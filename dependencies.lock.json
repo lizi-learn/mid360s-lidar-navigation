@@ -1,0 +1,23 @@
+{
+  "Livox-SDK2": {
+    "url": "https://github.com/Livox-SDK/Livox-SDK2.git",
+    "commit": "c0796f04c143143899c87a773d9f6b7136453c0b",
+    "license": "See upstream LICENSE.txt"
+  },
+  "livox_ros_driver2": {
+    "url": "https://github.com/Livox-SDK/livox_ros_driver2.git",
+    "commit": "21445540f0d100dc86a7e6df312dd70bbdb4afdf",
+    "license": "MIT"
+  },
+  "FAST_LIO": {
+    "url": "https://github.com/hku-mars/FAST_LIO.git",
+    "commit": "cc3c9e8b1469b33b8072764d6db2348ed6dc597f",
+    "branch_reference": "ROS2",
+    "license": "GPL-2.0 per upstream LICENSE; package.xml contains a different legacy license label"
+  },
+  "ikd-Tree": {
+    "url": "https://github.com/hku-mars/ikd-Tree.git",
+    "commit": "e2e3f4e9d3b95a9e66b1ba83dc98d4a05ed8a3c4",
+    "note": "FAST_LIO submodule; retain its upstream notices"
+  }
+}

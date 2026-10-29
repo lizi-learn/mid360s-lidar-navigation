@@ -1,0 +1,23 @@
+name: Tests
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  core-and-demo:
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        python: ['3.10', '3.12']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - run: python -m pip install -r requirements-dev.txt
+      - run: python -m unittest discover -s tests -v
+      - run: python -m compileall -q nav_server.py nav_geometry.py survey.py localization_health.py demo_server.py sensor_watchdog.py scripts tests
+      - run: bash -n run-stack.sh scripts/build-deps.sh

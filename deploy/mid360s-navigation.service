@@ -1,0 +1,17 @@
+[Unit]
+Description=MID-360S sensor mapping and path preview
+StartLimitIntervalSec=180
+StartLimitBurst=3
+
+[Service]
+Type=simple
+WorkingDirectory=%h/mid360s-lidar-navigation
+ExecStart=/usr/bin/bash %h/mid360s-lidar-navigation/run-stack.sh
+Restart=on-failure
+RestartSec=3
+KillMode=control-group
+TimeoutStopSec=25
+Nice=10
+
+[Install]
+WantedBy=default.target
