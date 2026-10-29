@@ -20,6 +20,10 @@ class NativeBackend:
         if not 30<=duration<=600:raise ValueError('Dynamics run must be bounded to 30–600 seconds')
         args=[str(binary),str(config),trace,str(duration),str(model),self.address]
         self.process=subprocess.Popen(args,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,bufsize=1,start_new_session=True)
+        self.tracker=None;self.command_at=time.monotonic()
+        if os.getenv('P2_NAV_VELOCITY_TRACKING')=='1':
+            from gait_velocity import GaitVelocityTracker
+            self.tracker=GaitVelocityTracker()
         self.lines=[];self.thread=threading.Thread(target=self.read,daemon=True);self.thread.start()
     def read(self):
         for line in self.process.stdout:
@@ -29,6 +33,10 @@ class NativeBackend:
                     with self.lock:self.state=values;self.at=time.monotonic()
             else:self.lines.append(line.strip());self.lines=self.lines[-30:]
     def send(self,v,w):
+        now=time.monotonic();dt=now-self.command_at;self.command_at=now
+        if self.tracker:
+            state,at=self.latest()
+            v,w=self.tracker.step((v,w),(state[4],state[6]) if state else (0.,0.),dt,now-at if state else 999.)
         self.sequence+=1
         packet=PACKET.pack(0x504e4156,1,1,self.instance,self.sequence,time.monotonic_ns(),float(v),0.,float(w),0)
         try:self.socket.sendto(packet,self.address)

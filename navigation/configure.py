@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
 """Generate explicit Nav2 Humble configuration for forward walking and turning."""
 from pathlib import Path
-import argparse, yaml
+import argparse, yaml, json
+import numpy as np
+from footprint import checked,DEFAULT,load as load_footprint
 
-def config(controller='rpp', tree=None, minimum_speed=.03):
-    footprint='[[0.35,0.40],[0.35,-0.40],[-0.35,-0.40],[-0.35,0.40]]'
+def config(controller='rpp', tree=None, minimum_speed=.03, footprint_vertices=None, odometry_model='differential'):
+    if odometry_model not in ('differential','omni'):raise ValueError('Unknown localization odometry model')
+    footprint=json.dumps(checked(DEFAULT if footprint_vertices is None else footprint_vertices))
     result={}
     def add(name, params):result[name]={'ros__parameters':params}
     add('amcl',dict(use_sim_time=False,alpha1=.05,alpha2=.05,alpha3=.05,alpha4=.05,alpha5=.05,
         base_frame_id='base_link',global_frame_id='map',odom_frame_id='odom',scan_topic='scan',
-        robot_model_type='nav2_amcl::DifferentialMotionModel',min_particles=500,max_particles=2000,
+        robot_model_type='nav2_amcl::OmniMotionModel' if odometry_model=='omni' else 'nav2_amcl::DifferentialMotionModel',min_particles=500,max_particles=2000,
         max_beams=90,laser_min_range=.12,laser_max_range=14.,laser_model_type='likelihood_field',
         laser_likelihood_max_dist=2.,sigma_hit=.15,z_hit=.8,z_rand=.2,z_short=0.,z_max=0.,
         update_min_d=.05,update_min_a=.05,transform_tolerance=.25,pf_err=.03,pf_z=.99,
@@ -65,7 +68,7 @@ def config(controller='rpp', tree=None, minimum_speed=.03):
         if rolling:common.update(rolling_window=True,width=5,height=5)
         result[name]={name:{'ros__parameters':common}}
     add('planner_server',dict(use_sim_time=False,expected_planner_frequency=1.,planner_plugins=['GridBased'],
-        GridBased=dict(plugin='nav2_smac_planner/SmacPlannerLattice',tolerance=.2,allow_unknown=False,
+        GridBased=dict(plugin='nav2_smac_planner/SmacPlannerLattice',tolerance=.05,allow_unknown=False,
             max_iterations=1000000,max_on_approach_iterations=1000,max_planning_time=3.,
             lattice_filepath='/opt/ros/humble/share/nav2_smac_planner/sample_primitives/5cm_resolution/0.5m_turning_radius/diff/output.json',
             allow_reverse_expansion=False,reverse_penalty=5.,change_penalty=.1,non_straight_penalty=1.2,
@@ -91,13 +94,17 @@ def config(controller='rpp', tree=None, minimum_speed=.03):
         feedback='OPEN_LOOP',max_velocity=[.30,0.,.35],min_velocity=[0.,0.,-.35],
         max_accel=[.15,0.,.5],max_decel=[-.30,0.,-.5],odom_topic='odom',odom_duration=.1,
         deadband_velocity=[0.,0.,0.],velocity_timeout=.3))
+    bounds=np.asarray(checked(DEFAULT if footprint_vertices is None else footprint_vertices))
+    lo,hi=bounds.min(axis=0),bounds.max(axis=0)
+    stop_points=[float(hi[0]+.25),float(hi[1]+.20),float(hi[0]+.25),float(lo[1]-.20),float(lo[0]-.15),float(lo[1]-.20),float(lo[0]-.15),float(hi[1]+.20)]
+    slow_points=[float(hi[0]+.75),float(hi[1]+.32),float(hi[0]+.75),float(lo[1]-.32),float(lo[0]-.25),float(lo[1]-.32),float(lo[0]-.25),float(hi[1]+.32)]
     add('collision_monitor',dict(use_sim_time=False,base_frame_id='base_link',odom_frame_id='odom',
         cmd_vel_in_topic='/p2_nav/cmd_smooth',cmd_vel_out_topic='/p2_nav/cmd_collision',
         state_topic='/p2_nav/collision_state',transform_tolerance=.15,source_timeout=.5,
         stop_pub_timeout=2.,polygons=['StopZone','SlowZone'],
-        StopZone=dict(type='polygon',points=[.62,.58,.62,-.58,-.52,-.58,-.52,.58],
+        StopZone=dict(type='polygon',points=stop_points,
             action_type='stop',max_points=2,visualize=True,polygon_pub_topic='stop_zone'),
-        SlowZone=dict(type='polygon',points=[1.1,.72,1.1,-.72,-.60,-.72,-.60,.72],
+        SlowZone=dict(type='polygon',points=slow_points,
             action_type='slowdown',slowdown_ratio=.4,max_points=2,visualize=True,polygon_pub_topic='slow_zone'),
         observation_sources=['scan'],scan=dict(type='scan',topic='/scan',enabled=True)))
     return result
@@ -105,7 +112,9 @@ def config(controller='rpp', tree=None, minimum_speed=.03):
 def main():
     p=argparse.ArgumentParser();p.add_argument('--controller',choices=['rpp','mppi'],default='rpp');p.add_argument('--output',required=True)
     p.add_argument('--minimum-speed',type=float,default=.03)
+    p.add_argument('--footprint-profile',default='')
+    p.add_argument('--odometry-model',choices=['differential','omni'],default='differential')
     args=p.parse_args();path=Path(args.output);path.parent.mkdir(parents=True,exist_ok=True)
     if not .03<=args.minimum_speed<=.25:raise ValueError('Minimum speed outside profile range')
-    path.write_text(yaml.safe_dump(config(args.controller,minimum_speed=args.minimum_speed),sort_keys=False))
+    path.write_text(yaml.safe_dump(config(args.controller,minimum_speed=args.minimum_speed,footprint_vertices=load_footprint(args.footprint_profile) if args.footprint_profile else None,odometry_model=args.odometry_model),sort_keys=False))
 if __name__=='__main__':main()

@@ -54,6 +54,9 @@ class Bench(Node):
         p=PoseStamped();p.header.frame_id='map';p.header.stamp=self.get_clock().now().to_msg()
         p.pose.position.x=float(x);p.pose.position.y=float(y)
         p.pose.orientation.z=math.sin(yaw/2);p.pose.orientation.w=math.cos(yaw/2);return p
+    def moving(self):
+        cut=time.monotonic()-.3
+        return any(abs(v)+abs(w)>.005 for t,v,_,w in self.commands if t>=cut)
     def event(self,name,**kw):
         item={'name':name,'time':time.monotonic(),**kw};self.events.append(item);print(json.dumps(item),flush=True)
     def navigate(self,goal,timeout=100,inject=None):
@@ -122,23 +125,23 @@ def navigation(bench):
         b.arm(.10);b.wait(1.5);cut=time.monotonic()
         b.wait(1.)
         cap_commands=[abs(c[1]) for c in b.commands if c[0]>=cut]
-        b.event('speed_cap',requested=.10,observed_max=max(cap_commands,default=0.),passed=max(cap_commands,default=0.)<=.100001)
-        b.publish(b.sim,{'ground_ok':False});begin=time.monotonic();b.wait(.4)
+        b.event('speed_cap',requested=.10,observed_max=max(cap_commands,default=0.),exercised=bool(cap_commands) and max(cap_commands)>.02,passed=bool(cap_commands) and .02<max(cap_commands)<=.100001)
+        exercised=b.moving();b.publish(b.sim,{'ground_ok':False});begin=time.monotonic();b.wait(.4)
         ground_stop=[c for c in b.commands if c[0]>begin+.15]
-        b.event('ground_missing_stop',passed=bool(ground_stop) and all(abs(c[1])+abs(c[3])<1e-8 for c in ground_stop))
+        b.event('ground_missing_stop',exercised=exercised,passed=exercised and bool(ground_stop) and all(abs(c[1])+abs(c[3])<1e-8 for c in ground_stop))
         b.publish(b.sim,{'ground_ok':True});b.wait(.5)
-        b.publish(b.sim,{'drop_scan':True});begin=time.monotonic();b.wait(.8)
+        exercised=b.moving();b.publish(b.sim,{'drop_scan':True});begin=time.monotonic();b.wait(.8)
         stale=[c for c in b.commands if c[0]>begin+.65]
-        b.event('scan_dropout_stop',passed=bool(stale) and all(abs(c[1])+abs(c[3])<1e-8 for c in stale))
+        b.event('scan_dropout_stop',exercised=exercised,passed=exercised and bool(stale) and all(abs(c[1])+abs(c[3])<1e-8 for c in stale))
         b.publish(b.sim,{'drop_scan':False});b.wait(1.);b.arm(.25)
-        b.publish(b.sim,{'drop_odom':True});begin=time.monotonic();b.wait(.85)
+        exercised=b.moving();b.publish(b.sim,{'drop_odom':True});begin=time.monotonic();b.wait(.85)
         stale=[c for c in b.commands if c[0]>begin+.65]
-        b.event('odometry_dropout_stop',passed=bool(stale) and all(abs(c[1])+abs(c[3])<1e-8 for c in stale))
+        b.event('odometry_dropout_stop',exercised=exercised,passed=exercised and bool(stale) and all(abs(c[1])+abs(c[3])<1e-8 for c in stale))
         b.publish(b.sim,{'drop_odom':False});b.wait(1.)
-        x,y,yaw=b.truth['pose'];b.publish(b.sim,{'obstacle':[x+.70*math.cos(yaw),y+.70*math.sin(yaw),.12]})
+        exercised=b.moving();x,y,yaw=b.truth['pose'];b.publish(b.sim,{'obstacle':[x+.70*math.cos(yaw),y+.70*math.sin(yaw),.12]})
         begin=time.monotonic();b.wait(.7)
         stopped=[c for c in b.commands if c[0]>begin+.25]
-        b.event('dynamic_obstacle_stop',passed=bool(stopped) and all(abs(c[1])+abs(c[3])<1e-8 for c in stopped))
+        b.event('dynamic_obstacle_stop',exercised=exercised,passed=exercised and bool(stopped) and all(abs(c[1])+abs(c[3])<1e-8 for c in stopped))
         b.publish(b.sim,{'obstacle':None});b.wait(1.)
         begin=time.monotonic()
         for _ in range(8):

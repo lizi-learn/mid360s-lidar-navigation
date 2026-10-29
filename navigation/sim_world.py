@@ -30,6 +30,8 @@ def save_truth(directory):
 class World(Node):
     def __init__(self):
         super().__init__('planar_navigation_simulator')
+        from footprint import checked,DEFAULT
+        self.footprint=np.asarray(checked(json.loads(os.environ['P2_NAV_FOOTPRINT']) if os.getenv('P2_NAV_FOOTPRINT') else DEFAULT))
         self.grid=make_world();self.x=2.;self.y=2.5;self.yaw=0.;self.cmd=(0.,0.);self.cmd_at=0.
         self.last=time.monotonic();self.start=self.last;self.collision_count=0;self.travel=0.;self.path=[]
         self.native=None
@@ -66,7 +68,9 @@ class World(Node):
         return result
     def footprint_collision(self,x,y,yaw):
         # Same rectangle as Nav2, densely sampled including its interior.
-        xx,yy=np.meshgrid(np.linspace(-.35,.35,11),np.linspace(-.40,.40,13))
+        lo,hi=self.footprint.min(axis=0),self.footprint.max(axis=0)
+        xx,yy=np.meshgrid(np.linspace(lo[0],hi[0],max(11,int((hi[0]-lo[0])/.04)+1)),
+                          np.linspace(lo[1],hi[1],max(13,int((hi[1]-lo[1])/.04)+1)))
         c,s=math.cos(yaw),math.sin(yaw)
         return bool(np.any(self.occupied(x+c*xx-s*yy,y+s*xx+c*yy)))
     def step(self):
@@ -97,6 +101,12 @@ class World(Node):
             o.twist.twist.linear.x=v;o.twist.twist.linear.y=actual_vy;o.twist.twist.angular.z=w;self.odom.publish(o)
         b=Bool();b.data=self.ground_ok;self.ground.publish(b)
     def sense(self):
+        if self.native:
+            state,received=self.native.latest()
+            if state is None or time.monotonic()-received>.25:
+                b=Bool();b.data=False;self.ground.publish(b)
+                msg=String();msg.data=json.dumps({'pose':[self.x,self.y,self.yaw],'pose_valid':False,'backend_alive':False,'simulation':'native backend unavailable; pose is stale'})
+                self.truth.publish(msg);return
         if not self.drop_scan:
             angles=self.angles+self.yaw
             x=self.x+np.cos(angles[:,None])*self.radii[None,:]

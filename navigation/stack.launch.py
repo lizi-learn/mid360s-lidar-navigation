@@ -15,12 +15,13 @@ def setup(context):
     common={'use_sim_time':False}
     nodes=[]
     if simulation:
-        nodes.append(ExecuteProcess(cmd=['/usr/bin/python3','-S',str(root/'sim_world.py')],output='screen'))
+        shape=yaml.safe_load(Path(params).read_text())['global_costmap']['global_costmap']['ros__parameters']['footprint']
+        nodes.append(ExecuteProcess(cmd=['/usr/bin/python3','-S',str(root/'sim_world.py')],additional_env={'P2_NAV_FOOTPRINT':shape},output='screen'))
     else:
         alignment=get('alignment')
         assert Path(alignment).is_file(),'Live preview needs the running sensor gravity-alignment file'
         nodes.append(ExecuteProcess(cmd=['/usr/bin/python3','-S',str(root/'live_adapter.py'),
-            '--alignment',alignment,'--source-domain',get('source_domain'),'--target-domain',os.getenv('ROS_DOMAIN_ID','194')],output='screen'))
+            '--alignment',alignment,'--body-reference',get('body_reference'),'--source-domain',get('source_domain'),'--target-domain',os.getenv('ROS_DOMAIN_ID','194')],output='screen'))
     nodes.append(ExecuteProcess(cmd=['/usr/bin/python3','-S',str(root/'gate_node.py'),'--ros-args',
         '-p','simulation:='+str(simulation).lower(),'-p','require_localization:='+str(mode=='navigation').lower()],output='screen'))
     if mode=='mapping':
@@ -64,6 +65,7 @@ def setup(context):
 def generate_launch_description():
     return LaunchDescription([DeclareLaunchArgument('mode',default_value='navigation'),
         DeclareLaunchArgument('simulation',default_value='false'),DeclareLaunchArgument('params'),
+        DeclareLaunchArgument('body_reference',default_value=os.getenv('P2_NAV_BODY_CALIBRATION','')),
         DeclareLaunchArgument('map',default_value=''),DeclareLaunchArgument('source_domain',default_value='188'),
         DeclareLaunchArgument('alignment',default_value=os.getenv('P2_LIDAR_ALIGNMENT',str(Path(__file__).resolve().parents[1]/'runtime/map_alignment.json'))),
         OpaqueFunction(function=setup)])

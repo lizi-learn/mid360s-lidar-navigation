@@ -6,6 +6,7 @@
 
 - [交互演示与说明](https://lizi-learn.github.io/mid360s-lidar-navigation/)：全部使用合成几何，不连接实机。
 - [前向导航工作台与完整流程](docs/NAVIGATION.md)
+- [双足平地适配、头身变换与三维扫描验证](docs/BIPED.md)
 - [换机与实机操作](docs/MIGRATION.md)
 - [验证结果与已知问题](docs/VALIDATION.md)
 - [第三方依赖与许可](THIRD_PARTY_NOTICES.md)

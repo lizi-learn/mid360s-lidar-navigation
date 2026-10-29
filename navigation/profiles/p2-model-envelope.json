@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "vertices": [[0.47, 0.52], [0.47, -0.52], [-0.43, -0.52], [-0.43, 0.52]],
+  "hardware_verified": false,
+  "source": "40 s P2 AMP + installed MuJoCo model; conservative projection of each collision geometry bounding sphere, plus approximately 5 cm. Nav2 footprint_padding adds another 5 cm.",
+  "measured_model_bounds_m": [-0.37538, 0.42004, -0.46891, 0.46412],
+  "scope": "Nominal pelvis ground frame model envelope; no physical payload, arms, head, calibration or stopping-distance acceptance. Revalidate for every gait and robot."
+}

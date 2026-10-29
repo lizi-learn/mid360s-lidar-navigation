@@ -15,7 +15,8 @@ from rclpy.executors import SingleThreadedExecutor
 from rclpy.qos import qos_profile_sensor_data
 from geometry_msgs.msg import TransformStamped
 from nav_msgs.msg import Odometry
-from sensor_msgs.msg import PointCloud2,LaserScan
+from sensor_msgs.msg import PointCloud2,LaserScan,JointState
+from biped_reference import BodyReference,rigid
 from std_msgs.msg import Bool,String
 from tf2_ros import TransformBroadcaster,StaticTransformBroadcaster
 from terrain import local_floor,classify,observed_front_support
@@ -40,6 +41,8 @@ class Adapter:
         rclpy.init(context=self.sink_context,domain_id=args.target_domain)
         self.source=Node('navigation_sensor_reader',context=self.source_context)
         self.sink=Node('navigation_sensor_preview_adapter',context=self.sink_context)
+        self.body_reference=BodyReference(args.body_reference) if args.body_reference else None
+        if self.body_reference:self.source.create_subscription(JointState,self.body_reference.topic,self.on_joints,qos_profile_sensor_data)
         self.source.create_subscription(PointCloud2,'/cloud_registered',self.on_cloud,qos_profile_sensor_data)
         self.source.create_subscription(Odometry,'/Odometry',self.on_odom,qos_profile_sensor_data)
         self.odom_pub=self.sink.create_publisher(Odometry,'/odom',10)
@@ -51,6 +54,11 @@ class Adapter:
         self.sink.create_timer(.1,self.tick)
         self.executor=SingleThreadedExecutor(context=self.source_context);self.executor.add_node(self.source)
         self.thread=threading.Thread(target=self.executor.spin,daemon=True);self.thread.start()
+    def on_joints(self,msg):
+        try:
+            if len(msg.name)!=len(msg.position):raise ValueError("Joint names/positions length mismatch")
+            self.body_reference.history.add(msg.header.stamp.sec+msg.header.stamp.nanosec*1e-9,dict(zip(msg.name,msg.position)))
+        except (ValueError,KeyError) as e:self.reference_fault="Joint feedback invalid: "+str(e)
     def on_cloud(self,msg):
         with self.lock:self.cloud=msg
     def on_odom(self,msg):
@@ -61,7 +69,9 @@ class Adapter:
         if cloud is None or odom is None:self.ground_pub.publish(ground);return
         now=self.sink.get_clock().now().nanoseconds*1e-9
         stamp=lambda m:m.header.stamp.sec+m.header.stamp.nanosec*1e-9
-        if self.alignment_path.stat().st_mtime_ns!=self.alignment_mtime:self.reference_fault='sensor reference changed; start a new mapping/localization session'
+        try:
+            if self.alignment_path.stat().st_mtime_ns!=self.alignment_mtime:self.reference_fault='sensor reference changed; start a new mapping/localization session'
+        except OSError:self.reference_fault='sensor reference unavailable; start a new mapping/localization session'
         if self.reference_fault:
             self.ground_pub.publish(ground)
             msg=String();msg.data=json.dumps({'error':self.reference_fault,'ground_ok':False,'hardware_execution_enabled':False});self.status_pub.publish(msg)
@@ -69,15 +79,29 @@ class Adapter:
         if max(now-stamp(cloud),now-stamp(odom))>.5 or min(now-stamp(cloud),now-stamp(odom))<-.05:
             self.ground_pub.publish(ground);return
         q=odom.pose.pose.orientation;p=odom.pose.pose.position
+        values=np.array([p.x,p.y,p.z,q.x,q.y,q.z,q.w])
+        if not np.isfinite(values).all() or not .8<np.linalg.norm(values[3:])<1.2:
+            self.reference_fault='invalid odometry pose';self.ground_pub.publish(ground);return
         imu=Rotation.from_quat([q.x,q.y,q.z,q.w]).as_matrix()
         origin=self.rotation@(np.array([p.x,p.y,p.z])+imu@np.array([-.011,-.02329,.04412]))
+        optical=origin.copy()
+        orientation=self.rotation@imu@np.diag([1.,-1.,-1.])
+        if self.body_reference:
+            try:
+                world_lidar=rigid(self.rotation@imu,origin+np.array([0.,0.,self.initial_height]))
+                body=self.body_reference.transform(world_lidar,stamp(odom))
+                origin=body[:3,3];orientation=body[:3,:3]
+            except (ValueError,OSError) as e:
+                self.ground_pub.publish(ground)
+                status=String();status.data=json.dumps({'error':str(e),'ground_ok':False,'body_reference_ready':False,'hardware_execution_enabled':False});self.status_pub.publish(status)
+                return
         if self.previous is not None and stamp(odom)!=self.previous[0]:
             dt=stamp(odom)-self.previous[0];distance=np.linalg.norm(origin[:2]-self.previous[1])
             if dt<=0 or distance>max(.4,2.*dt):
                 self.reference_fault='odometry discontinuity; recheck localization'
                 self.ground_pub.publish(ground);return
         self.previous=(stamp(odom),origin[:2].copy())
-        orientation=self.rotation@imu@np.diag([1.,-1.,-1.]);yaw=math.atan2(orientation[1,0],orientation[0,0])
+        yaw=math.atan2(orientation[1,0],orientation[0,0])
         t=TransformStamped();t.header.stamp=odom.header.stamp;t.header.frame_id='odom';t.child_frame_id='base_link'
         t.transform.translation.x=float(origin[0]);t.transform.translation.y=float(origin[1]);t.transform.rotation.z=math.sin(yaw/2);t.transform.rotation.w=math.cos(yaw/2);self.tf.sendTransform(t)
         out=Odometry();out.header=t.header;out.child_frame_id='base_link';out.pose.pose.position.x=float(origin[0]);out.pose.pose.position.y=float(origin[1]);out.pose.pose.orientation=t.transform.rotation
@@ -87,7 +111,7 @@ class Adapter:
         try:
             points=xyz(cloud);points=points[np.isfinite(points).all(axis=1)]
             points=points@self.rotation.T;points[:,2]+=self.initial_height
-            plane,report=local_floor(points,origin[:2],expected_height=float(origin[2]))
+            plane,report=local_floor(points,origin[:2],expected_height=float(optical[2]))
             _,obstacles=classify(points,origin[:2],plane)
             delta=points[obstacles,:2]-origin[:2]
             bearing=(np.arctan2(delta[:,1],delta[:,0])-yaw+math.pi)%(2*math.pi)-math.pi
@@ -98,9 +122,12 @@ class Adapter:
             scan=LaserScan();scan.header.stamp=cloud.header.stamp;scan.header.frame_id='laser'
             scan.angle_min=-math.pi;scan.angle_increment=2*math.pi/360;scan.angle_max=-math.pi+359*scan.angle_increment
             scan.range_min=.12;scan.range_max=14.;scan.scan_time=.1;scan.ranges=output.tolist();self.scan_pub.publish(scan)
-            ground.data=bool(observed_front_support(points,origin[:2],yaw,plane));self.ground_pub.publish(ground)
+            observed=bool(observed_front_support(points,origin[:2],yaw,plane))
+            verified=bool(self.body_reference and self.body_reference.verified)
+            ground.data=observed and (verified if self.body_reference else True);self.ground_pub.publish(ground)
             report.update(ground_ok=ground.data,finite_scan_bins=int(np.isfinite(output).sum()),
-                source_age_s=now-stamp(cloud),base_reference='uncalibrated lidar ground projection',hardware_execution_enabled=False)
+                source_age_s=now-stamp(cloud),base_reference='timestamped body kinematics' if self.body_reference else 'uncalibrated lidar ground projection',
+                body_reference_ready=verified,kinematic_feedback_ready=bool(self.body_reference),observed_front_support=observed,hardware_execution_enabled=False)
         except ValueError as e:
             self.ground_pub.publish(ground);report={'error':str(e),'ground_ok':False,'hardware_execution_enabled':False}
         msg=String();msg.data=json.dumps(report);self.status_pub.publish(msg)
@@ -114,4 +141,5 @@ class Adapter:
 
 if __name__=='__main__':
     p=argparse.ArgumentParser();p.add_argument('--source-domain',type=int,default=188);p.add_argument('--target-domain',type=int,default=194);p.add_argument('--alignment',required=True)
+    p.add_argument('--body-reference',default='')
     Adapter(p.parse_args()).run()

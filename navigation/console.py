@@ -20,10 +20,10 @@ ROOT=Path(__file__).resolve().parent
 SAFE_NAME=re.compile(r'[A-Za-z0-9_-]{1,48}\Z')
 
 class Console(Node):
-    def __init__(self,runtime,simulation,minimum_speed):
+    def __init__(self,runtime,simulation,minimum_speed,footprint=None,odometry_model='differential'):
         super().__init__('navigation_workflow_console')
         self.runtime=runtime;self.simulation=simulation;self.mode='idle';self.controller='rpp';self.process=None
-        self.minimum_speed=minimum_speed
+        self.minimum_speed=minimum_speed;self.footprint=footprint;self.odometry_model=odometry_model
         self.route_process=None;self.route_directory=None
         self.lock=threading.RLock();self.grid=None;self.path=[];self.gate={};self.truth={};self.goal=None
         self.last_action='等待选择建图或载入地图';self.goal_handle=None;self.feedback={}
@@ -82,7 +82,7 @@ class Console(Node):
             self.grid=None;self.gate={};self.buffer.clear()
             from configure import config
             import yaml
-            params=self.runtime/'nav2.yaml';params.write_text(yaml.safe_dump(config(controller,minimum_speed=self.minimum_speed),sort_keys=False))
+            params=self.runtime/'nav2.yaml';params.write_text(yaml.safe_dump(config(controller,minimum_speed=self.minimum_speed,footprint_vertices=self.footprint,odometry_model=self.odometry_model),sort_keys=False))
             args=['bash',str(ROOT/'run.sh'),'mode:='+mode,'simulation:='+str(self.simulation).lower(),'params:='+str(params)]
             if mode=='navigation':args+=['map:='+str(map_file)]
             self.process=subprocess.Popen(args,cwd=ROOT,stdout=open(self.runtime/'workflow.log','w'),stderr=subprocess.STDOUT,start_new_session=True)
@@ -199,10 +199,14 @@ class Console(Node):
 def main():
     parser=argparse.ArgumentParser();parser.add_argument('--simulation',action='store_true');parser.add_argument('--port',type=int,default=8930)
     parser.add_argument('--minimum-speed',type=float,default=.03)
+    parser.add_argument('--footprint-profile',default='')
+    parser.add_argument('--odometry-model',choices=['differential','omni'],default='differential')
     parser.add_argument('--runtime',default=str(ROOT.parent/'runtime/workflow'));args=parser.parse_args()
     runtime=Path(args.runtime).resolve();runtime.mkdir(parents=True,exist_ok=True);(runtime/'maps').mkdir(exist_ok=True)
     if not .03<=args.minimum_speed<=.25:raise ValueError('Invalid minimum speed profile')
-    rclpy.init();node=Console(runtime,args.simulation,args.minimum_speed);executor=MultiThreadedExecutor(num_threads=3);executor.add_node(node)
+    from footprint import load as load_footprint
+    vertices=load_footprint(args.footprint_profile) if args.footprint_profile else None
+    rclpy.init();node=Console(runtime,args.simulation,args.minimum_speed,vertices,args.odometry_model);executor=MultiThreadedExecutor(num_threads=3);executor.add_node(node)
     thread=threading.Thread(target=executor.spin,daemon=True);thread.start()
     class Handler(BaseHTTPRequestHandler):
         def log_message(self,*a):pass
