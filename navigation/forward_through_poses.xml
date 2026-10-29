@@ -1,0 +1,21 @@
+<?xml version="1.0"?>
+<root main_tree_to_execute="MainTree">
+  <BehaviorTree ID="MainTree">
+    <RecoveryNode number_of_retries="2" name="NavigationRecovery">
+      <PipelineSequence name="NavigateThroughForwardWaypoints">
+        <RateController hz="1.0">
+          <Sequence>
+            <RemovePassedGoals input_goals="{goals}" output_goals="{goals}" radius="0.30"/>
+            <ComputePathThroughPoses goals="{goals}" path="{path}" planner_id="GridBased"/>
+          </Sequence>
+        </RateController>
+        <FollowPath path="{path}" controller_id="FollowPath"/>
+      </PipelineSequence>
+      <Sequence>
+        <ClearEntireCostmap service_name="local_costmap/clear_entirely_local_costmap"/>
+        <ClearEntireCostmap service_name="global_costmap/clear_entirely_global_costmap"/>
+        <Wait wait_duration="2"/>
+      </Sequence>
+    </RecoveryNode>
+  </BehaviorTree>
+</root>
