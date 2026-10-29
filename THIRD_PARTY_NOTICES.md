@@ -12,7 +12,7 @@ included.
 | FAST-LIO ROS2 | https://github.com/hku-mars/FAST_LIO/tree/ROS2 | Upstream root LICENSE is GNU GPL v2. Its package.xml has a different legacy label; this project follows the root LICENSE for its patch. |
 | ikd-Tree | https://github.com/hku-mars/ikd-Tree | FAST-LIO submodule; retain its upstream license and copyright. |
 | NumPy / SciPy | https://numpy.org/ / https://scipy.org/ | Separately installed BSD-licensed dependencies; preserve their distribution notices. |
-| Nav2 | https://github.com/ros-navigation/navigation2 | Separately installed; Apache-2.0, retain upstream notices. |
+| Nav2 | https://github.com/ros-navigation/navigation2 | Separately installed; retain package-specific licenses. Much of Nav2 is Apache-2.0; nav2_amcl includes LGPL-2.1-or-later code. |
 | SLAM Toolbox | https://github.com/SteveMacenski/slam_toolbox | Separately installed; LGPL-2.1-only and upstream component notices apply. |
 | ROS 2 / PCL / Eigen | Their upstream distributions | Installed separately; their licenses remain applicable. |
 
