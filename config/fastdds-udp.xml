@@ -3,6 +3,8 @@
   <transport_descriptors>
     <transport_descriptor>
       <transport_id>navigation_udp</transport_id><type>UDPv4</type>
+      <sendBufferSize>4194304</sendBufferSize>
+      <receiveBufferSize>4194304</receiveBufferSize>
     </transport_descriptor>
   </transport_descriptors>
   <participant profile_name="navigation_udp_only" is_default_profile="true">
