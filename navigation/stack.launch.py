@@ -64,7 +64,7 @@ def setup(context):
         navigation=['planner_server','controller_server','behavior_server','bt_navigator','velocity_smoother','collision_monitor']
     nodes += [Node(package='nav2_velocity_smoother',executable='velocity_smoother',name='velocity_smoother',parameters=[params],
                    remappings=[('cmd_vel','/p2_nav/cmd_raw'),('cmd_vel_smoothed','/p2_nav/cmd_smooth')],output='screen'),
-              Node(package='nav2_collision_monitor',executable='collision_monitor',name='collision_monitor',parameters=[params],output='screen'),
+              Node(package='p2_nav_controller',executable='observed_collision_monitor',name='collision_monitor',parameters=[params],output='screen'),
               TimerAction(period=6.,actions=[Node(package='nav2_lifecycle_manager',executable='lifecycle_manager',name='lifecycle_manager_navigation',
                    parameters=[{'use_sim_time':False,'autostart':True,'node_names':navigation,'bond_timeout':4.}],output='screen')])]
     return nodes

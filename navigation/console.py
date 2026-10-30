@@ -11,12 +11,14 @@ from rclpy.qos import QoSProfile,DurabilityPolicy,ReliabilityPolicy
 from geometry_msgs.msg import PoseStamped,PoseWithCovarianceStamped,Twist
 from nav_msgs.msg import OccupancyGrid,Path as RosPath
 from nav2_msgs.action import NavigateToPose,ComputePathToPose
-from nav2_msgs.msg import SpeedLimit
+from nav2_msgs.msg import SpeedLimit,CollisionMonitorState
 from slam_toolbox.srv import SerializePoseGraph
 from nav2_msgs.srv import SaveMap
 from std_msgs.msg import String
 from tf2_ros import Buffer,TransformListener
 from map_persistence import configure_save_request,validate_map_metadata
+from session import NavigationSession
+from urllib.parse import urlsplit,parse_qs
 
 ROOT=Path(__file__).resolve().parent
 SAFE_NAME=re.compile(r'[A-Za-z0-9_-]{1,48}\Z')
@@ -30,12 +32,17 @@ class Console(Node):
         self.route_process=None;self.route_directory=None
         self.lock=threading.RLock();self.grid=None;self.path=[];self.gate={};self.truth={};self.goal=None
         self.last_action='等待选择建图或载入地图';self.goal_handle=None;self.feedback={}
-        self.goal_generation=0
+        self.goal_generation=0;self.session=NavigationSession();self.map_revision=0
+        self.plan_handle=None;self.pending_nav_accept=False;self.pending_plan_accept=False;self.cancel_sent_handles=[];self.action_results={};self.accepted_actions={}
+        self.collision_stop=False;self.path_revision=0;self.obstacle_path_revision=0
+        self.virtual_operator=None;self.virtual_sequence=0;self.virtual_source=secrets.randbits(63)+1
         self.request_token=secrets.token_urlsafe(24)
         self.speed_value=min(.20,self.maximum_speed)
         qos=QoSProfile(depth=1,durability=DurabilityPolicy.TRANSIENT_LOCAL,reliability=ReliabilityPolicy.RELIABLE)
         self.create_subscription(OccupancyGrid,'/map',self.on_map,qos)
-        self.create_subscription(RosPath,'/plan',lambda m:setattr(self,'path',[[p.pose.position.x,p.pose.position.y] for p in m.poses]),10)
+        self.create_subscription(RosPath,'/plan',self.on_path,10)
+        self.create_subscription(CollisionMonitorState,'/p2_nav/collision_state',self.on_collision,10)
+        self.create_subscription(String,'/p2_nav/operator_authority',self.on_authority,10)
         self.create_subscription(String,'/p2_nav/gate_status',lambda m:setattr(self,'gate',json.loads(m.data)),10)
         self.create_subscription(String,'/p2_nav/sim_truth',lambda m:setattr(self,'truth',json.loads(m.data)),10)
         self.operator=self.create_publisher(String,'/p2_nav/operator',10)
@@ -45,7 +52,62 @@ class Console(Node):
         self.planner=ActionClient(self,ComputePathToPose,'compute_path_to_pose')
         self.buffer=Buffer();self.listener=TransformListener(self.buffer,self)
         self.create_timer(.5,self.publish_speed)
-    def on_map(self,msg):self.grid=msg
+        self.create_timer(.02,self.poll_session)
+    def on_map(self,msg):self.grid=msg;self.map_revision+=1
+    def on_authority(self,msg):
+        with self.lock:
+            try:
+                d=json.loads(msg.data)
+                self.session.operator(d['switch_mode'],d['switch_mapping_verified'],d['receiver_connected'],
+                    d['manual_activity'],d['source_instance'],d['source_sequence'],d['source_monotonic_ns']/1e9,time.monotonic())
+            except (KeyError,TypeError,ValueError):
+                self.session.operator('unknown',False,False,False,0,0,0.,time.monotonic())
+    def simulation_operator(self,data):
+        if not self.simulation:raise ValueError('真实机器人不接受网页伪造保护开关状态')
+        mode=data['mode']
+        if mode not in ('navigation_allowed','manual','paused'):raise ValueError('模拟档位无效')
+        self.virtual_operator={'mode':mode,'connected':data.get('connected',True) is True,'activity':data.get('manual_activity',False) is True}
+        return {'simulation_only':True,'mode':mode}
+    def on_path(self,msg):
+        with self.lock:
+            self.path_revision+=1
+            if self.session.phase in ('executing','replanning'):
+                self.path=[[p.pose.position.x,p.pose.position.y] for p in msg.poses]
+                age=(self.get_clock().now().nanoseconds/1e9)-(msg.header.stamp.sec+msg.header.stamp.nanosec/1e9)
+                fresh=-.05<=age<=.5 and self.path_revision>self.obstacle_path_revision and len(self.path)>1
+                self.session.reroute(time.monotonic(),fresh,not self.collision_stop and self.health_ready())
+    def on_collision(self,msg):
+        with self.lock:
+            self.collision_stop=msg.action_type==CollisionMonitorState.STOP
+            if self.collision_stop and self.session.phase=='executing':
+                self.obstacle_path_revision=self.path_revision;self.session.obstacle(time.monotonic())
+    def health_ready(self):
+        g=self.gate
+        return bool(g.get('localized') and g.get('ground_ok') and
+            -.05<=g.get('scan_age',999)<=.5 and -.05<=g.get('odom_age',999)<=.5)
+    def poll_session(self):
+        with self.lock:
+            now=time.monotonic()
+            if self.simulation and self.virtual_operator:
+                v=self.virtual_operator;self.virtual_sequence+=1
+                self.session.operator(v['mode'],True,v['connected'],v['activity'],self.virtual_source,self.virtual_sequence,now,now)
+            status=self.session.poll(now)
+            if status['cancel_pending']:
+                self.stop_actions()
+            if self.session.phase=='replanning':self.session.reroute(now,False,not self.collision_stop and self.health_ready())
+            if self.session.phase in ('starting','executing','replanning'):
+                if not self.health_ready():self.session.cancel();self.session._notice('地面、定位或传感器未就绪，导航已停止')
+                self.op(armed=not self.session.status(now)['force_navigation_zero'],paused=self.session.status(now)['force_navigation_zero'])
+    def stop_actions(self):
+        self.op(armed=False,paused=True)
+        # Cancellation is acknowledged by terminal action results, never merely
+        # because a cancel RPC was sent. Unknown acceptance keeps the latch.
+        for handle in (self.goal_handle,self.plan_handle):
+            if handle is not None and handle not in self.cancel_sent_handles:
+                self.cancel_sent_handles.append(handle);handle.cancel_goal_async()
+        if self.goal_handle is None and self.plan_handle is None and not self.pending_nav_accept and not self.pending_plan_accept:
+            self.session.acknowledge_cancel(self.session.cancel_generation)
+
     def wait_future(self,future,timeout=15):
         end=time.monotonic()+timeout
         while not future.done() and time.monotonic()<end:time.sleep(.02)
@@ -54,12 +116,12 @@ class Console(Node):
     def op(self,**values):
         m=String();m.data=json.dumps(values);self.operator.publish(m)
     def stop(self):
+        with self.lock:self.session.cancel();self.stop_actions()
         self.goal_generation+=1
         self.op(armed=False,paused=True)
         if self.route_process is not None and self.route_process.poll() is None:
             os.killpg(self.route_process.pid,signal.SIGINT)
-        if self.goal_handle is not None:
-            self.goal_handle.cancel_goal_async();self.goal_handle=None
+        if self.goal_handle is not None:self.goal_handle.cancel_goal_async()
         self.last_action='已停止，目标已取消'
     def stop_process(self):
         self.stop()
@@ -75,6 +137,9 @@ class Console(Node):
                 try:self.process.wait(timeout=5)
                 except subprocess.TimeoutExpired:os.killpg(self.process.pid,signal.SIGKILL);self.process.wait()
         self.process=None;self.mode='idle'
+        self.goal_handle=self.plan_handle=None;self.pending_nav_accept=self.pending_plan_accept=False
+        self.cancel_sent_handles=[];self.accepted_actions={};self.action_results={}
+        self.acknowledge_if_quiet(self.session.cancel_generation)
     def start(self,mode,name,controller):
         if mode not in ('mapping','navigation') or controller not in ('rpp','mppi'):raise ValueError('模式或控制器无效')
         if not SAFE_NAME.fullmatch(name):raise ValueError('地图名仅允许字母、数字、下划线和连字符')
@@ -139,44 +204,106 @@ class Console(Node):
         msg.pose.covariance[0]=.04;msg.pose.covariance[7]=.04;msg.pose.covariance[35]=.04
         self.initial.publish(msg);self.last_action='已提交初始位置，等待定位稳定'
         return {'initial_pose_set':True}
+    def acknowledge_if_quiet(self,generation):
+        if self.goal_handle is None and self.plan_handle is None and not self.pending_nav_accept and not self.pending_plan_accept:
+            self.session.acknowledge_cancel(generation)
+    def track_acceptance(self,kind,generation,future):
+        with self.lock:
+            key=(kind,generation)
+            if key in self.accepted_actions:return self.accepted_actions[key]
+            if kind=='plan':self.pending_plan_accept=False
+            else:self.pending_nav_accept=False
+            try:
+                handle=future.result()
+                if handle is None or not hasattr(handle,'accepted'):raise ValueError('No action acceptance receipt')
+            except Exception:
+                # A transport exception cannot prove the server rejected the
+                # request. Keep its unknown acceptance pending until the owned
+                # action server is actually stopped, not just another poll.
+                if kind=='plan':self.pending_plan_accept=True
+                else:self.pending_nav_accept=True
+                self.session.cancel();self.op(armed=False,paused=True)
+                self.session._notice('执行回执异常，导航已停止；请重新载入工作流程')
+                return None
+            self.accepted_actions[key]=handle
+            if not handle.accepted:self.acknowledge_if_quiet(generation);return handle
+            if kind=='plan':self.plan_handle=handle
+            else:self.goal_handle=handle
+            result=handle.get_result_async();self.action_results[key]=result
+            result.add_done_callback(lambda f:self.action_terminal(kind,generation,handle,f))
+            expected='planning' if kind=='plan' else 'starting'
+            if self.session.generation!=generation or self.session.phase!=expected:
+                handle.cancel_goal_async();self.cancel_sent_handles.append(handle)
+            elif kind=='nav':
+                if self.session.started(generation,time.monotonic()):self.op(armed=True,paused=False,speed=self.speed_value)
+                else:handle.cancel_goal_async();self.cancel_sent_handles.append(handle)
+            return handle
+    def action_terminal(self,kind,generation,handle,future):
+        with self.lock:
+            try:status=future.result().status
+            except Exception:
+                self.session.cancel();self.stop_actions()
+                self.session._notice('终止回执异常，导航保持停止；请重新载入工作流程')
+                return
+            if kind=='plan' and self.plan_handle is handle:self.plan_handle=None
+            if kind=='nav' and self.goal_handle is handle:self.goal_handle=None
+            self.cancel_sent_handles=[h for h in self.cancel_sent_handles if h is not handle]
+            if kind=='nav':
+                if self.session.finished(generation,status==4):
+                    self.op(armed=False,paused=True);self.last_action=self.session.message
+            self.acknowledge_if_quiet(generation)
     def set_goal(self,data):
         if self.mode!='navigation':raise ValueError('请先载入地图进入导航模式')
         pose=self.checked_pose(data)
         if not self.gate.get('localized'):raise ValueError('定位尚未就绪，请先设置初始位置')
-        from lifecycle_msgs.srv import GetState
-        for name in (['planner_server','controller_server','bt_navigator','velocity_smoother','collision_monitor'] if self.simulation else ['planner_server']):
-            client=self.create_client(GetState,'/'+name+'/get_state')
-            try:
-                if not client.wait_for_service(timeout_sec=.2) or self.wait_future(client.call_async(GetState.Request()),2).current_state.id!=3:raise ValueError('导航服务正在初始化，请等待就绪')
-            finally:self.destroy_client(client)
-        if not self.simulation:
-            if not self.planner.wait_for_server(timeout_sec=3):raise ValueError('规划服务尚未就绪')
-            request=ComputePathToPose.Goal();request.goal=pose;request.planner_id='GridBased'
-            handle=self.wait_future(self.planner.send_goal_async(request),5)
-            if not handle.accepted:raise ValueError('规划请求被拒绝')
-            result=self.wait_future(handle.get_result_async(),10)
-            if result.status!=4:raise ValueError('未找到可用路径')
-            self.path=[[p.pose.position.x,p.pose.position.y] for p in result.result.path.poses]
-            self.goal=[data['x'],data['y']];self.last_action='路径预演已生成，不驱动电机'
-            return {'planned':True,'path_points':len(self.path),'hardware_execution_enabled':False}
-        if not self.nav.wait_for_server(timeout_sec=3):raise ValueError('导航服务尚未就绪')
-        self.stop();generation=self.goal_generation
-        self.op(armed=True,paused=False,speed=self.speed_value);self.publish_speed()
+        with self.lock:
+            generation=self.session.prepare(data,time.monotonic());self.path=[];self.goal=None
+            self.pending_plan_accept=True
+            self.op(armed=False,paused=True)
+        if not self.planner.wait_for_server(timeout_sec=3):
+            with self.lock:
+                self.pending_plan_accept=False;self.session.planned(generation,0,time.monotonic());self.acknowledge_if_quiet(generation)
+            raise ValueError('规划服务尚未就绪')
+        request=ComputePathToPose.Goal();request.goal=pose;request.planner_id='GridBased'
+        with self.lock:
+            if self.session.generation!=generation or self.session.phase!='planning':
+                self.pending_plan_accept=False;self.acknowledge_if_quiet(generation);raise ValueError('规划已取消')
+            future=self.planner.send_goal_async(request)
+        try:self.wait_future(future,5)
+        except TimeoutError:
+            self.session.cancel();future.add_done_callback(lambda f:self.track_acceptance('plan',generation,f));raise
+        handle=self.track_acceptance('plan',generation,future)
+        if handle is None or not handle.accepted:self.session.planned(generation,0,time.monotonic());raise ValueError('规划请求被拒绝')
+        try:result=self.wait_future(self.action_results[('plan',generation)],10)
+        except TimeoutError:self.session.cancel();self.stop_actions();raise
+        path=[[p.pose.position.x,p.pose.position.y] for p in result.result.path.poses] if result.status==4 else []
+        if not self.session.planned(generation,len(path),time.monotonic()):raise ValueError('路径未完成或已取消，请重新选择目标')
+        self.path=path;self.goal=[data['x'],data['y']];self.last_action='路径已预览；确认开始前不会行走'
+        return {'planned':True,'generation':generation,'path_points':len(path),'hardware_execution_enabled':False}
+    def confirm_goal(self,data):
+        generation=int(data['generation'])
+        with self.lock:
+            self.session.start(generation,time.monotonic(),self.simulation,self.health_ready())
+            self.goal_generation=generation;pose=self.checked_pose(self.session.goal)
+            self.pending_nav_accept=True
+        if not self.nav.wait_for_server(timeout_sec=3):
+            self.pending_nav_accept=False;self.session.cancel();self.acknowledge_if_quiet(generation);raise ValueError('导航服务未就绪')
         goal=NavigateToPose.Goal();goal.pose=pose
-        handle=self.wait_future(self.nav.send_goal_async(goal,feedback_callback=self.on_feedback),5)
-        if not handle.accepted:self.op(armed=False);raise ValueError('导航目标被拒绝')
-        if generation!=self.goal_generation:
-            handle.cancel_goal_async();raise ValueError('该目标已被停止或后续请求取代')
-        self.goal_handle=handle;self.goal=[data['x'],data['y']];self.last_action='正在导航' if self.simulation else '正在计算实机导航预演（不驱动电机）'
-        handle.get_result_async().add_done_callback(lambda f:self.finished(f,generation))
-        return {'accepted':True,'hardware_execution_enabled':False}
+        with self.lock:
+            if self.session.generation!=generation or self.session.phase!='starting':
+                self.pending_nav_accept=False;self.acknowledge_if_quiet(generation);raise ValueError('开始已取消')
+            future=self.nav.send_goal_async(goal,feedback_callback=self.on_feedback)
+        try:self.wait_future(future,5)
+        except TimeoutError:
+            self.session.cancel();self.op(armed=False,paused=True)
+            future.add_done_callback(lambda f:self.track_acceptance('nav',generation,f));raise
+        handle=self.track_acceptance('nav',generation,future)
+        if handle is None or not handle.accepted:
+            self.session.cancel();self.acknowledge_if_quiet(generation);raise ValueError('导航请求被拒绝')
+        if self.session.phase!='executing':raise ValueError('开始过程中已取消或手动接管')
+        return {'accepted':True,'generation':generation,'hardware_execution_enabled':False}
     def on_feedback(self,feedback):
         f=feedback.feedback;self.feedback={'distance_remaining':f.distance_remaining,'recoveries':f.number_of_recoveries}
-    def finished(self,future,generation):
-        if generation!=self.goal_generation:return
-        self.op(armed=False);status=future.result().status
-        self.last_action={4:'已到达目标',5:'目标已取消',6:'导航失败，已停止'}.get(status,'导航已结束')
-        self.goal_handle=None
     def speed(self,value):
         v=float(value)
         if not math.isfinite(v) or not self.minimum_speed<=v<=self.maximum_speed:raise ValueError(f'此步态配置的速度范围为 {self.minimum_speed:.2f}–{self.maximum_speed:.2f} m/s')
@@ -185,7 +312,7 @@ class Console(Node):
     def publish_speed(self):
         self.op(speed=self.speed_value)
         limit=SpeedLimit();limit.percentage=False;limit.speed_limit=self.speed_value;self.limiter.publish(limit)
-    def status(self):
+    def status(self,include_cells=True):
         if self.route_process is not None and self.route_process.poll() is not None:
             report=self.route_directory/'mapping-report.json'
             good=report.exists() and 'error' not in json.loads(report.read_text())
@@ -200,9 +327,11 @@ class Console(Node):
         return {'robot_name':self.robot_name,'gait_profile':self.gait_profile,'request_token':self.request_token,'mode':self.mode,'simulation':self.simulation,'controller':self.controller,'message':self.last_action,
             'minimum_speed':self.minimum_speed,'maximum_speed':self.maximum_speed,'simulation_kind':'native_dynamics' if os.getenv('P2_NAV_NATIVE_EXEC') else 'planar',
             'process_alive':self.process is not None and self.process.poll() is None,'gate':self.gate,'pose':pose,
-            'map':None if grid is None else {'width':grid.info.width,'height':grid.info.height,'resolution':grid.info.resolution,
-                'origin':[grid.info.origin.position.x,grid.info.origin.position.y],'cells':list(grid.data)},
+            'session':self.session.status(time.monotonic()),'map_revision':self.map_revision,
+            'execution_ready':self.simulation,'map':None if grid is None else {'width':grid.info.width,'height':grid.info.height,'resolution':grid.info.resolution,
+                'origin':[grid.info.origin.position.x,grid.info.origin.position.y],**({'cells':list(grid.data)} if include_cells else {})},
             'path':self.path,'goal':self.goal,'feedback':self.feedback,
+            **({'truth':self.truth} if self.simulation else {}),
             'maps':sorted(p.parent.name for p in (self.runtime/'maps').glob('*/mapped.yaml')),
             'hardware_execution_enabled':False,
             'scope':'平面导航仿真' if self.simulation else '实机导航预演；机身外参、整机零位和步态接入待验收'}
@@ -260,7 +389,8 @@ def main():
             self.send_header('Content-Length',str(len(raw)));self.end_headers();self.wfile.write(raw)
         def do_GET(self):
             if self.path=='/':self.send((ROOT/'console.html').read_bytes(),content_type='text/html; charset=utf-8')
-            elif self.path=='/api/status':self.send(node.status())
+            elif urlsplit(self.path).path=='/api/status':self.send(node.status(include_cells=parse_qs(urlsplit(self.path).query).get('summary')!=['1']))
+            elif self.path=='/api/map':self.send({'revision':node.map_revision,'map':node.status()['map']})
             else:self.send({'error':'Not found'},404)
         def do_POST(self):
             try:
@@ -272,6 +402,7 @@ def main():
                 routes={'/api/start':lambda:node.start(d['mode'],d.get('name','office'),d.get('controller','rpp')),
                     '/api/sim_mapping_route':lambda:node.simulated_mapping_route(d['name']),
                     '/api/save':lambda:node.save_map(d['name']),'/api/goal':lambda:node.set_goal(d),
+                    '/api/confirm':lambda:node.confirm_goal(d),'/api/sim_operator':lambda:node.simulation_operator(d),
                     '/api/initialpose':lambda:node.set_pose(d),'/api/speed':lambda:node.speed(d['speed']),
                     '/api/stop':lambda:(node.stop() or {'stopped':True})}
                 if self.path not in routes:self.send({'error':'Not found'},404);return
