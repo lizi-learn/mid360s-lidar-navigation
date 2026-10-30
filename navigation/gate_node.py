@@ -29,6 +29,7 @@ class GateNode(Node):
         self.last = time.monotonic();self.command_time = 0.
         self.invalid_command_until=0.;self.invalid_command=(0.,0.,0.)
         self.scan_stamp = self.odom_stamp = None
+        self.calibration_ready=False;self.calibration_time=0.
         self.command = (0., 0., 0.);self.ground = False;self.ground_time = 0.;self.paused = False
         self.covariance_ok = False
         self.covariance = None
@@ -39,6 +40,7 @@ class GateNode(Node):
         self.create_subscription(LaserScan, '/scan', self.on_scan, qos_profile_sensor_data)
         self.create_subscription(Odometry, '/odom', self.on_odom, 10)
         self.create_subscription(Bool, '/p2_nav/ground_ok', self.on_ground, 10)
+        self.create_subscription(String,'/p2_nav/terrain_status',self.on_terrain,10)
         self.create_subscription(String, '/p2_nav/operator', self.on_operator, 10)
         localization_qos=QoSProfile(depth=1,durability=DurabilityPolicy.TRANSIENT_LOCAL,reliability=ReliabilityPolicy.RELIABLE)
         self.create_subscription(PoseWithCovarianceStamped, '/amcl_pose', self.on_amcl, localization_qos)
@@ -58,6 +60,11 @@ class GateNode(Node):
     def on_odom(self, msg):
         self.odom_stamp = self.stamp(msg);v=(msg.twist.twist.linear.x,msg.twist.twist.linear.y,msg.twist.twist.angular.z);self.measured=v if all(math.isfinite(x) for x in v) else None
     def on_ground(self, msg):self.ground = msg.data;self.ground_time = time.monotonic()
+    def on_terrain(self,msg):
+        try:
+            d=json.loads(msg.data);self.calibration_ready=d.get('body_reference_ready') is True and d.get('kinematic_feedback_ready') is True
+            self.calibration_time=time.monotonic()
+        except (ValueError,TypeError):self.calibration_ready=False
     def on_amcl(self, msg):
         c = msg.pose.covariance
         self.covariance = [float(c[i]) for i in (0,7,35)]
@@ -100,8 +107,9 @@ class GateNode(Node):
             ground_ok=self.ground and now - self.ground_time < .5, localized=localized, paused=self.paused)
         out = Twist();out.linear.x, out.linear.y, out.angular.z = result;self.output.publish(out)
         self.counter += 1
-        if self.counter % 2 == 0:
+        if True: #20Hz original evaluations; transport does not restamp cached health
             status = String();status.data = json.dumps({'armed':self.gate.armed,'simulation':self.simulation,
+                'evaluated_monotonic_ns':time.monotonic_ns(),'data_fresh':-.05<=min(scan_age,odom_age) and max(scan_age,odom_age)<=self.gate.limits.sensor_timeout,'calibration_ready':self.calibration_ready and now-self.calibration_time<.2,
                 'hardware_execution_enabled':False,'speed_cap':self.gate.speed,'reason':self.gate.reason,
                 'motion_phase':'waiting_clearance' if self.recovery_wait else self.handoff.phase if self.handoff else 'direct','body_velocity_feedback':self.measured,'command':result,'scan_age':scan_age,'odom_age':odom_age,'localized':localized,
                 'ground_ok':self.ground and now - self.ground_time < .5,

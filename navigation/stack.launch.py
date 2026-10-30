@@ -16,6 +16,8 @@ def setup(context):
     assert mode in ('mapping','navigation')
     common={'use_sim_time':False}
     nodes=[]
+    buffered=os.getenv('P2_NAV_MOTION_BUFFER')=='true'
+    if buffered:nodes.append(ExecuteProcess(cmd=['/usr/bin/python3','-S',str(root/'motion_buffer_node.py')],output='screen'))
     if get('simulation_sensor_fixture')=='true' and not simulation:raise ValueError('External simulation sensors require simulation mode')
     if simulation and get('simulation_sensor_fixture')!='true':
         shape=yaml.safe_load(Path(params).read_text())['local_costmap']['local_costmap']['ros__parameters']['footprint']
@@ -63,7 +65,7 @@ def setup(context):
                 remappings=[('cmd_vel','/p2_nav/cmd_raw')],output='screen'))
         navigation=['planner_server','controller_server','behavior_server','bt_navigator','velocity_smoother','collision_monitor']
     nodes += [Node(package='nav2_velocity_smoother',executable='velocity_smoother',name='velocity_smoother',parameters=[params],
-                   remappings=[('cmd_vel','/p2_nav/cmd_raw'),('cmd_vel_smoothed','/p2_nav/cmd_smooth')],output='screen'),
+                   remappings=[('cmd_vel','/p2_nav/cmd_buffered' if buffered else '/p2_nav/cmd_raw'),('cmd_vel_smoothed','/p2_nav/cmd_smooth')],output='screen'),
               Node(package='p2_nav_controller',executable='observed_collision_monitor',name='collision_monitor',parameters=[params],output='screen'),
               TimerAction(period=6.,actions=[Node(package='nav2_lifecycle_manager',executable='lifecycle_manager',name='lifecycle_manager_navigation',
                    parameters=[{'use_sim_time':False,'autostart':True,'node_names':navigation,'bond_timeout':4.}],output='screen')])]

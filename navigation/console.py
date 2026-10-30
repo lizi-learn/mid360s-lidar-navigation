@@ -24,8 +24,13 @@ ROOT=Path(__file__).resolve().parent
 SAFE_NAME=re.compile(r'[A-Za-z0-9_-]{1,48}\Z')
 
 class Console(Node):
-    def __init__(self,runtime,simulation,minimum_speed,footprint=None,odometry_model='differential',gait_profile='generic'):
+    def __init__(self,runtime,simulation,minimum_speed,footprint=None,odometry_model='differential',gait_profile='generic',gait_socket=''):
         super().__init__('navigation_workflow_console')
+        self.gait=None
+        if gait_socket:
+            if simulation:raise ValueError('Physical gait transport requires a separate explicit contract fixture, never normal simulation')
+            from gait_transport import GaitTransport
+            self.gait=GaitTransport(gait_socket)
         self.robot_name=None;self.runtime=runtime;self.simulation=simulation;self.mode='idle';self.controller='rpp';self.process=None
         self.minimum_speed=minimum_speed;self.footprint=footprint;self.odometry_model=odometry_model;self.gait_profile=gait_profile
         self.maximum_speed=.15 if gait_profile=='p2-flat-model' else .30
@@ -33,6 +38,7 @@ class Console(Node):
         self.lock=threading.RLock();self.grid=None;self.path=[];self.gate={};self.truth={};self.goal=None
         self.last_action='等待选择建图或载入地图';self.goal_handle=None;self.feedback={}
         self.goal_generation=0;self.session=NavigationSession();self.map_revision=0
+        if self.gait:self.gait.operator_observer=lambda:self.poll_gait_authority(time.monotonic())
         self.plan_handle=None;self.pending_nav_accept=False;self.pending_plan_accept=False;self.cancel_sent_handles=[];self.action_results={};self.accepted_actions={}
         self.collision_stop=False;self.path_revision=0;self.obstacle_path_revision=0
         self.virtual_operator=None;self.virtual_sequence=0;self.virtual_source=secrets.randbits(63)+1
@@ -55,6 +61,9 @@ class Console(Node):
         self.create_timer(.02,self.poll_session)
     def on_map(self,msg):self.grid=msg;self.map_revision+=1
     def on_authority(self,msg):
+        # An attached gait loop has the verified physical sample. Do not race it
+        # against another ROS forwarder with a separate source identity/latency.
+        if getattr(self,'gait',None) is not None:return
         with self.lock:
             try:
                 d=json.loads(msg.data)
@@ -81,17 +90,45 @@ class Console(Node):
             self.collision_stop=msg.action_type==CollisionMonitorState.STOP
             if self.collision_stop and self.session.phase=='executing':
                 self.obstacle_path_revision=self.path_revision;self.session.obstacle(time.monotonic())
+    def execution_ready(self):
+        gait=getattr(self,'gait',None)
+        return self.simulation or bool(gait and gait.ready())
     def health_ready(self):
         g=self.gate
         return bool(g.get('localized') and g.get('ground_ok') and
             -.05<=g.get('scan_age',999)<=.5 and -.05<=g.get('odom_age',999)<=.5)
+    def poll_gait_authority(self,now):
+        gait=getattr(self,'gait',None)
+        if gait is None:return
+        d=gait.operator_authority()
+        with self.session.lock:
+            if not d or not (-.005<=now-d['stamp']<=.1 and -.005<=now-d['reply_stamp']<=.1):
+                self.session.operator('unknown',False,False,False,0,0,0.,now);return
+            key=(d['source'],d['sequence'])
+            # Cached replies cannot renew source time. Fresh replies are also
+            # observed by the ordinary RPC thread, independent of ROS timers.
+            if getattr(self,'gait_authority_key',None)==key:return
+            self.gait_authority_key=key
+            self.session.operator(d['mode'],d['verified'],d['connected'],d['activity'],
+                d['source'],d['sequence'],d['stamp'],now)
     def poll_session(self):
         with self.lock:
             now=time.monotonic()
+            if getattr(self,'gait',None) is not None:self.poll_gait_authority(now)
             if self.simulation and self.virtual_operator:
                 v=self.virtual_operator;self.virtual_sequence+=1
                 self.session.operator(v['mode'],True,v['connected'],v['activity'],self.virtual_source,self.virtual_sequence,now,now)
             status=self.session.poll(now)
+            gait=getattr(self,'gait',None)
+            if gait:
+                state=gait.status()
+                if (state['cancel_pending'] or state['phase'] in ('failed','disconnected')) and self.session.phase in ('starting','executing','replanning'):
+                    self.session.cancel();self.session._notice('步态已撤销导航控制，请重新确认目标')
+                gait.update(self.gate,self.session.phase=='executing' and not status['force_navigation_zero'])
+                if self.session.phase in ('manual','paused','stopped','cancelled','blocked','arrived') and gait.phase not in ('stopped','idle','disconnected'):
+                    gait.stop()
+                self.acknowledge_if_quiet(self.session.cancel_generation)
+            status=self.session.status(now)
             if status['cancel_pending']:
                 self.stop_actions()
             if self.session.phase=='replanning':self.session.reroute(now,False,not self.collision_stop and self.health_ready())
@@ -99,6 +136,8 @@ class Console(Node):
                 if not self.health_ready():self.session.cancel();self.session._notice('地面、定位或传感器未就绪，导航已停止')
                 self.op(armed=not self.session.status(now)['force_navigation_zero'],paused=self.session.status(now)['force_navigation_zero'])
     def stop_actions(self):
+        gait=getattr(self,'gait',None)
+        if gait and gait.phase!='stopped':gait.stop()
         self.op(armed=False,paused=True)
         # Cancellation is acknowledged by terminal action results, never merely
         # because a cancel RPC was sent. Unknown acceptance keeps the latch.
@@ -107,6 +146,7 @@ class Console(Node):
                 self.cancel_sent_handles.append(handle);handle.cancel_goal_async()
         if self.goal_handle is None and self.plan_handle is None and not self.pending_nav_accept and not self.pending_plan_accept:
             self.session.acknowledge_cancel(self.session.cancel_generation)
+            if gait:gait.acknowledge_cancel()
 
     def wait_future(self,future,timeout=15):
         end=time.monotonic()+timeout
@@ -154,6 +194,7 @@ class Console(Node):
             params=self.runtime/'nav2.yaml';params.write_text(yaml.safe_dump(config(controller,minimum_speed=self.minimum_speed,footprint_vertices=self.footprint,odometry_model=self.odometry_model,gait_profile=self.gait_profile),sort_keys=False))
             args=['bash',str(ROOT/'run.sh'),'mode:='+mode,'simulation:='+str(self.simulation).lower(),'params:='+str(params)]
             if mode=='navigation':args+=['map:='+str(map_file)]
+            if self.gait:args=['nice','-n','10']+args
             self.process=subprocess.Popen(args,cwd=ROOT,stdout=open(self.runtime/'workflow.log','w'),stderr=subprocess.STDOUT,start_new_session=True)
             self.mode=mode;self.controller=controller;self.path=[];self.goal=None
             self.last_action='正在启动建图' if mode=='mapping' else '正在载入地图和定位'
@@ -207,6 +248,8 @@ class Console(Node):
     def acknowledge_if_quiet(self,generation):
         if self.goal_handle is None and self.plan_handle is None and not self.pending_nav_accept and not self.pending_plan_accept:
             self.session.acknowledge_cancel(generation)
+            gait=getattr(self,'gait',None)
+            if gait:gait.acknowledge_cancel()
     def track_acceptance(self,kind,generation,future):
         with self.lock:
             key=(kind,generation)
@@ -283,11 +326,18 @@ class Console(Node):
     def confirm_goal(self,data):
         generation=int(data['generation'])
         with self.lock:
-            self.session.start(generation,time.monotonic(),self.simulation,self.health_ready())
+            self.session.start(generation,time.monotonic(),self.execution_ready(),self.health_ready())
             self.goal_generation=generation;pose=self.checked_pose(self.session.goal)
             self.pending_nav_accept=True
+        gait=getattr(self,'gait',None)
+        if gait:
+            try:gait.arm(generation)
+            except (ValueError,TimeoutError):
+                with self.lock:
+                    self.pending_nav_accept=False;self.session.cancel();self.stop_actions();self.acknowledge_if_quiet(generation)
+                raise
         if not self.nav.wait_for_server(timeout_sec=3):
-            self.pending_nav_accept=False;self.session.cancel();self.acknowledge_if_quiet(generation);raise ValueError('导航服务未就绪')
+            self.pending_nav_accept=False;self.session.cancel();self.stop_actions();self.acknowledge_if_quiet(generation);raise ValueError('导航服务未就绪')
         goal=NavigateToPose.Goal();goal.pose=pose
         with self.lock:
             if self.session.generation!=generation or self.session.phase!='starting':
@@ -301,7 +351,7 @@ class Console(Node):
         if handle is None or not handle.accepted:
             self.session.cancel();self.acknowledge_if_quiet(generation);raise ValueError('导航请求被拒绝')
         if self.session.phase!='executing':raise ValueError('开始过程中已取消或手动接管')
-        return {'accepted':True,'generation':generation,'hardware_execution_enabled':False}
+        return {'accepted':True,'generation':generation,'hardware_execution_enabled':bool(gait and gait.status()['navigation_owned'])}
     def on_feedback(self,feedback):
         f=feedback.feedback;self.feedback={'distance_remaining':f.distance_remaining,'recoveries':f.number_of_recoveries}
     def speed(self,value):
@@ -328,13 +378,13 @@ class Console(Node):
             'minimum_speed':self.minimum_speed,'maximum_speed':self.maximum_speed,'simulation_kind':'native_dynamics' if os.getenv('P2_NAV_NATIVE_EXEC') else 'planar',
             'process_alive':self.process is not None and self.process.poll() is None,'gate':self.gate,'pose':pose,
             'session':self.session.status(time.monotonic()),'map_revision':self.map_revision,
-            'execution_ready':self.simulation,'map':None if grid is None else {'width':grid.info.width,'height':grid.info.height,'resolution':grid.info.resolution,
+            'execution_ready':self.execution_ready(),'gait_transport':getattr(self,'gait',None).status() if getattr(self,'gait',None) else None,'map':None if grid is None else {'width':grid.info.width,'height':grid.info.height,'resolution':grid.info.resolution,
                 'origin':[grid.info.origin.position.x,grid.info.origin.position.y],**({'cells':list(grid.data)} if include_cells else {})},
             'path':self.path,'goal':self.goal,'feedback':self.feedback,
             **({'truth':self.truth} if self.simulation else {}),
             'maps':sorted(p.parent.name for p in (self.runtime/'maps').glob('*/mapped.yaml')),
-            'hardware_execution_enabled':False,
-            'scope':'平面导航仿真' if self.simulation else '实机导航预演；机身外参、整机零位和步态接入待验收'}
+            'hardware_execution_enabled':bool(getattr(self,'gait',None) and self.gait.status()['navigation_owned']),
+            'scope':'平面导航仿真' if self.simulation else ('实机步态接口已连接；机身外参、驱动保护与行走验收未完成' if self.gait else '实机导航预演；机身外参、整机零位和步态接入待验收')}
 
 def main():
     parser=argparse.ArgumentParser();parser.add_argument('--simulation',action='store_true');parser.add_argument('--port',type=int,default=8930)
@@ -343,7 +393,8 @@ def main():
     parser.add_argument('--odometry-model',choices=['differential','omni'],default='differential')
     parser.add_argument('--gait-handoff',action='store_true');parser.add_argument('--robot-profile',default='')
     parser.add_argument('--gait-profile',choices=['generic','p2-flat-model'],default='generic')
-    parser.add_argument('--runtime',default='');args=parser.parse_args()
+    parser.add_argument('--gait-socket',default='');parser.add_argument('--runtime',default='');args=parser.parse_args()
+    if args.gait_socket:os.environ['P2_NAV_MOTION_BUFFER']='true'
     if args.gait_handoff or args.gait_profile=='p2-flat-model':os.environ['P2_NAV_GAIT_HANDOFF']='true'
     selected=args.robot_profile or os.getenv('P2_NAV_ROBOT_PROFILE','')
     if not selected and not args.simulation and (ROOT.parent/'config/robot.local.json').is_file():selected=str(ROOT.parent/'config/robot.local.json')
@@ -377,7 +428,7 @@ def main():
         if data.get('hardware_verified') is True:
             from robot_profile import check_calibration
             check_calibration(profile,data)
-    rclpy.init();node=Console(runtime,args.simulation,args.minimum_speed,vertices,args.odometry_model,args.gait_profile);node.robot_name=profile['name'] if selected else None;executor=MultiThreadedExecutor(num_threads=3);executor.add_node(node)
+    rclpy.init();node=Console(runtime,args.simulation,args.minimum_speed,vertices,args.odometry_model,args.gait_profile,args.gait_socket);node.robot_name=profile['name'] if selected else None;executor=MultiThreadedExecutor(num_threads=3);executor.add_node(node)
     thread=threading.Thread(target=executor.spin,daemon=True);thread.start()
     class Handler(BaseHTTPRequestHandler):
         def log_message(self,*a):pass
@@ -415,5 +466,7 @@ def main():
     try:
         while not stopping.is_set():server.handle_request()
     finally:
-        node.stop_process();server.server_close();executor.shutdown();node.destroy_node();rclpy.shutdown()
+        node.stop_process()
+        if node.gait:node.gait.close()
+        server.server_close();executor.shutdown();node.destroy_node();rclpy.shutdown()
 if __name__=='__main__':main()
