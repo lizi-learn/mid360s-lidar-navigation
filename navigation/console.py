@@ -16,6 +16,7 @@ from slam_toolbox.srv import SerializePoseGraph
 from nav2_msgs.srv import SaveMap
 from std_msgs.msg import String
 from tf2_ros import Buffer,TransformListener
+from map_persistence import configure_save_request,validate_map_metadata
 
 ROOT=Path(__file__).resolve().parent
 SAFE_NAME=re.compile(r'[A-Za-z0-9_-]{1,48}\Z')
@@ -79,6 +80,7 @@ class Console(Node):
         if not SAFE_NAME.fullmatch(name):raise ValueError('地图名仅允许字母、数字、下划线和连字符')
         map_file=self.runtime/'maps'/name/'mapped.yaml'
         if mode=='navigation' and not map_file.is_file():raise ValueError('请先保存该地图')
+        if mode=='navigation':validate_map_metadata(map_file)
         with self.lock:
             self.stop_process()
             self.grid=None;self.gate={};self.buffer.clear()
@@ -111,11 +113,12 @@ class Console(Node):
             client=self.create_client(typ,service)
             if not client.wait_for_service(timeout_sec=5):raise ValueError('建图服务尚未就绪')
             req=typ.Request()
-            if typ is SaveMap:req.map_topic='/map';req.map_url=stem;req.image_format='pgm';req.map_mode='trinary';req.free_thresh=.25;req.occupied_thresh=.65
+            if typ is SaveMap:configure_save_request(req,stem)
             else:req.filename=stem
             response=self.wait_future(client.call_async(req),25)
             if not (response.result if typ is SaveMap else response.result==0):raise ValueError('地图保存失败')
             self.destroy_client(client)
+        validate_map_metadata(target/'mapped.yaml')
         self.last_action='地图与位姿图已保存：'+name
         return {'saved':name,'files':[p.name for p in target.iterdir()]}
     def checked_pose(self,data):
