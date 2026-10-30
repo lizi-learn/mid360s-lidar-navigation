@@ -105,3 +105,5 @@ python3 -m venv .venv
 ## 许可
 
 独立 Python/UI/文档采用 [MIT](LICENSE)。FAST-LIO 队列补丁沿用上游 GPL-2.0，见 [第三方说明](THIRD_PARTY_NOTICES.md) 与 `LICENSES/GPL-2.0.txt`。上游 SDK、驱动和算法按各自许可使用；本仓库不附带其二进制或完整源码。
+
+可选的[步态约束规划实验](experiments/gait_space/README.md)保留完整包络检查，增加通道中心代价与连续转身预算；冻结失败起点的规划已恢复。此项只验证规划，整段窄门行走跟踪仍未验收。默认导航配置未变。

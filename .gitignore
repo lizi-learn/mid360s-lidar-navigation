@@ -19,3 +19,5 @@ config/MID360S.json
 config/robot.local.json
 nav_controller_ws/
 continuous_nav_ws/
+
+gait_nav_ws/

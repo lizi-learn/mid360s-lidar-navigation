@@ -21,7 +21,7 @@ jobs:
       - run: python -m unittest discover -s tests -v
       - run: python -m compileall -q robot_profile.py nav_server.py nav_geometry.py survey.py localization_health.py demo_server.py sensor_watchdog.py scripts tests navigation
       - run: python -m compileall -q experiments
-      - run: bash -n experiments/continuous_forward/build.sh experiments/continuous_forward/check_collision.sh
+      - run: bash -n experiments/continuous_forward/build.sh experiments/continuous_forward/check_collision.sh experiments/gait_space/build.sh experiments/gait_space/check.sh
       - run: bash -n run-stack.sh scripts/build-deps.sh scripts/build-nav-controller.sh navigation/run.sh navigation/console.sh
       - run: g++ -std=c++17 -O2 -Wall -Wextra -pedantic tests/velocity_contract_test.cpp -o /tmp/velocity-contract-test && /tmp/velocity-contract-test
       - run: g++ -std=c++17 -O2 -Wall -Wextra -pedantic tests/terminal_heading_test.cpp -o /tmp/terminal-heading-test && /tmp/terminal-heading-test
@@ -35,3 +35,6 @@ jobs:
       - run: bash scripts/build-nav-controller.sh
       - run: bash experiments/continuous_forward/build.sh
       - run: bash experiments/continuous_forward/check_collision.sh
+
+      - run: bash experiments/gait_space/build.sh
+      - run: bash experiments/gait_space/check.sh

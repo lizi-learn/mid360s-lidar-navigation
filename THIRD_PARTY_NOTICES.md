@@ -37,3 +37,5 @@ obligations when distributing the patched library. This does not relicense Nav2
 under this repository's MIT application license.
 
 可选通信实现使用 ROS Humble 的 [rmw_cyclonedds](https://github.com/ros2/rmw_cyclonedds) 与 [Eclipse Cyclone DDS](https://github.com/eclipse-cyclonedds/cyclonedds) 系统包；不随本源码包分发，使用时保留各上游许可。
+
+`experiments/gait_space/p2_smac_gait` fetches the same ten pinned Apache-2.0 Nav2 sources listed in its `upstream-provenance.json` and applies continuous collision checks, valid-state center-cost ranking and query-local angular transition exclusions. Its package includes the upstream Apache-2.0 license. The gait-path validator, exclusion context, wrapper planner, component regressions and synthetic fixture are project-authored. No vendor robot assets are distributed.

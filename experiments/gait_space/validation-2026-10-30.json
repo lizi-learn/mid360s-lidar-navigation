@@ -1,0 +1,312 @@
+{
+  "scope": "Optional planning only, no controller/default or real acceptance",
+  "synthetic_map_fixture": {
+    "pgm_sha256": "12c131ee81445c86851f30712cb2cc1c32e0134538c6f8a42b9a00a0f2490650",
+    "lethal_mask_sha256": "c87008371e82434717dd3d67d393985904aa3c7f84d79eb7b2b9152fc0e5722e"
+  },
+  "frozen_synthetic_map_queries": [
+    {
+      "headings": 32,
+      "queries": [
+        {
+          "name": "detour_start",
+          "start": [
+            4.0,
+            2.5,
+            0.0
+          ],
+          "goal": [
+            9.0,
+            2.8,
+            0.0
+          ],
+          "status": 4,
+          "elapsed_s": 1.9295291199814528,
+          "planning_s": 1.869563992,
+          "poses": 1915
+        },
+        {
+          "name": "settled_failure",
+          "start": [
+            3.9021665564134813,
+            2.458225326212233,
+            -0.04025327117862649
+          ],
+          "goal": [
+            9.0,
+            2.8,
+            0.0
+          ],
+          "status": 4,
+          "elapsed_s": 2.840267522027716,
+          "planning_s": 2.7899617670000003,
+          "poses": 1934
+        }
+      ]
+    }
+  ],
+  "independent_audit": {
+    "scope": "Planning only, complete padded stop rectangle, actual start connection, nonempty independent dense filled and Nav2 C++ boundary checks",
+    "checks": [
+      {
+        "arm": "gait",
+        "query": "detour_start",
+        "map": "before",
+        "resolution": 0.05,
+        "samples": 1917,
+        "filled_violations": 0,
+        "nav2_cpp_violations": 0
+      },
+      {
+        "arm": "gait",
+        "query": "detour_start",
+        "map": "before",
+        "resolution": 0.05000000074505806,
+        "samples": 1917,
+        "filled_violations": 0,
+        "nav2_cpp_violations": 0
+      },
+      {
+        "arm": "gait",
+        "query": "detour_start",
+        "map": "after",
+        "resolution": 0.05,
+        "samples": 1917,
+        "filled_violations": 0,
+        "nav2_cpp_violations": 0
+      },
+      {
+        "arm": "gait",
+        "query": "detour_start",
+        "map": "after",
+        "resolution": 0.05000000074505806,
+        "samples": 1917,
+        "filled_violations": 0,
+        "nav2_cpp_violations": 0
+      },
+      {
+        "arm": "gait",
+        "query": "settled_failure",
+        "map": "before",
+        "resolution": 0.05,
+        "samples": 1937,
+        "filled_violations": 0,
+        "nav2_cpp_violations": 0
+      },
+      {
+        "arm": "gait",
+        "query": "settled_failure",
+        "map": "before",
+        "resolution": 0.05000000074505806,
+        "samples": 1937,
+        "filled_violations": 0,
+        "nav2_cpp_violations": 0
+      },
+      {
+        "arm": "gait",
+        "query": "settled_failure",
+        "map": "after",
+        "resolution": 0.05,
+        "samples": 1937,
+        "filled_violations": 0,
+        "nav2_cpp_violations": 0
+      },
+      {
+        "arm": "gait",
+        "query": "settled_failure",
+        "map": "after",
+        "resolution": 0.05000000074505806,
+        "samples": 1937,
+        "filled_violations": 0,
+        "nav2_cpp_violations": 0
+      }
+    ],
+    "all_zero": true
+  },
+  "retained_failure": {
+    "original_bad_anchor": "Budget-origin exclusion missed the actual over-budget transition after several short legs; the same invalid path was repeated until the repair budget expired",
+    "before_statuses": [
+      4,
+      6
+    ],
+    "after_statuses": [
+      4,
+      4
+    ],
+    "fixed": "Anchor angular exclusions at the actual violating edge, retain90deg/.50m and full collision checks"
+  },
+  "whole_navigation_accepted": false,
+  "final_public_client_replay": {
+    "scope": "Read-only ComputePath queries; never arm, NavigateToPose or physical acceptance",
+    "queries": [
+      {
+        "name": "detour_start",
+        "start": [
+          4.0,
+          2.5,
+          0.0
+        ],
+        "goal": [
+          9.0,
+          2.8,
+          0.0
+        ],
+        "status": 4,
+        "elapsed_s": 1.929723153822124,
+        "poses": 1915
+      },
+      {
+        "name": "settled_failure",
+        "start": [
+          3.9021665564134813,
+          2.458225326212233,
+          -0.04025327117862649
+        ],
+        "goal": [
+          9.0,
+          2.8,
+          0.0
+        ],
+        "status": 4,
+        "elapsed_s": 2.8793383061420172,
+        "poses": 1934
+      }
+    ],
+    "navigation_accepted": false,
+    "effective": {
+      "planner_server": {
+        "GridBased.plugin": "p2_nav_controller::GaitFeasibleLattice",
+        "GridBased.lattice_filepath": "/nav/experiments/gait_space/biped-straight-pivot32.json",
+        "GridBased.lookup_table_size": 0.05,
+        "GridBased.smooth_path": false,
+        "GridBased.allow_reverse_expansion": false,
+        "GridBased.gait_max_midroute_rotation": 1.5707963267948966,
+        "GridBased.gait_min_forward_leg": 0.5,
+        "GridBased.gait_terminal_region": 0.3
+      },
+      "global_costmap/global_costmap": {
+        "footprint": "[[1.0, 0.72], [1.0, -0.72], [-0.58, -0.72], [-0.58, 0.72]]",
+        "footprint_padding": 0.05,
+        "inflation_layer.inflation_radius": 1.4,
+        "obstacle_layer.enabled": false
+      }
+    },
+    "gait_parameters_read_only": {
+      "GridBased.gait_max_midroute_rotation": true,
+      "GridBased.gait_min_forward_leg": true,
+      "GridBased.gait_terminal_region": true
+    },
+    "pre_map": {
+      "lethal_mask_exact": true,
+      "resolution": 0.05000000074505806
+    },
+    "post_map": {
+      "lethal_mask_exact": true,
+      "resolution": 0.05000000074505806
+    },
+    "observed_safe_command_count": 97,
+    "all_safe_commands_zero": true,
+    "planning_replay_matched": true
+  },
+  "final_public_client_independent_checks": {
+    "scope": "Planning only, complete padded stop rectangle, actual start connection, nonempty independent dense filled and Nav2 C++ boundary checks",
+    "checks": [
+      {
+        "arm": "gait",
+        "query": "detour_start",
+        "map": "before",
+        "resolution": 0.05,
+        "samples": 1917,
+        "filled_violations": 0,
+        "nav2_cpp_violations": 0
+      },
+      {
+        "arm": "gait",
+        "query": "detour_start",
+        "map": "before",
+        "resolution": 0.05000000074505806,
+        "samples": 1917,
+        "filled_violations": 0,
+        "nav2_cpp_violations": 0
+      },
+      {
+        "arm": "gait",
+        "query": "detour_start",
+        "map": "after",
+        "resolution": 0.05,
+        "samples": 1917,
+        "filled_violations": 0,
+        "nav2_cpp_violations": 0
+      },
+      {
+        "arm": "gait",
+        "query": "detour_start",
+        "map": "after",
+        "resolution": 0.05000000074505806,
+        "samples": 1917,
+        "filled_violations": 0,
+        "nav2_cpp_violations": 0
+      },
+      {
+        "arm": "gait",
+        "query": "settled_failure",
+        "map": "before",
+        "resolution": 0.05,
+        "samples": 1937,
+        "filled_violations": 0,
+        "nav2_cpp_violations": 0
+      },
+      {
+        "arm": "gait",
+        "query": "settled_failure",
+        "map": "before",
+        "resolution": 0.05000000074505806,
+        "samples": 1937,
+        "filled_violations": 0,
+        "nav2_cpp_violations": 0
+      },
+      {
+        "arm": "gait",
+        "query": "settled_failure",
+        "map": "after",
+        "resolution": 0.05,
+        "samples": 1937,
+        "filled_violations": 0,
+        "nav2_cpp_violations": 0
+      },
+      {
+        "arm": "gait",
+        "query": "settled_failure",
+        "map": "after",
+        "resolution": 0.05000000074505806,
+        "samples": 1937,
+        "filled_violations": 0,
+        "nav2_cpp_violations": 0
+      }
+    ],
+    "all_zero": true
+  },
+  "release_component_contracts": {
+    "gait_path_budget_query_and_thread_isolation": true,
+    "actual_loaded_library_identity": true,
+    "actual_node_transition_ban": true,
+    "valid_center_cost_gradient": true,
+    "full_footprint_lethal_edge_rejection": true,
+    "build_type": "Release",
+    "python_tests": 93
+  },
+  "public_libraries_sha256": {
+    "libnav2_smac_planner_lattice.so": "5ed56fdee0742e85086df45a53164bc42ed3ebaf51fa346f5494b4f55df0f6c2",
+    "libp2_nav_gait_trial.so": "881eaacb14ae7d1afb7b8ed8dba251dcf0e6e3504ec5a8e2a72b3a11bf428766"
+  },
+  "retained_execution_boundary": {
+    "scope": "Separate private model, planar ray-cast and explicitly ideal model body pose; not a public executable or physical acceptance",
+    "goal_statuses": [
+      4,
+      6
+    ],
+    "collision_samples": 0,
+    "obstacle_control_confirmed": true,
+    "failure": "Subsequent stopped turn exceeded the unchanged0.18m whole-pivot displacement guard; whole navigation remains rejected"
+  }
+}
