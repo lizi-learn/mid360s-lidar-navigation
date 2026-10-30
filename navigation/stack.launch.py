@@ -1,11 +1,13 @@
 """Isolated Nav2 + SLAM/AMCL launch. Live mode publishes preview commands only."""
 from pathlib import Path
-import os
+import os,sys
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, OpaqueFunction, ExecuteProcess, TimerAction
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 import yaml
+sys.path.insert(0,str(Path(__file__).resolve().parent))
+from map_persistence import FREE_THRESH,OCCUPIED_THRESH,validate_map_metadata
 
 def setup(context):
     root=Path(__file__).resolve().parent
@@ -46,10 +48,11 @@ def setup(context):
             'coarse_search_angle_offset':.349,'coarse_angle_resolution':.0349,'minimum_angle_penalty':.9,
             'minimum_distance_penalty':.5,'use_response_expansion':True}
         nodes.append(Node(package='slam_toolbox',executable='async_slam_toolbox_node',name='slam_toolbox',parameters=[slam],output='screen'))
-        nodes.append(Node(package='nav2_map_server',executable='map_saver_server',name='map_saver',parameters=[dict(use_sim_time=False,save_map_timeout=5.,map_subscribe_transient_local=True,free_thresh_default=.25,occupied_thresh_default=.65)],output='screen'))
+        nodes.append(Node(package='nav2_map_server',executable='map_saver_server',name='map_saver',parameters=[dict(use_sim_time=False,save_map_timeout=5.,map_subscribe_transient_local=True,free_thresh_default=FREE_THRESH,occupied_thresh_default=OCCUPIED_THRESH)],output='screen'))
         navigation=['map_saver','velocity_smoother','collision_monitor']
     else:
         assert map_file and Path(map_file).is_file(),'Navigation needs a saved map'
+        validate_map_metadata(map_file)
         nodes += [Node(package='nav2_map_server',executable='map_server',name='map_server',parameters=[params,{'yaml_filename':map_file}],output='screen'),
                   Node(package='nav2_amcl',executable='amcl',name='amcl',parameters=[params,{'set_initial_pose':simulation}],output='screen'),
                   TimerAction(period=3.,actions=[Node(package='nav2_lifecycle_manager',executable='lifecycle_manager',name='lifecycle_manager_localization',

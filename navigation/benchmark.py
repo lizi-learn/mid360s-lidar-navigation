@@ -12,6 +12,7 @@ from nav2_msgs.msg import SpeedLimit
 from slam_toolbox.srv import SerializePoseGraph
 from nav2_msgs.srv import SaveMap
 from std_msgs.msg import String
+from map_persistence import configure_save_request,validate_map_metadata
 
 def angle(x):return (x+math.pi)%(2*math.pi)-math.pi
 
@@ -130,13 +131,14 @@ def mapping(bench,directory,targets=None):
     for service,typ in [('/map_saver/save_map',SaveMap),('/slam_toolbox/serialize_map',SerializePoseGraph)]:
         client=bench.create_client(typ,service);assert client.wait_for_service(timeout_sec=15.)
         req=typ.Request()
-        if typ==SaveMap:req.map_topic='/map';req.map_url=stem;req.image_format='pgm';req.map_mode='trinary';req.free_thresh=.25;req.occupied_thresh=.65
+        if typ==SaveMap:configure_save_request(req,stem)
         else:req.filename=stem
         response=bench.future(client.call_async(req),20)
         if not (response.result if typ==SaveMap else response.result==0):raise RuntimeError('Map save failed: '+service)
         bench.event('map_saved',service=service,result=int(response.result))
     grid=bench.map
     assert grid and (directory/'mapped.yaml').is_file() and (directory/'mapped.pgm').is_file()
+    validate_map_metadata(directory/'mapped.yaml')
     final=bench.truth['pose']
     return {'workflow':'SLAM Toolbox mapping -> map + serialized pose graph',
         'map_dimensions':[grid.info.width,grid.info.height],'resolution':grid.info.resolution,
