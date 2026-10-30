@@ -38,3 +38,17 @@ jobs:
 
       - run: bash experiments/gait_space/build.sh
       - run: bash experiments/gait_space/check.sh
+
+  gait-transport:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - run: g++ -std=c++17 -O2 -Wall -Wextra -Werror -pthread -Inavigation experiments/gait_velocity_input/check_loop.cpp -o /tmp/gait-loop && /tmp/gait-loop
+      - run: g++ -std=c++17 -O2 -Wall -Wextra -Werror -pthread -Inavigation experiments/gait_velocity_input/contract_server.cpp -o /tmp/gait-contract
+      - run: PYTHONPATH=navigation python3 experiments/gait_velocity_input/check_transport.py /tmp/gait-contract
+      - run: g++ -std=c++17 -O2 -Wall -Wextra -Werror -pthread -Inavigation experiments/gait_velocity_input/check_peer_acl.cpp -o /tmp/check_peer_acl
+      - run: sudo env PYTHONPATH="$GITHUB_WORKSPACE/navigation" python3 experiments/gait_velocity_input/check_peer_acl.py /tmp/check_peer_acl

@@ -6,6 +6,7 @@
 
 - [交互演示与说明](https://lizi-learn.github.io/mid360s-lidar-navigation/)：全部使用合成几何，不连接实机。
 - [前向导航工作台与完整流程](docs/NAVIGATION.md)
+- [实验性步态速度接管与实际验收边界](docs/GAIT_HANDOFF.md)：原手柄不变；本地协议、零速度待机已验证，完整导航未验收。
 - [双足平地适配、头身变换与三维扫描验证](docs/BIPED.md)
 - [换机与实机操作](docs/MIGRATION.md)
 - [本轮持续仿真与迁移验证](docs/VALIDATION_2026-10-30.md)
