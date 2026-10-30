@@ -369,5 +369,293 @@
   "frozen_map_audit_scope": "One frozen global costmap before queries; per-query map changes not recorded. Actual simulator pose/scan were static, but path audit is evidence for a follow-up, not executed collision or proof smoothing is the sole cause.",
   "sampling_correction": "Early Python sampling exceeded the Y boundary by 0.01m; those preliminary counts were discarded. Final audit samples remain inside exact padded bounds and are independently checked with the actual Nav2 C++ footprint checker.",
   "production_parameter_changes": false,
-  "navigation_or_physical_acceptance": false
+  "navigation_or_physical_acceptance": false,
+  "seed_provenance": "Fixture label 0; no claim that AMCL and all runtime random generators were explicitly seeded.",
+  "smoothing_ab_followup": {
+    "scope": "Bounded sequential planar-sensor / ideal body pose AMP dynamics A/B; no 3D LIO chain or physical acceptance",
+    "source_commit": "f4ce49bfd9dd473bc61e4579cd28449052fb2410",
+    "algorithm_commit": "f00cd0580c6f3e3f092abd4392ac6671c5a1bb5c",
+    "harness_hashes_reverified": true,
+    "seed_provenance": "Fixture label 0. AMCL and all runtime random generators were not explicitly seeded or audited; this is not a deterministic common-random-number comparison.",
+    "map_scope": "Manual query pre/post GetCostmap and observer pre/post data match. These observational snapshots are not an atomic in-plugin snapshot.",
+    "resolution_m": 0.05,
+    "footprint_bounds_m": [
+      [
+        -0.63,
+        -0.77
+      ],
+      [
+        1.05,
+        0.77
+      ]
+    ],
+    "sample_limits_m_rad": [
+      0.025,
+      0.025
+    ],
+    "arms": [
+      {
+        "arm": "smooth-on",
+        "smooth_path": true,
+        "navigation": {
+          "goals_completed": 1,
+          "goals_total": 2,
+          "goal_truth_errors_m": [
+            0.09753052101906376,
+            3.4886108006769687
+          ],
+          "goal_truth_yaw_errors_rad": [
+            0.139222,
+            1.28354
+          ],
+          "final_truth_poses": [
+            [
+              3.90907,
+              2.4647305,
+              0.139222
+            ],
+            [
+              7.01425,
+              5.66831,
+              -1.28354
+            ]
+          ],
+          "elapsed_goal_s": [
+            19.12755957292393,
+            165.64212885079905
+          ],
+          "collision_samples": 0,
+          "max_forward_command": 0.15,
+          "max_lateral_command": 0.0,
+          "max_angular_command": 0.24,
+          "validation_passed": false,
+          "obstacle_controls_confirmed": true
+        },
+        "manual_probe": [
+          {
+            "case": "detour_start",
+            "status": 4,
+            "elapsed_s": 0.261210068827495,
+            "planning_s": 0.25173471000000003,
+            "pre_map_id": "1dfc41108f5831a4c5a01d2eae16a1406479deda8e4c64ee4f3d74e1dfdc8322",
+            "post_map_id": "1dfc41108f5831a4c5a01d2eae16a1406479deda8e4c64ee4f3d74e1dfdc8322",
+            "stable_map": true,
+            "path_poses": 325
+          },
+          {
+            "case": "previous_failure",
+            "status": 6,
+            "elapsed_s": 0.0025350989308208227,
+            "planning_s": 0.0,
+            "pre_map_id": "1dfc41108f5831a4c5a01d2eae16a1406479deda8e4c64ee4f3d74e1dfdc8322",
+            "post_map_id": "1dfc41108f5831a4c5a01d2eae16a1406479deda8e4c64ee4f3d74e1dfdc8322",
+            "stable_map": true,
+            "path_poses": 0
+          }
+        ],
+        "path_audit": {
+          "raw": {
+            "path_poses": 324,
+            "stable_pre_post_map": true,
+            "checked_poses": 1089,
+            "filled_footprint_bad_samples": 5,
+            "cpp_footprint_bad_samples": 5,
+            "bad_sample_indices_match": true,
+            "first_bad": [
+              4.833325171967225,
+              8.267937783419157,
+              0.14487225562334063
+            ],
+            "max_cost": 254,
+            "cpp_max_cost": 254.0
+          },
+          "final": {
+            "path_poses": 325,
+            "stable_pre_post_map": true,
+            "checked_poses": 1024,
+            "filled_footprint_bad_samples": 6,
+            "cpp_footprint_bad_samples": 6,
+            "bad_sample_indices_match": true,
+            "first_bad": [
+              4.839130182771281,
+              8.247211217591774,
+              0.16257700683918536
+            ],
+            "max_cost": 254,
+            "cpp_max_cost": 254.0
+          }
+        },
+        "observed_raw_final_receipt_gap_s": 0.0127545609138906,
+        "effective_parameters": {
+          "planner_server": {
+            "GridBased.plugin": "p2_nav_controller::ExactHeadingLattice",
+            "GridBased.lattice_filepath": "/opt/ros/humble/share/nav2_smac_planner/sample_primitives/5cm_resolution/0.5m_turning_radius/diff/output.json",
+            "GridBased.smooth_path": true,
+            "GridBased.max_planning_time": 3.0,
+            "GridBased.allow_reverse_expansion": false
+          },
+          "controller_server": {
+            "FollowPath.plugin": "p2_nav_controller::SettledGoalRPP",
+            "FollowPath.min_lookahead_dist": 0.4,
+            "FollowPath.max_lookahead_dist": 0.8,
+            "FollowPath.lookahead_time": 2.0,
+            "FollowPath.rotate_to_heading_min_angle": 0.35,
+            "FollowPath.max_angular_accel": 20.0,
+            "FollowPath.cost_scaling_dist": 1.0,
+            "FollowPath.desired_linear_vel": 0.15
+          },
+          "global_costmap/global_costmap": {
+            "footprint": "[[1.0, 0.72], [1.0, -0.72], [-0.58, -0.72], [-0.58, 0.72]]",
+            "footprint_padding": 0.05,
+            "inflation_layer.inflation_radius": 1.2
+          },
+          "local_costmap/local_costmap": {
+            "footprint": "[[0.47, 0.52], [0.47, -0.52], [-0.43, -0.52], [-0.43, 0.52]]",
+            "footprint_padding": 0.05,
+            "inflation_layer.inflation_radius": 1.2
+          },
+          "velocity_smoother": {
+            "max_velocity": [
+              0.15,
+              0.0,
+              0.24
+            ]
+          }
+        },
+        "raw_final_identical": false
+      },
+      {
+        "arm": "smooth-off",
+        "smooth_path": false,
+        "navigation": {
+          "goals_completed": 1,
+          "goals_total": 2,
+          "goal_truth_errors_m": [
+            0.11032476701085761,
+            3.103819994587315
+          ],
+          "goal_truth_yaw_errors_rad": [
+            0.117298,
+            1.46536
+          ],
+          "final_truth_poses": [
+            [
+              3.89051,
+              2.513546,
+              0.117298
+            ],
+            [
+              7.22858,
+              5.34868,
+              -1.46536
+            ]
+          ],
+          "elapsed_goal_s": [
+            18.326056089950725,
+            192.7792605110444
+          ],
+          "collision_samples": 0,
+          "max_forward_command": 0.15,
+          "max_lateral_command": 0.0,
+          "max_angular_command": 0.24,
+          "validation_passed": false,
+          "obstacle_controls_confirmed": true
+        },
+        "manual_probe": [
+          {
+            "case": "detour_start",
+            "status": 4,
+            "elapsed_s": 0.2438689609989524,
+            "planning_s": 0.234691263,
+            "pre_map_id": "1dfc41108f5831a4c5a01d2eae16a1406479deda8e4c64ee4f3d74e1dfdc8322",
+            "post_map_id": "1dfc41108f5831a4c5a01d2eae16a1406479deda8e4c64ee4f3d74e1dfdc8322",
+            "stable_map": true,
+            "path_poses": 325
+          },
+          {
+            "case": "previous_failure",
+            "status": 6,
+            "elapsed_s": 0.002332035917788744,
+            "planning_s": 0.0,
+            "pre_map_id": "1dfc41108f5831a4c5a01d2eae16a1406479deda8e4c64ee4f3d74e1dfdc8322",
+            "post_map_id": "1dfc41108f5831a4c5a01d2eae16a1406479deda8e4c64ee4f3d74e1dfdc8322",
+            "stable_map": true,
+            "path_poses": 0
+          }
+        ],
+        "path_audit": {
+          "raw": {
+            "path_poses": 324,
+            "stable_pre_post_map": true,
+            "checked_poses": 1089,
+            "filled_footprint_bad_samples": 5,
+            "cpp_footprint_bad_samples": 5,
+            "bad_sample_indices_match": true,
+            "first_bad": [
+              4.833325171967225,
+              8.267937783419157,
+              0.14487225562334063
+            ],
+            "max_cost": 254,
+            "cpp_max_cost": 254.0
+          },
+          "final": {
+            "path_poses": 325,
+            "stable_pre_post_map": true,
+            "checked_poses": 1090,
+            "filled_footprint_bad_samples": 5,
+            "cpp_footprint_bad_samples": 5,
+            "bad_sample_indices_match": true,
+            "first_bad": [
+              4.833325171967225,
+              8.267937783419157,
+              0.14487225562334063
+            ],
+            "max_cost": 254,
+            "cpp_max_cost": 254.0
+          }
+        },
+        "observed_raw_final_receipt_gap_s": 0.00887677981518209,
+        "effective_parameters": {
+          "planner_server": {
+            "GridBased.plugin": "p2_nav_controller::ExactHeadingLattice",
+            "GridBased.lattice_filepath": "/opt/ros/humble/share/nav2_smac_planner/sample_primitives/5cm_resolution/0.5m_turning_radius/diff/output.json",
+            "GridBased.smooth_path": false,
+            "GridBased.max_planning_time": 3.0,
+            "GridBased.allow_reverse_expansion": false
+          },
+          "controller_server": {
+            "FollowPath.plugin": "p2_nav_controller::SettledGoalRPP",
+            "FollowPath.min_lookahead_dist": 0.4,
+            "FollowPath.max_lookahead_dist": 0.8,
+            "FollowPath.lookahead_time": 2.0,
+            "FollowPath.rotate_to_heading_min_angle": 0.35,
+            "FollowPath.max_angular_accel": 20.0,
+            "FollowPath.cost_scaling_dist": 1.0,
+            "FollowPath.desired_linear_vel": 0.15
+          },
+          "global_costmap/global_costmap": {
+            "footprint": "[[1.0, 0.72], [1.0, -0.72], [-0.58, -0.72], [-0.58, 0.72]]",
+            "footprint_padding": 0.05,
+            "inflation_layer.inflation_radius": 1.2
+          },
+          "local_costmap/local_costmap": {
+            "footprint": "[[0.47, 0.52], [0.47, -0.52], [-0.43, -0.52], [-0.43, 0.52]]",
+            "footprint_padding": 0.05,
+            "inflation_layer.inflation_radius": 1.2
+          },
+          "velocity_smoother": {
+            "max_velocity": [
+              0.15,
+              0.0,
+              0.24
+            ]
+          }
+        },
+        "raw_final_identical": false
+      }
+    ],
+    "production_parameter_changes": false,
+    "navigation_or_physical_acceptance": false
+  }
 }
