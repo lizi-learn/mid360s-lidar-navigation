@@ -10,6 +10,7 @@
 - [换机与实机操作](docs/MIGRATION.md)
 - [本轮持续仿真与迁移验证](docs/VALIDATION_2026-10-30.md)
 - [窄门起点量化与冻结地图诊断补充](docs/PLANNER_DIAGNOSTIC_2026-10-30.md)
+- [连续包络检查与 32 航向规划实验](experiments/continuous_forward/README.md)：含可复现碰撞回归；完整窄门步态跟踪仍未通过。
 - [历史验证与已知问题](docs/VALIDATION.md)
 - [第三方依赖与许可](THIRD_PARTY_NOTICES.md)
 

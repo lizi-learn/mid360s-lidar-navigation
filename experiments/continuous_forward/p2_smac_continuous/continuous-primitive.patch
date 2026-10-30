@@ -1,0 +1,132 @@
+--- a/src/node_lattice.cpp
++++ b/src/node_lattice.cpp
+@@ -224,41 +224,33 @@
+   // If valid motion primitives are set, check intermediary poses > 1 cell apart
+   if (motion_primitive) {
+     const float & grid_resolution = motion_table.lattice_metadata.grid_resolution;
+-    const float & resolution_diag_sq = 2.0 * grid_resolution * grid_resolution;
+-    MotionPose last_pose(1e9, 1e9, 1e9), pose_dist(0.0, 0.0, 0.0);
+-
+-    // Back out the initial node starting point to move motion primitive relative to
+-    MotionPose initial_pose, prim_pose;
+-    initial_pose._x = this->pose.x - (motion_primitive->poses.back()._x / grid_resolution);
+-    initial_pose._y = this->pose.y - (motion_primitive->poses.back()._y / grid_resolution);
+-    initial_pose._theta = motion_table.getAngleFromBin(motion_primitive->start_angle);
+-
+-    for (auto it = motion_primitive->poses.begin(); it != motion_primitive->poses.end(); ++it) {
+-      // poses are in metric coordinates from (0, 0), not grid space yet
+-      pose_dist = *it - last_pose;
+-      // Avoid square roots by (hypot(x, y) > res) == (x*x+y*y > diag*diag)
+-      if (pose_dist._x * pose_dist._x + pose_dist._y * pose_dist._y > resolution_diag_sq) {
+-        last_pose = *it;
+-        // Convert primitive pose into grid space if it should be checked
+-        prim_pose._x = initial_pose._x + (it->_x / grid_resolution);
+-        prim_pose._y = initial_pose._y + (it->_y / grid_resolution);
+-        // If reversing, invert the angle because the robot is backing into the primitive
+-        // not driving forward with it
+-        if (is_backwards) {
+-          prim_pose._theta = std::fmod(it->_theta + M_PI, 2.0 * M_PI);
+-        } else {
+-          prim_pose._theta = it->_theta;
+-        }
+-        if (collision_checker->inCollision(
+-            prim_pose._x,
+-            prim_pose._y,
+-            prim_pose._theta / bin_size /*bin in collision checker*/,
+-            traverse_unknown))
+-        {
++    // P2 patch: check the entire primitive, including pure rotations. Metric
++    // pose spacing alone cannot detect a swept corner during an in-place turn.
++    MotionPose initial_pose;
++    initial_pose._x = this->pose.x - motion_primitive->poses.back()._x / grid_resolution;
++    initial_pose._y = this->pose.y - motion_primitive->poses.back()._y / grid_resolution;
++    MotionPose previous(0.0, 0.0,
++      motion_table.getAngleFromBin(motion_primitive->start_angle));
++    for (const auto & target : motion_primitive->poses) {
++      const double delta = std::remainder(target._theta - previous._theta, 2.0 * M_PI);
++      const int steps = std::max({1,
++        static_cast<int>(std::ceil(std::hypot(target._x - previous._x,
++          target._y - previous._y) / (0.5 * grid_resolution))),
++        static_cast<int>(std::ceil(std::abs(delta) / 0.02))});
++      for (int i = 1; i <= steps; ++i) {
++        const double f = static_cast<double>(i) / steps;
++        const float x = initial_pose._x +
++          (previous._x + f * (target._x - previous._x)) / grid_resolution;
++        const float y = initial_pose._y +
++          (previous._y + f * (target._y - previous._y)) / grid_resolution;
++        double yaw = previous._theta + f * delta + (is_backwards ? M_PI : 0.0);
++        yaw = std::fmod(yaw + 2.0 * M_PI, 2.0 * M_PI);
++        if (collision_checker->inCollision(x, y, yaw / bin_size, traverse_unknown)) {
+           return false;
+         }
+         max_cell_cost = std::max(max_cell_cost, collision_checker->getCost());
+       }
++      previous = target;
+     }
+   }
+ 
+--- a/src/collision_checker.cpp
++++ b/src/collision_checker.cpp
+@@ -13,6 +13,7 @@
+ // limitations under the License. Reserved.
+ 
+ #include "nav2_smac_planner/collision_checker.hpp"
++#include <cmath>
+ 
+ namespace nav2_smac_planner
+ {
+@@ -93,6 +94,7 @@
+   const float & angle_bin,
+   const bool & traverse_unknown)
+ {
++  if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(angle_bin)) {return true;}
+   // Check to make sure cell is inside the map
+   if (outsideRange(costmap_->getSizeInCellsX(), x) ||
+     outsideRange(costmap_->getSizeInCellsY(), y))
+@@ -102,7 +104,10 @@
+ 
+   // Assumes setFootprint already set
+   double wx, wy;
+-  costmap_->mapToWorld(static_cast<double>(x), static_cast<double>(y), wx, wy);
++  // P2 patch: Costmap2D::mapToWorld accepts unsigned cells; passing a double
++  // silently discards primitive subcell coordinates. Keep the continuous pose.
++  wx = costmap_->getOriginX() + (static_cast<double>(x) + 0.5) * costmap_->getResolution();
++  wy = costmap_->getOriginY() + (static_cast<double>(y) + 0.5) * costmap_->getResolution();
+ 
+   if (!footprint_is_radius_) {
+     // if footprint, then we check for the footprint's points, but first see
+@@ -134,20 +139,11 @@
+       return true;
+     }
+ 
+-    // if possible inscribed, need to check actual footprint pose.
+-    // Use precomputed oriented footprints are done on initialization,
+-    // offset by translation value to collision check
+-    geometry_msgs::msg::Point new_pt;
+-    const nav2_costmap_2d::Footprint & oriented_footprint = oriented_footprints_[angle_bin];
+-    nav2_costmap_2d::Footprint current_footprint;
+-    current_footprint.reserve(oriented_footprint.size());
+-    for (unsigned int i = 0; i < oriented_footprint.size(); ++i) {
+-      new_pt.x = wx + oriented_footprint[i].x;
+-      new_pt.y = wy + oriented_footprint[i].y;
+-      current_footprint.push_back(new_pt);
+-    }
+-
+-    footprint_cost_ = footprintCost(current_footprint);
++    // P2 patch: exact primitive orientation rather than truncating to the
++    // nearest lower cached heading bin. The public API still takes bin units.
++    const double yaw = angle_bin * (2.0 * M_PI / angles_.size());
++    footprint_cost_ = footprintCostAtPose(wx, wy, yaw, unoriented_footprint_);
++    if (footprint_cost_ < 0.0) {return true;}
+ 
+     if (footprint_cost_ == UNKNOWN && traverse_unknown) {
+       return false;
+@@ -190,7 +186,7 @@
+ 
+ bool GridCollisionChecker::outsideRange(const unsigned int & max, const float & value)
+ {
+-  return value < 0.0f || value > max;
++  return value < 0.0f || value >= max;
+ }
+ 
+ }  // namespace nav2_smac_planner

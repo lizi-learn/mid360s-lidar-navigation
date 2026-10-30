@@ -28,4 +28,12 @@ Nav2 Humble extensions. It links to separately installed RPP and Smac packages
 from Nav2 1.1.20; their Apache-2.0 notices and upstream licenses remain applicable.
 No robot vendor source, model mesh or policy weight is included.
 
+The optional `experiments/continuous_forward/p2_smac_continuous` package fetches
+ten SHA-256 checked Apache-2.0 Nav2 source files from commit
+`a097086719c88f781aa59788eca29ac6ca5e56db` into its build directory. Its
+`continuous-primitive.patch` is distributed under Apache-2.0, with that license
+text in the package's `LICENSE`. Preserve upstream notices and source/license
+obligations when distributing the patched library. This does not relicense Nav2
+under this repository's MIT application license.
+
 可选通信实现使用 ROS Humble 的 [rmw_cyclonedds](https://github.com/ros2/rmw_cyclonedds) 与 [Eclipse Cyclone DDS](https://github.com/eclipse-cyclonedds/cyclonedds) 系统包；不随本源码包分发，使用时保留各上游许可。

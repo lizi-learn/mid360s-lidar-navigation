@@ -1,0 +1,15 @@
+{
+  "upstream_commit": "a097086719c88f781aa59788eca29ac6ca5e56db",
+  "sources": {
+    "smac_planner_lattice.cpp": "701438227aa7d60299955fa299dbc569e38e51269416a78d2636dfd5075b901b",
+    "a_star.cpp": "f42e53702723b110da8bcb228e0cb121e781f463804ed49c408142d1ff6b708d",
+    "smoother.cpp": "5b2e144acc45a264f3a38ac9c7e530a66f78b2e76982cfb7fba72d74f50ba836",
+    "collision_checker.cpp": "2be59308f6b216130abc6247aed60709137bac8b9bcd888d1afcb59a13f3b939",
+    "analytic_expansion.cpp": "771e1ab17587a83a00d9fbb6cecba7e5b62cc0677fc75b561bedee4f1dc266eb",
+    "node_hybrid.cpp": "5ebca2583d579d1b1bb3107a08a600b1612b1effd57bd2f598e18e69ddccf852",
+    "node_lattice.cpp": "86eb7052ea22d74438e771f5f254dedfcf0588f9b145e8f7b41c1888a59a5ae8",
+    "costmap_downsampler.cpp": "92ecc0c525871ffc513c3fc77005435aa2d2cfcd5f5dd35eb143946e0d68f28f",
+    "node_2d.cpp": "4458c27c569f7127196c757ff1c8a5f3eb5590858989ec42e370149224563139",
+    "node_basic.cpp": "a7d3976010e58ebc8289974b89ff8d4189b1d37b16398799c8b0101d6cdf83d6"
+  }
+}

@@ -1,0 +1,1 @@
+<library path="p2_nav_swept_trial"><class name="p2_nav_controller::SweptLattice" type="p2_nav_controller::SweptLattice" base_class_type="nav2_core::GlobalPlanner"><description>Full swept planning footprint with query-local center exclusions</description></class></library>

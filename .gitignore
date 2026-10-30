@@ -18,3 +18,4 @@ config/MID360S.json
 .DS_Store
 config/robot.local.json
 nav_controller_ws/
+continuous_nav_ws/

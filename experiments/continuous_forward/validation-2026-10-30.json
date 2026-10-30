@@ -1,0 +1,335 @@
+{
+  "scope": "Public-source planning regression; no arm, NavigateToPose, gait model or physical acceptance",
+  "full_navigation_accepted": false,
+  "default_navigation_config_changed": false,
+  "baseline_commit": "97f1c4bf2f66e8787e51886ec28ff27a4082a562",
+  "library_regression": {
+    "endpoints_clear": true,
+    "intermediate_cost": 254,
+    "original_transition_accepted": true,
+    "patched_transition_accepted": false,
+    "actual_library_identity_checked": true,
+    "release_checks_are_runtime_requirements": true
+  },
+  "frozen_synthetic_map_queries": [
+    {
+      "headings": 8,
+      "queries": [
+        {
+          "name": "first_failure",
+          "start": [
+            6.928108807204626,
+            7.3600534346749305,
+            -1.7017928005755834
+          ],
+          "goal": [
+            9.0,
+            2.8,
+            0.0
+          ],
+          "status": 6,
+          "elapsed_s": 0.007642761105671525,
+          "planning_s": 0.0,
+          "poses": 0
+        },
+        {
+          "name": "settled_failure",
+          "start": [
+            6.944112237742203,
+            7.1868970337707525,
+            -1.6633015190622107
+          ],
+          "goal": [
+            9.0,
+            2.8,
+            0.0
+          ],
+          "status": 6,
+          "elapsed_s": 0.0041402101051062346,
+          "planning_s": 0.0,
+          "poses": 0
+        }
+      ],
+      "all_safe_commands_zero": true,
+      "lethal_mask_unchanged_before_and_after": true
+    },
+    {
+      "headings": 32,
+      "queries": [
+        {
+          "name": "first_failure",
+          "start": [
+            6.928108807204626,
+            7.3600534346749305,
+            -1.7017928005755834
+          ],
+          "goal": [
+            9.0,
+            2.8,
+            0.0
+          ],
+          "status": 4,
+          "elapsed_s": 0.054217769065871835,
+          "planning_s": 0.036720055,
+          "poses": 620
+        },
+        {
+          "name": "settled_failure",
+          "start": [
+            6.944112237742203,
+            7.1868970337707525,
+            -1.6633015190622107
+          ],
+          "goal": [
+            9.0,
+            2.8,
+            0.0
+          ],
+          "status": 4,
+          "elapsed_s": 0.047063007950782776,
+          "planning_s": 0.031412044,
+          "poses": 604
+        }
+      ],
+      "all_safe_commands_zero": true,
+      "lethal_mask_unchanged_before_and_after": true
+    }
+  ],
+  "independent_path_checks": {
+    "scope": "Two recovered frozen-map paths, actual start connection included; independent dense filled test and Nav2 C++ boundary checker; not execution acceptance",
+    "checks": [
+      {
+        "query": "first_failure",
+        "map": "before",
+        "resolution": 0.05,
+        "sampled_poses": 621,
+        "filled_violations": 0,
+        "nav2_cpp_violations": 0
+      },
+      {
+        "query": "first_failure",
+        "map": "before",
+        "resolution": 0.05000000074505806,
+        "sampled_poses": 621,
+        "filled_violations": 0,
+        "nav2_cpp_violations": 0
+      },
+      {
+        "query": "first_failure",
+        "map": "after",
+        "resolution": 0.05,
+        "sampled_poses": 621,
+        "filled_violations": 0,
+        "nav2_cpp_violations": 0
+      },
+      {
+        "query": "first_failure",
+        "map": "after",
+        "resolution": 0.05000000074505806,
+        "sampled_poses": 621,
+        "filled_violations": 0,
+        "nav2_cpp_violations": 0
+      },
+      {
+        "query": "settled_failure",
+        "map": "before",
+        "resolution": 0.05,
+        "sampled_poses": 606,
+        "filled_violations": 0,
+        "nav2_cpp_violations": 0
+      },
+      {
+        "query": "settled_failure",
+        "map": "before",
+        "resolution": 0.05000000074505806,
+        "sampled_poses": 606,
+        "filled_violations": 0,
+        "nav2_cpp_violations": 0
+      },
+      {
+        "query": "settled_failure",
+        "map": "after",
+        "resolution": 0.05,
+        "sampled_poses": 606,
+        "filled_violations": 0,
+        "nav2_cpp_violations": 0
+      },
+      {
+        "query": "settled_failure",
+        "map": "after",
+        "resolution": 0.05000000074505806,
+        "sampled_poses": 606,
+        "filled_violations": 0,
+        "nav2_cpp_violations": 0
+      }
+    ],
+    "all_zero": true
+  },
+  "runtime_library_proofs": [
+    {
+      "headings": 8,
+      "library_basenames": [
+        "libp2_nav_swept_trial.so",
+        "libnav2_smac_planner_lattice.so"
+      ],
+      "verified_owned_experimental_prefix": true
+    },
+    {
+      "headings": 32,
+      "library_basenames": [
+        "libp2_nav_swept_trial.so",
+        "libnav2_smac_planner_lattice.so"
+      ],
+      "verified_owned_experimental_prefix": true
+    }
+  ],
+  "whole_gait_tracking_trials": "Still fail narrow passages/fine turns; no controller or arrival-threshold promotion",
+  "omitted_assets": [
+    "vendor models",
+    "policy weights",
+    "robot descriptions",
+    "office maps",
+    "recordings",
+    "credentials"
+  ],
+  "synthetic_map_fixture": {
+    "yaml": "frozen-synthetic.yaml",
+    "image": "frozen-synthetic.pgm",
+    "image_sha256": "2e58a6097c84416f93bedb653f979332dfa3a5f0e8c33b2ddbde1d54dd3b694e",
+    "origin": "Authored synthetic simulator geometry; not an office map or physical robot recording",
+    "lethal_mask_sha256": "ce9a42ae82b4163ea136306de38fb0a9e67268796c6d419b9b0583e2fac42882"
+  },
+  "final_public_client_replay": {
+    "scope": "Read-only ComputePath queries; never arm, NavigateToPose or physical acceptance",
+    "queries": [
+      {
+        "name": "first_failure",
+        "start": [
+          6.928108807204626,
+          7.3600534346749305,
+          -1.7017928005755834
+        ],
+        "goal": [
+          9.0,
+          2.8,
+          0.0
+        ],
+        "status": 4,
+        "elapsed_s": 0.049437911016866565,
+        "poses": 620
+      },
+      {
+        "name": "settled_failure",
+        "start": [
+          6.944112237742203,
+          7.1868970337707525,
+          -1.6633015190622107
+        ],
+        "goal": [
+          9.0,
+          2.8,
+          0.0
+        ],
+        "status": 4,
+        "elapsed_s": 0.0459456299431622,
+        "poses": 604
+      }
+    ],
+    "navigation_accepted": false,
+    "effective": {
+      "planner_server": {
+        "GridBased.plugin": "p2_nav_controller::SweptLattice",
+        "GridBased.lattice_filepath": "/nav/experiments/continuous_forward/biped-straight-pivot32.json",
+        "GridBased.lookup_table_size": 0.05,
+        "GridBased.smooth_path": false,
+        "GridBased.allow_reverse_expansion": false
+      },
+      "global_costmap/global_costmap": {
+        "footprint": "[[1.0, 0.72], [1.0, -0.72], [-0.58, -0.72], [-0.58, 0.72]]",
+        "footprint_padding": 0.05,
+        "inflation_layer.inflation_radius": 1.4,
+        "obstacle_layer.enabled": false
+      }
+    },
+    "observed_safe_command_count": 3,
+    "all_safe_commands_zero": true,
+    "planning_replay_matched": true
+  },
+  "final_public_client_independent_checks": {
+    "scope": "Two recovered frozen-map paths, actual start connection included; independent dense filled test and Nav2 C++ boundary checker; not execution acceptance",
+    "checks": [
+      {
+        "query": "first_failure",
+        "map": "before",
+        "resolution": 0.05,
+        "sampled_poses": 621,
+        "filled_violations": 0,
+        "nav2_cpp_violations": 0
+      },
+      {
+        "query": "first_failure",
+        "map": "before",
+        "resolution": 0.05000000074505806,
+        "sampled_poses": 621,
+        "filled_violations": 0,
+        "nav2_cpp_violations": 0
+      },
+      {
+        "query": "first_failure",
+        "map": "after",
+        "resolution": 0.05,
+        "sampled_poses": 621,
+        "filled_violations": 0,
+        "nav2_cpp_violations": 0
+      },
+      {
+        "query": "first_failure",
+        "map": "after",
+        "resolution": 0.05000000074505806,
+        "sampled_poses": 621,
+        "filled_violations": 0,
+        "nav2_cpp_violations": 0
+      },
+      {
+        "query": "settled_failure",
+        "map": "before",
+        "resolution": 0.05,
+        "sampled_poses": 606,
+        "filled_violations": 0,
+        "nav2_cpp_violations": 0
+      },
+      {
+        "query": "settled_failure",
+        "map": "before",
+        "resolution": 0.05000000074505806,
+        "sampled_poses": 606,
+        "filled_violations": 0,
+        "nav2_cpp_violations": 0
+      },
+      {
+        "query": "settled_failure",
+        "map": "after",
+        "resolution": 0.05,
+        "sampled_poses": 606,
+        "filled_violations": 0,
+        "nav2_cpp_violations": 0
+      },
+      {
+        "query": "settled_failure",
+        "map": "after",
+        "resolution": 0.05000000074505806,
+        "sampled_poses": 606,
+        "filled_violations": 0,
+        "nav2_cpp_violations": 0
+      }
+    ],
+    "all_zero": true
+  },
+  "retained_harness_failure": {
+    "scope": "Public replay guard failure, before any planning query",
+    "problem": "A valid reversed winding of the same full rectangle was initially rejected",
+    "resolution": "Cyclic shifts and reversed winding accepted; crossed or changed polygons rejected",
+    "empty_audit_result_revoked": true,
+    "current_audit_requires_two_nonempty_successful_queries_and_eight_checks": true
+  }
+}
