@@ -11,6 +11,7 @@ using namespace p2_nav;
 constexpr std::uint64_t base=10000000000ULL;
 GaitFeedback mode(std::uint64_t now=base){
  GaitFeedback f;f.monotonic_ns=now;f.controller_instance=10;f.policy_generation=7;
+ f.operator_mode=OperatorMode::navigation_allowed;f.operator_mode_verified=true;
  f.supported_policy=f.walking_ready=f.operator_connected=f.healthy=f.calibrated=f.ground_ok=f.localized=true;return f;
 }
 Packet packet(std::uint64_t seq,float vx=0.f,float vy=0.f,float wz=0.f,std::uint64_t now=base){return {0x504e4156,1,1,11,seq,now,vx,vy,wz,0};}
@@ -23,7 +24,8 @@ int main(){
  assert(!d.navigation_owns_velocity&&d.cancel_navigation_goal&&!g.armed());
  assert(!g.poll(mode(base+2000000),base+2000000).navigation_owns_velocity);
  assert(!g.accept(packet(3,.1f,0,0,base+2000000),48,mode(base+2000000),base+2000000));
- assert(!g.poll(mode(base+2000000),base+2000000).cancel_navigation_goal);
+ assert(g.poll(mode(base+2000000),base+2000000).cancel_navigation_goal);
+ assert(!g.acknowledge_cancel(d.cancel_generation+1));assert(g.acknowledge_cancel(d.cancel_generation));
  // Explicit restart requires a new zero handshake, not the old moving command.
  assert(g.arm(mode(base+3000000),base+3000000));
  assert(!g.accept(packet(4,.1f,0,0,base+3000000),48,mode(base+3000000),base+3000000));
@@ -57,7 +59,13 @@ int main(){
  assert(!restart.poll(m,base+1000).navigation_owns_velocity);
  PhysicalSpeedInput rollback;active(rollback);assert(!rollback.poll(mode(base-1),base-1).navigation_owns_velocity);
  PhysicalSpeedInput pending;active(pending);pending.disarm();assert(!pending.arm(mode(),base));
- assert(pending.poll(mode(),base).cancel_navigation_goal);assert(pending.arm(mode(),base));
+ auto cancel=pending.poll(mode(),base);assert(cancel.cancel_navigation_goal);assert(!pending.arm(mode(),base));
+ assert(pending.acknowledge_cancel(cancel.cancel_generation));assert(pending.arm(mode(),base));
+ PhysicalSpeedInput sw;active(sw);auto sf=mode(base+1000);sf.operator_mode=OperatorMode::manual;
+ auto manual=sw.poll(sf,base+1000);assert(manual.manual_velocity_allowed&&!manual.force_zero_velocity&&!manual.navigation_owns_velocity&&manual.cancel_navigation_goal);
+ sf.operator_mode=OperatorMode::paused;auto paused=sw.poll(sf,base+2000);assert(paused.force_zero_velocity&&!paused.manual_velocity_allowed);
+ sf.operator_mode=OperatorMode::navigation_allowed;assert(!sw.poll(sf,base+3000).navigation_owns_velocity);
+ PhysicalSpeedInput unknown;auto uf=mode();uf.operator_mode_verified=false;assert(!unknown.arm(uf,base));
  std::cout<<"manual handoff, rearm, speed bounds, authority loss, source identity, telemetry and command expiry passed\n";
 }
 '''

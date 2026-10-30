@@ -9,7 +9,7 @@ source /opt/ros/humble/setup.bash
 from pathlib import Path
 import xml.etree.ElementTree as ET
 from ament_index_python.packages import get_package_share_directory
-for name in ['nav2_regulated_pure_pursuit_controller','nav2_smac_planner']:
+for name in ['nav2_regulated_pure_pursuit_controller','nav2_smac_planner','nav2_collision_monitor']:
  p=Path(get_package_share_directory(name))/'package.xml'
  v=ET.parse(p).getroot().findtext('version')
  if v!='1.1.20':raise SystemExit('This extension was validated with Nav2 Humble 1.1.20; '+name+' is '+str(v)+'. Review compatibility before building.')
