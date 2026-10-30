@@ -52,3 +52,5 @@ jobs:
       - run: PYTHONPATH=navigation python3 experiments/gait_velocity_input/check_transport.py /tmp/gait-contract
       - run: g++ -std=c++17 -O2 -Wall -Wextra -Werror -pthread -Inavigation experiments/gait_velocity_input/check_peer_acl.cpp -o /tmp/check_peer_acl
       - run: sudo env PYTHONPATH="$GITHUB_WORKSPACE/navigation" python3 experiments/gait_velocity_input/check_peer_acl.py /tmp/check_peer_acl
+      - run: g++ -std=c++17 -O2 -Wall -Wextra -Werror -pthread experiments/runtime_readiness/test_runtime_readiness.cpp -o /tmp/runtime-readiness && /tmp/runtime-readiness
+      - run: g++ -std=c++17 -O2 -Wall -Wextra -Werror experiments/runtime_readiness/test_imu_source_identity.cpp -o /tmp/source-identity && /tmp/source-identity
