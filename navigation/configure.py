@@ -5,7 +5,13 @@ import argparse, yaml, json
 import numpy as np
 from footprint import checked,DEFAULT,load as load_footprint
 
-def config(controller='rpp', tree=None, minimum_speed=.03, footprint_vertices=None, odometry_model='differential'):
+def config(controller='rpp', tree=None, minimum_speed=.03, footprint_vertices=None, odometry_model='differential',gait_profile='generic'):
+    if gait_profile not in ('generic','p2-flat-model'):raise ValueError('Unknown gait profile')
+    if gait_profile=='p2-flat-model':
+        if controller!='rpp':raise ValueError('The experimental P2 model profile requires RPP')
+        if minimum_speed>.15:raise ValueError('P2 model profile minimum speed exceeds its 0.15 m/s candidate cap')
+        if footprint_vertices is None:footprint_vertices=load_footprint(Path(__file__).parent/'profiles/p2-model-envelope.json')
+        odometry_model='omni'
     if odometry_model not in ('differential','omni'):raise ValueError('Unknown localization odometry model')
     footprint=json.dumps(checked(DEFAULT if footprint_vertices is None else footprint_vertices))
     result={}
@@ -19,6 +25,8 @@ def config(controller='rpp', tree=None, minimum_speed=.03, footprint_vertices=No
         set_initial_pose=False,initial_pose=dict(x=2.,y=2.5,z=0.,yaw=0.),resample_interval=1,
         recovery_alpha_fast=0.,recovery_alpha_slow=0.,tf_broadcast=True))
     add('map_server',dict(use_sim_time=False,yaml_filename=''))
+    # RPP bounds rotation about measured body-rate; stepping ripple must not lock that request.
+    # The final smoother and command gate independently retain the 0.5 rad/s^2 command ramp.
     rpp=dict(plugin='nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController',
         desired_linear_vel=.30,lookahead_dist=.55,min_lookahead_dist=.35,max_lookahead_dist=.8,
         lookahead_time=1.5,rotate_to_heading_angular_vel=.30,transform_tolerance=.15,
@@ -29,6 +37,10 @@ def config(controller='rpp', tree=None, minimum_speed=.03, footprint_vertices=No
         inflation_cost_scaling_factor=3.,regulated_linear_scaling_min_radius=.65,
         regulated_linear_scaling_min_speed=max(.08,minimum_speed),use_rotate_to_heading=True,allow_reversing=False,
         rotate_to_heading_min_angle=.5,max_angular_accel=.5,max_robot_pose_search_dist=3.)
+    if gait_profile=='p2-flat-model':
+        rpp.update(plugin='p2_nav_controller::SettledGoalRPP',desired_linear_vel=.15,min_lookahead_dist=.4,max_lookahead_dist=.8,
+            lookahead_time=2.0,rotate_to_heading_angular_vel=.24,rotate_to_heading_min_angle=.35,cost_scaling_dist=1.0,
+            max_angular_accel=20.,regulated_linear_scaling_min_radius=1.25)
     mppi=dict(plugin='nav2_mppi_controller::MPPIController',time_steps=48,model_dt=.05,batch_size=1000,
         iteration_count=1,vx_std=.10,vy_std=0.,wz_std=.20,vx_max=.30,vx_min=0.,vy_max=0.,wz_max=.35,
         ax_max=.15,ax_min=-.30,az_max=.5,prune_distance=1.8,transform_tolerance=.15,
@@ -96,8 +108,10 @@ def config(controller='rpp', tree=None, minimum_speed=.03, footprint_vertices=No
         deadband_velocity=[0.,0.,0.],velocity_timeout=.3))
     bounds=np.asarray(checked(DEFAULT if footprint_vertices is None else footprint_vertices))
     lo,hi=bounds.min(axis=0),bounds.max(axis=0)
-    stop_points=[float(hi[0]+.25),float(hi[1]+.20),float(hi[0]+.25),float(lo[1]-.20),float(lo[0]-.15),float(lo[1]-.20),float(lo[0]-.15),float(hi[1]+.20)]
-    slow_points=[float(hi[0]+.75),float(hi[1]+.32),float(hi[0]+.75),float(lo[1]-.32),float(lo[0]-.25),float(lo[1]-.32),float(lo[0]-.25),float(hi[1]+.32)]
+    stop_front=float(hi[0]+(.53 if gait_profile=='p2-flat-model' else .25))
+    slow_front=float(hi[0]+(.95 if gait_profile=='p2-flat-model' else .75))
+    stop_points=[stop_front,float(hi[1]+.20),stop_front,float(lo[1]-.20),float(lo[0]-.15),float(lo[1]-.20),float(lo[0]-.15),float(hi[1]+.20)]
+    slow_points=[slow_front,float(hi[1]+.32),slow_front,float(lo[1]-.32),float(lo[0]-.25),float(lo[1]-.32),float(lo[0]-.25),float(hi[1]+.32)]
     add('collision_monitor',dict(use_sim_time=False,base_frame_id='base_link',odom_frame_id='odom',
         cmd_vel_in_topic='/p2_nav/cmd_smooth',cmd_vel_out_topic='/p2_nav/cmd_collision',
         state_topic='/p2_nav/collision_state',transform_tolerance=.15,source_timeout=.5,
@@ -107,6 +121,17 @@ def config(controller='rpp', tree=None, minimum_speed=.03, footprint_vertices=No
         SlowZone=dict(type='polygon',points=slow_points,
             action_type='slowdown',slowdown_ratio=.4,max_points=2,visualize=True,polygon_pub_topic='slow_zone'),
         observation_sources=['scan'],scan=dict(type='scan',topic='/scan',enabled=True)))
+    if gait_profile=='p2-flat-model':
+        result['planner_server']['ros__parameters']['GridBased']['plugin']='p2_nav_controller::ExactHeadingLattice'
+        for costmap in ('local_costmap','global_costmap'):result[costmap][costmap]['ros__parameters']['inflation_layer']['inflation_radius']=1.2
+        result['controller_server']['ros__parameters']['progress_checker']['movement_time_allowance']=40.
+        result['velocity_smoother']['ros__parameters']['max_velocity'][0]=.15
+        result['velocity_smoother']['ros__parameters']['max_velocity'][2]=.24
+        result['velocity_smoother']['ros__parameters']['min_velocity'][2]=-.24
+        # Routes must fit the monitor's stop clearance, rather than repeatedly
+        # selecting a physical-footprint gap that the monitor will reject.
+        clearance=np.asarray(stop_points).reshape(-1,2).tolist()
+        result['global_costmap']['global_costmap']['ros__parameters']['footprint']=json.dumps(checked(clearance))
     return result
 
 def main():
@@ -114,7 +139,8 @@ def main():
     p.add_argument('--minimum-speed',type=float,default=.03)
     p.add_argument('--footprint-profile',default='')
     p.add_argument('--odometry-model',choices=['differential','omni'],default='differential')
+    p.add_argument('--gait-profile',choices=['generic','p2-flat-model'],default='generic')
     args=p.parse_args();path=Path(args.output);path.parent.mkdir(parents=True,exist_ok=True)
     if not .03<=args.minimum_speed<=.25:raise ValueError('Minimum speed outside profile range')
-    path.write_text(yaml.safe_dump(config(args.controller,minimum_speed=args.minimum_speed,footprint_vertices=load_footprint(args.footprint_profile) if args.footprint_profile else None,odometry_model=args.odometry_model),sort_keys=False))
+    path.write_text(yaml.safe_dump(config(args.controller,minimum_speed=args.minimum_speed,footprint_vertices=load_footprint(args.footprint_profile) if args.footprint_profile else None,odometry_model=args.odometry_model,gait_profile=args.gait_profile),sort_keys=False))
 if __name__=='__main__':main()

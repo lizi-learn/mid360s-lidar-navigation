@@ -1,0 +1,175 @@
+{
+  "date": "2026-10-30",
+  "release_scope": "experimental simulation and real-sensor preview; physical locomotion not accepted",
+  "versions": {
+    "ROS": "Humble",
+    "Nav2": "1.1.20",
+    "SLAM Toolbox": "2.6.10",
+    "FAST-LIO commit": "cc3c9e8b1469b33b8072764d6db2348ed6dc597f"
+  },
+  "real_motor_or_head_commands": 0,
+  "python_unit_tests": 87,
+  "cpp_contract_executables": 2,
+  "p2_candidate": {
+    "forward_cap_m_s": 0.15,
+    "angular_cap_rad_s": 0.24,
+    "stop_zone_front_m": 1.0,
+    "slow_zone_front_m": 1.42,
+    "xy_tolerance_m": 0.15,
+    "yaw_tolerance_rad": 0.15
+  },
+  "endurance": {
+    "evaluated_s": 483.1000168779865,
+    "samples": 4832,
+    "source_age_s": {
+      "p50": 0.20315468311309814,
+      "p95": 0.20336174964904785,
+      "p99": 0.2034841251373291,
+      "max": 0.33075881004333496
+    },
+    "fresh_fraction": 1.0,
+    "body_error_m": {
+      "p50": 0.010892366654247178,
+      "p95": 0.012452093611199757,
+      "max": 0.013507565284357181
+    },
+    "yaw_error_deg": {
+      "p50": 0.04448665379968061,
+      "p95": 0.0654216401708956,
+      "max": 0.09317229005815723
+    },
+    "observed_support_fraction": 1.0,
+    "hardware_ground_true_samples": 0,
+    "sensor_queue_drops": 0,
+    "protocol_errors": 0,
+    "virtual_neck_range_deg": [
+      [
+        -6.648077387441946,
+        16.006935498451718
+      ],
+      [
+        6.671758954869155,
+        23.94096856652238
+      ]
+    ],
+    "alignment": "One constant SE2 alignment from first2s of this stationary evaluation; no trajectory fit or truth feedback",
+    "scope": "Generated2400rays/frame/200HzIMU through actual FAST-LIO and body kinematics on x86; virtual head geometry, no physical neck inertial coupling or RK3588 full sensor load acceptance"
+  },
+  "three_d_saved_map": {
+    "map_dimensions": [
+      237,
+      198
+    ],
+    "resolution": 0.05000000074505806,
+    "known_cells": 33253,
+    "occupied_cells": 1328
+  },
+  "three_d_saved_map_navigation": {
+    "accepted": true,
+    "goals": [
+      {
+        "status": 4,
+        "world_xy_error_m": 0.050743645341044634,
+        "world_yaw_error_rad": 0.08467731445544002
+      },
+      {
+        "status": 4,
+        "world_xy_error_m": 0.103804299063127,
+        "world_yaw_error_rad": 0.08325697559417478
+      }
+    ],
+    "overlap_samples": 0
+  },
+  "three_d_dynamic_obstacle_navigation": {
+    "accepted": true,
+    "goals": [
+      {
+        "status": 4,
+        "world_xy_error_m": 0.01109762097387362,
+        "world_yaw_error_rad": 0.105247017436092
+      },
+      {
+        "status": 4,
+        "world_xy_error_m": 0.0942486550613915,
+        "world_yaw_error_rad": 0.15058104617600732
+      }
+    ],
+    "overlap_samples": 0,
+    "acknowledged_control_requests": 4,
+    "moving_before_both_injections": true,
+    "stop_and_resume_both": true
+  },
+  "three_d_source_faults": {
+    "passed": true,
+    "checks": 5,
+    "overlap_samples": 0,
+    "scope": "commands zero in >=800ms source-fault and >=1s obstacle observation windows; not physical stopping-distance certification"
+  },
+  "planar_faults": {
+    "passed": true,
+    "checks": 8,
+    "acknowledged_control_requests": 8
+  },
+  "optional_cyclone": {
+    "rmw_version": "1.3.5",
+    "dds_version": "0.10.5",
+    "three_d_saved_map_navigation": [
+      {
+        "status": 4,
+        "world_xy_error_m": 0.1290054821088458,
+        "world_yaw_error_rad": 0.06415553293176224
+      },
+      {
+        "status": 4,
+        "world_xy_error_m": 0.0473696190628621,
+        "world_yaw_error_rad": 0.11376250869165272
+      }
+    ],
+    "overlap_samples": 0,
+    "scope": "Few isolated simulation starts and complete workflow; no physical middleware acceptance"
+  },
+  "console_workflow": {
+    "passed": true,
+    "middleware": "rmw_cyclonedds_cpp",
+    "tested_speed_caps_m_s": [
+      0.1,
+      0.15
+    ],
+    "rejected_speed_m_s": 0.2
+  },
+  "retained_failures": {
+    "higher_speed_3d_obstacle_runs": [
+      {
+        "candidate_forward_cap_m_s": 0.3,
+        "overlap_samples": 20,
+        "accepted": false
+      },
+      {
+        "candidate_forward_cap_m_s": 0.3,
+        "overlap_samples": 62,
+        "accepted": false
+      }
+    ],
+    "low_speed_first_terminal_attempt": {
+      "goals_completed": 1,
+      "goals_requested": 2,
+      "overlap_samples": 0,
+      "accepted": false,
+      "reason": "lattice replanning failed near the target; superseded by collision-checked short-connection retest"
+    },
+    "narrow_blocked_door": {
+      "accepted": false,
+      "acknowledged_64_heading_prototype_goals_completed": 1,
+      "goals_requested": 2,
+      "prototype_shipped": false
+    }
+  },
+  "known_limits": [
+    "Narrow blocked-door scenarios retained failures; larger final stop zone is not accepted as general maze/navigation readiness.",
+    "Several isolated Nav2 bringup attempts did not become Active; output remained zero; successful retries do not prove complete DDS root-cause resolution.",
+    "Some earlier static obstacle controls were not acknowledged; those exploratory results are excluded from current obstacle acceptance.",
+    "64-heading primitive experiment was repaired for upstream vector::reserve error but still failed acknowledged narrow-door navigation; not shipped.",
+    "Virtual head geometry excludes moving-head inertial coupling and self-occlusion; actual mount/time/footprint must be calibrated per robot.",
+    "2400 generated rays/frame and x86 timing do not certify full-density MID-360S on RK3588."
+  ]
+}

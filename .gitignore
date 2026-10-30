@@ -16,3 +16,5 @@ config/MID360S.json
 *.npy
 *.log
 .DS_Store
+config/robot.local.json
+nav_controller_ws/

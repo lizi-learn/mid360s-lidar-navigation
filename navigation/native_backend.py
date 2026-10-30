@@ -5,6 +5,15 @@ the local lease and STATE-line contracts; it is never a physical gait executable
 """
 import math,os,signal,socket,struct,subprocess,tempfile,threading,time
 from pathlib import Path
+from collections import deque
+
+def sensor_sample(line):
+    values=tuple(float(v) for v in line.split()[1:])
+    if not line.startswith('SENSOR ') or len(values)!=16 or not all(math.isfinite(v) for v in values) or values[0]<0:
+        raise ValueError('Invalid 3D backend sample')
+    for offset in (4,11):
+        if not .8<math.sqrt(sum(v*v for v in values[offset:offset+4]))<1.2:raise ValueError('Invalid model quaternion')
+    return values
 
 PACKET=struct.Struct('<IHHQQQfffI')
 class NativeBackend:
@@ -24,14 +33,26 @@ class NativeBackend:
         if os.getenv('P2_NAV_VELOCITY_TRACKING')=='1':
             from gait_velocity import GaitVelocityTracker
             self.tracker=GaitVelocityTracker()
+        self.sensors=deque(maxlen=4096);self.collect_sensors=os.getenv('P2_NAV_COLLECT_3D')=='1';self.dropped_sensor_samples=0;self.protocol_errors=0
         self.lines=[];self.thread=threading.Thread(target=self.read,daemon=True);self.thread.start()
     def read(self):
         for line in self.process.stdout:
-            if line.startswith('STATE '):
-                values=[float(v) for v in line.split()[1:]]
-                if len(values)==8 and all(math.isfinite(v) for v in values):
+            try:
+                if line.startswith('STATE '):
+                    values=[float(v) for v in line.split()[1:]]
+                    if len(values)!=8 or not all(math.isfinite(v) for v in values):raise ValueError('Invalid STATE sample')
                     with self.lock:self.state=values;self.at=time.monotonic()
-            else:self.lines.append(line.strip());self.lines=self.lines[-30:]
+                elif line.startswith('SENSOR '):
+                    values=sensor_sample(line)
+                    if self.collect_sensors:
+                        with self.lock:
+                            if len(self.sensors)==self.sensors.maxlen:self.dropped_sensor_samples+=1
+                            self.sensors.append(values)
+                else:self.lines.append(line.strip());self.lines=self.lines[-30:]
+            except ValueError:self.protocol_errors+=1
+    def drain_sensor_samples(self):
+        with self.lock:
+            samples=list(self.sensors);self.sensors.clear();return samples
     def send(self,v,w):
         now=time.monotonic();dt=now-self.command_at;self.command_at=now
         if self.tracker:

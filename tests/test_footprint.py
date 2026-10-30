@@ -24,3 +24,16 @@ class FootprintTests(unittest.TestCase):
 
  def test_planner_endpoint_tolerance_is_tighter_than_arrival_tolerance(self):
   c=config();self.assertLess(c['planner_server']['ros__parameters']['GridBased']['tolerance'],c['controller_server']['ros__parameters']['goal_checker']['xy_goal_tolerance'])
+
+ def test_p2_routes_reserve_monitor_clearance_without_relaxing_output_limits(self):
+  import json
+  c=config(gait_profile='p2-flat-model');global_shape=json.loads(c['global_costmap']['global_costmap']['ros__parameters']['footprint']);local_shape=json.loads(c['local_costmap']['local_costmap']['ros__parameters']['footprint'])
+  stop=c['collision_monitor']['ros__parameters']['StopZone']['points']
+  self.assertGreaterEqual(max(p[0] for p in global_shape),max(stop[::2]));self.assertGreaterEqual(max(p[1] for p in global_shape),max(stop[1::2]))
+  self.assertLess(max(p[1] for p in local_shape),max(p[1] for p in global_shape))
+  smoother=c['velocity_smoother']['ros__parameters'];self.assertEqual(smoother['max_velocity'][1],0.);self.assertEqual(smoother['min_velocity'][0],0.);self.assertLessEqual(smoother['max_accel'][2],.5)
+  self.assertFalse(c['controller_server']['ros__parameters']['FollowPath']['allow_reversing'])
+  self.assertLessEqual(smoother['max_velocity'][0],.15);self.assertLessEqual(c['controller_server']['ros__parameters']['FollowPath']['desired_linear_vel'],.15)
+  self.assertGreaterEqual(max(stop[::2]),1.0)
+  with self.assertRaises(ValueError):config(gait_profile='p2-flat-model',minimum_speed=.2)
+  with self.assertRaises(ValueError):config(controller='mppi',gait_profile='p2-flat-model')

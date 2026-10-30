@@ -3,6 +3,8 @@ set -euo pipefail
 root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 set +u
 source /opt/ros/humble/setup.bash
+nav_controller_setup="${P2_NAV_CONTROLLER_SETUP:-$root/../nav_controller_ws/install/setup.bash}"
+if [[ -f "$nav_controller_setup" ]]; then source "$nav_controller_setup"; fi
 set -u
 export ROS_LOCALHOST_ONLY=1
 export ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-194}"

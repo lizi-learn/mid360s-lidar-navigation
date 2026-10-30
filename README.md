@@ -8,7 +8,8 @@
 - [前向导航工作台与完整流程](docs/NAVIGATION.md)
 - [双足平地适配、头身变换与三维扫描验证](docs/BIPED.md)
 - [换机与实机操作](docs/MIGRATION.md)
-- [验证结果与已知问题](docs/VALIDATION.md)
+- [本轮持续仿真与迁移验证](docs/VALIDATION_2026-10-30.md)
+- [历史验证与已知问题](docs/VALIDATION.md)
 - [第三方依赖与许可](THIRD_PARTY_NOTICES.md)
 
 ## 能做什么

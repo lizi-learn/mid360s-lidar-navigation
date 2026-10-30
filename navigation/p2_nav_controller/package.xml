@@ -1,0 +1,10 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>p2_nav_controller</name><version>0.4.0</version>
+  <description>Experimental bounded terminal-heading extension for Nav2 Humble RPP.</description>
+  <maintainer email="maintainers@example.invalid">MID360S navigation contributors</maintainer>
+  <license>MIT</license>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <depend>nav2_regulated_pure_pursuit_controller</depend><depend>nav2_core</depend><depend>nav2_smac_planner</depend><depend>pluginlib</depend>
+  <export><build_type>ament_cmake</build_type></export>
+</package>

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """MID-360S live LiDAR map and path preview. No locomotion command publisher."""
-import json, math, threading, time, pathlib, argparse, gzip, signal
+import os, json, math, threading, time, pathlib, argparse, gzip, signal
 from collections import deque
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 import numpy as np
@@ -18,6 +18,8 @@ from survey import Survey
 from localization_health import source_age,pose_discontinuous
 
 ROOT=pathlib.Path(__file__).resolve().parent
+RUNTIME=pathlib.Path(os.getenv('P2_NAV_RUNTIME',str(ROOT/'runtime'))).resolve()
+ROBOT_IDENTITY=None
 LIDAR_IN_IMU=np.array([-.011,-.02329,.04412])
 
 def cloud_xyz(msg):
@@ -37,7 +39,7 @@ class NavigationView(Node):
         self.imu_stamp=None;self.cloud_stamp=None;self.odom_stamp=None;self.previous_odom=None;self.localization_error=""
         self.points=np.empty((0,3))
         self.sensor_xy=[0.,0.];self.sensor_z=None;self.sensor_yaw=0.;self.sensor_pitch=0.;self.path=[];self.goal=None;self.path_state='未选择目标'
-        self.floor_map=FloorMap();self.floor_error='等待雷达惯性建图';self.survey=Survey(ROOT)
+        self.floor_map=FloorMap();self.floor_error='等待雷达惯性建图';self.survey=Survey(ROOT,RUNTIME)
         self.last_map_update=0.;self.initial_tilt=None
         self.static_tf=StaticTransformBroadcaster(self);self.dynamic_tf=TransformBroadcaster(self)
         latched=QoSProfile(depth=1,durability=DurabilityPolicy.TRANSIENT_LOCAL,reliability=ReliabilityPolicy.RELIABLE)
@@ -80,8 +82,8 @@ class NavigationView(Node):
                     q=Rotation.from_matrix(self.rotation).as_quat()
                     t.transform.rotation.x,t.transform.rotation.y,t.transform.rotation.z,t.transform.rotation.w=map(float,q)
                     self.static_tf.sendTransform(t)
-                    (ROOT/'runtime').mkdir(exist_ok=True)
-                    (ROOT/'runtime/map_alignment.json').write_text(json.dumps({'rotation':self.rotation.tolist(),'initial_height_m':self.height,'initial_tilt_deg':self.initial_tilt},indent=2))
+                    RUNTIME.mkdir(parents=True,exist_ok=True)
+                    (RUNTIME/'map_alignment.json').write_text(json.dumps({'rotation':self.rotation.tolist(),'initial_height_m':self.height,'initial_tilt_deg':self.initial_tilt,'robot_identity':ROBOT_IDENTITY},indent=2))
                 except ValueError as e:self.floor_error=str(e);return
             p[:,2]+=self.height
             radius=np.linalg.norm(p[:,:2]-np.array(self.sensor_xy),axis=1)
@@ -114,7 +116,7 @@ class NavigationView(Node):
                     if self.survey.active:self.survey.issues.add(self.localization_error)
                 self.path=[];self.path_state=self.localization_error
                 empty=Path();empty.header.frame_id='map';empty.header.stamp=self.get_clock().now().to_msg();self.path_pub.publish(empty)
-                (ROOT/'runtime/localization-fault.json').write_text(json.dumps({'time':time.time(),'source_stamp':stamp,'before_xy':list(self.previous_odom[1]),'after_xy':p[:2].tolist(),'dt':stamp-self.previous_odom[0],'execution_enabled':False},ensure_ascii=False,indent=2))
+                (RUNTIME/'localization-fault.json').write_text(json.dumps({'time':time.time(),'source_stamp':stamp,'before_xy':list(self.previous_odom[1]),'after_xy':p[:2].tolist(),'dt':stamp-self.previous_odom[0],'execution_enabled':False},ensure_ascii=False,indent=2))
             self.previous_odom=(stamp,p[:2].tolist());self.odom_stamp=stamp
             self.sensor_xy=p[:2].tolist();self.sensor_z=float(p[2])
             orientation=self.rotation@imu_rotation@np.diag([1.,-1.,-1.])
@@ -197,12 +199,20 @@ class NavigationView(Node):
                 'lio_pitch_deg':math.degrees(self.sensor_pitch),
                 'free_cells':np.argwhere(free)[::1].tolist(),'obstacle_cells':np.argwhere(self.floor_map.obstacles).tolist(),
                 'grid':{'resolution':self.floor_map.resolution,'origin':self.floor_map.origin,'origin_xy':self.floor_map.origin_xy.tolist(),'size':self.floor_map.size},
-                'path':self.path,'goal':self.goal,'path_state':self.path_state,'execution_enabled':False,
+                'path':self.path,'goal':self.goal,'path_state':self.path_state,'execution_enabled':False,'robot_name':ROBOT_IDENTITY['name'] if ROBOT_IDENTITY else None,
                 'localization_reference':'雷达地面投影；机身与颈部运动外参待核验',
                 'survey':self.survey.status(),
-                'neck':json.loads((ROOT/'runtime/neck_status.json').read_text()) if (ROOT/'runtime/neck_status.json').is_file() else {'state':'固定安装姿态 · 此程序不控制电机'}}
+                'neck':json.loads((RUNTIME/'neck_status.json').read_text()) if (RUNTIME/'neck_status.json').is_file() else {'state':'固定安装姿态 · 此程序不控制电机'}}
 
 def main():
+    global RUNTIME,ROBOT_IDENTITY
+    selected=os.getenv('P2_NAV_ROBOT_PROFILE',str(ROOT/'config/robot.local.json'))
+    if pathlib.Path(selected).is_file():
+        from robot_profile import load,check_machine,bind_runtime,runtime_path,identity
+        profile=load(selected);check_machine(profile)
+        RUNTIME=bind_runtime(profile,os.getenv('P2_NAV_RUNTIME') or runtime_path(profile,ROOT/'runtime/robots'));ROBOT_IDENTITY=identity(profile)
+    elif os.getenv('P2_NAV_ROBOT_PROFILE'):raise ValueError('Selected robot profile missing')
+    RUNTIME.mkdir(parents=True,exist_ok=True)
     parser=argparse.ArgumentParser();parser.add_argument('--bind',default='127.0.0.1');parser.add_argument('--port',type=int,default=8920);args=parser.parse_args()
     rclpy.init();node=NavigationView();stop=threading.Event()
     def spin():

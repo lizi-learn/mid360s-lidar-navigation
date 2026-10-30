@@ -13,7 +13,7 @@ def main():
             failures=failures+1 if seen and data_stale(s) else 0
             if failures>=3:
                 for k in ('points','free_cells','obstacle_cells'):s.pop(k,None)
-                pathlib.Path(__file__).with_name('runtime').joinpath('last-data-stall.json').write_text(json.dumps(s,ensure_ascii=False,indent=2))
+                pathlib.Path(os.getenv('P2_NAV_RUNTIME',str(pathlib.Path(__file__).with_name('runtime')))).joinpath('last-data-stall.json').write_text(json.dumps(s,ensure_ascii=False,indent=2))
                 print('Sensor data stalled; restarting this preview stack with a new map origin.',flush=True)
                 return 2
         except (OSError,ValueError,KeyError):

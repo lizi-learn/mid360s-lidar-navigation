@@ -25,6 +25,13 @@ class ForwardGate:
             raise ValueError('speed must be finite and between 0.03 and 0.30 m/s')
         self.speed = value
 
+    @staticmethod
+    def command_fault(command):
+        if not all(math.isfinite(x) for x in command):return 'invalid_time_or_command'
+        if abs(command[1])>1e-6:return 'lateral_command_rejected'
+        if command[0]<-1e-6:return 'reverse_command_rejected'
+        return ''
+
     def step(self, command, dt, command_age, scan_age, odom_age,
              ground_ok=True, localized=True, paused=False):
         reason = ''
@@ -36,8 +43,7 @@ class ForwardGate:
         elif min(scan_age, odom_age) < -.05 or max(scan_age, odom_age) > self.limits.sensor_timeout: reason = 'sensor_timeout'
         elif not localized: reason = 'localization_unavailable'
         elif not ground_ok: reason = 'ground_unobserved'
-        elif abs(command[1]) > 1e-6: reason = 'lateral_command_rejected'
-        elif command[0] < -1e-6: reason = 'reverse_command_rejected'
+        elif self.command_fault(command): reason = self.command_fault(command)
         # A stop, collision-monitor zero, cancellation or health fault is immediate.
         # Normal speed changes are acceleration limited; emergency stops are not.
         if reason or abs(command[0]) + abs(command[2]) < 1e-9:

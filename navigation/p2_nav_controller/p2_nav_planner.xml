@@ -1,0 +1,5 @@
+<library path="p2_nav_planner">
+  <class name="p2_nav_controller::ExactHeadingLattice" type="p2_nav_controller::ExactHeadingLattice" base_class_type="nav2_core::GlobalPlanner">
+    <description>Smac lattice plus collision-checked terminal pivot to the requested yaw.</description>
+  </class>
+</library>

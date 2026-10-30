@@ -12,7 +12,8 @@ from geometry_msgs.msg import PoseStamped,PoseWithCovarianceStamped,Twist
 from nav_msgs.msg import OccupancyGrid,Path as RosPath
 from nav2_msgs.action import NavigateToPose,ComputePathToPose
 from nav2_msgs.msg import SpeedLimit
-from slam_toolbox.srv import SaveMap,SerializePoseGraph
+from slam_toolbox.srv import SerializePoseGraph
+from nav2_msgs.srv import SaveMap
 from std_msgs.msg import String
 from tf2_ros import Buffer,TransformListener
 
@@ -20,16 +21,17 @@ ROOT=Path(__file__).resolve().parent
 SAFE_NAME=re.compile(r'[A-Za-z0-9_-]{1,48}\Z')
 
 class Console(Node):
-    def __init__(self,runtime,simulation,minimum_speed,footprint=None,odometry_model='differential'):
+    def __init__(self,runtime,simulation,minimum_speed,footprint=None,odometry_model='differential',gait_profile='generic'):
         super().__init__('navigation_workflow_console')
-        self.runtime=runtime;self.simulation=simulation;self.mode='idle';self.controller='rpp';self.process=None
-        self.minimum_speed=minimum_speed;self.footprint=footprint;self.odometry_model=odometry_model
+        self.robot_name=None;self.runtime=runtime;self.simulation=simulation;self.mode='idle';self.controller='rpp';self.process=None
+        self.minimum_speed=minimum_speed;self.footprint=footprint;self.odometry_model=odometry_model;self.gait_profile=gait_profile
+        self.maximum_speed=.15 if gait_profile=='p2-flat-model' else .30
         self.route_process=None;self.route_directory=None
         self.lock=threading.RLock();self.grid=None;self.path=[];self.gate={};self.truth={};self.goal=None
         self.last_action='等待选择建图或载入地图';self.goal_handle=None;self.feedback={}
         self.goal_generation=0
         self.request_token=secrets.token_urlsafe(24)
-        self.speed_value=.20
+        self.speed_value=min(.20,self.maximum_speed)
         qos=QoSProfile(depth=1,durability=DurabilityPolicy.TRANSIENT_LOCAL,reliability=ReliabilityPolicy.RELIABLE)
         self.create_subscription(OccupancyGrid,'/map',self.on_map,qos)
         self.create_subscription(RosPath,'/plan',lambda m:setattr(self,'path',[[p.pose.position.x,p.pose.position.y] for p in m.poses]),10)
@@ -82,7 +84,7 @@ class Console(Node):
             self.grid=None;self.gate={};self.buffer.clear()
             from configure import config
             import yaml
-            params=self.runtime/'nav2.yaml';params.write_text(yaml.safe_dump(config(controller,minimum_speed=self.minimum_speed,footprint_vertices=self.footprint,odometry_model=self.odometry_model),sort_keys=False))
+            params=self.runtime/'nav2.yaml';params.write_text(yaml.safe_dump(config(controller,minimum_speed=self.minimum_speed,footprint_vertices=self.footprint,odometry_model=self.odometry_model,gait_profile=self.gait_profile),sort_keys=False))
             args=['bash',str(ROOT/'run.sh'),'mode:='+mode,'simulation:='+str(self.simulation).lower(),'params:='+str(params)]
             if mode=='navigation':args+=['map:='+str(map_file)]
             self.process=subprocess.Popen(args,cwd=ROOT,stdout=open(self.runtime/'workflow.log','w'),stderr=subprocess.STDOUT,start_new_session=True)
@@ -105,14 +107,14 @@ class Console(Node):
         if not SAFE_NAME.fullmatch(name):raise ValueError('地图名无效')
         target=self.runtime/'maps'/name;target.mkdir(parents=True,exist_ok=True)
         stem=str(target/'mapped')
-        for service,typ in [('/slam_toolbox/save_map',SaveMap),('/slam_toolbox/serialize_map',SerializePoseGraph)]:
+        for service,typ in [('/map_saver/save_map',SaveMap),('/slam_toolbox/serialize_map',SerializePoseGraph)]:
             client=self.create_client(typ,service)
             if not client.wait_for_service(timeout_sec=5):raise ValueError('建图服务尚未就绪')
             req=typ.Request()
-            if typ is SaveMap:req.name.data=stem
+            if typ is SaveMap:req.map_topic='/map';req.map_url=stem;req.image_format='pgm';req.map_mode='trinary';req.free_thresh=.25;req.occupied_thresh=.65
             else:req.filename=stem
             response=self.wait_future(client.call_async(req),25)
-            if response.result!=0:raise ValueError('地图保存失败')
+            if not (response.result if typ is SaveMap else response.result==0):raise ValueError('地图保存失败')
             self.destroy_client(client)
         self.last_action='地图与位姿图已保存：'+name
         return {'saved':name,'files':[p.name for p in target.iterdir()]}
@@ -138,6 +140,12 @@ class Console(Node):
         if self.mode!='navigation':raise ValueError('请先载入地图进入导航模式')
         pose=self.checked_pose(data)
         if not self.gate.get('localized'):raise ValueError('定位尚未就绪，请先设置初始位置')
+        from lifecycle_msgs.srv import GetState
+        for name in (['planner_server','controller_server','bt_navigator','velocity_smoother','collision_monitor'] if self.simulation else ['planner_server']):
+            client=self.create_client(GetState,'/'+name+'/get_state')
+            try:
+                if not client.wait_for_service(timeout_sec=.2) or self.wait_future(client.call_async(GetState.Request()),2).current_state.id!=3:raise ValueError('导航服务正在初始化，请等待就绪')
+            finally:self.destroy_client(client)
         if not self.simulation:
             if not self.planner.wait_for_server(timeout_sec=3):raise ValueError('规划服务尚未就绪')
             request=ComputePathToPose.Goal();request.goal=pose;request.planner_id='GridBased'
@@ -153,7 +161,7 @@ class Console(Node):
         self.op(armed=True,paused=False,speed=self.speed_value);self.publish_speed()
         goal=NavigateToPose.Goal();goal.pose=pose
         handle=self.wait_future(self.nav.send_goal_async(goal,feedback_callback=self.on_feedback),5)
-        if not handle.accepted:raise ValueError('导航目标被拒绝')
+        if not handle.accepted:self.op(armed=False);raise ValueError('导航目标被拒绝')
         if generation!=self.goal_generation:
             handle.cancel_goal_async();raise ValueError('该目标已被停止或后续请求取代')
         self.goal_handle=handle;self.goal=[data['x'],data['y']];self.last_action='正在导航' if self.simulation else '正在计算实机导航预演（不驱动电机）'
@@ -168,7 +176,7 @@ class Console(Node):
         self.goal_handle=None
     def speed(self,value):
         v=float(value)
-        if not math.isfinite(v) or not self.minimum_speed<=v<=.30:raise ValueError(f'此步态配置的速度范围为 {self.minimum_speed:.2f}–0.30 m/s')
+        if not math.isfinite(v) or not self.minimum_speed<=v<=self.maximum_speed:raise ValueError(f'此步态配置的速度范围为 {self.minimum_speed:.2f}–{self.maximum_speed:.2f} m/s')
         self.speed_value=v;self.publish_speed()
         return {'speed_m_s':v}
     def publish_speed(self):
@@ -186,8 +194,8 @@ class Console(Node):
             pose=[t.transform.translation.x,t.transform.translation.y,math.atan2(2*q.w*q.z,1-2*q.z*q.z)]
         except Exception:pass
         grid=self.grid
-        return {'request_token':self.request_token,'mode':self.mode,'simulation':self.simulation,'controller':self.controller,'message':self.last_action,
-            'minimum_speed':self.minimum_speed,'simulation_kind':'native_dynamics' if os.getenv('P2_NAV_NATIVE_EXEC') else 'planar',
+        return {'robot_name':self.robot_name,'gait_profile':self.gait_profile,'request_token':self.request_token,'mode':self.mode,'simulation':self.simulation,'controller':self.controller,'message':self.last_action,
+            'minimum_speed':self.minimum_speed,'maximum_speed':self.maximum_speed,'simulation_kind':'native_dynamics' if os.getenv('P2_NAV_NATIVE_EXEC') else 'planar',
             'process_alive':self.process is not None and self.process.poll() is None,'gate':self.gate,'pose':pose,
             'map':None if grid is None else {'width':grid.info.width,'height':grid.info.height,'resolution':grid.info.resolution,
                 'origin':[grid.info.origin.position.x,grid.info.origin.position.y],'cells':list(grid.data)},
@@ -201,12 +209,43 @@ def main():
     parser.add_argument('--minimum-speed',type=float,default=.03)
     parser.add_argument('--footprint-profile',default='')
     parser.add_argument('--odometry-model',choices=['differential','omni'],default='differential')
-    parser.add_argument('--runtime',default=str(ROOT.parent/'runtime/workflow'));args=parser.parse_args()
-    runtime=Path(args.runtime).resolve();runtime.mkdir(parents=True,exist_ok=True);(runtime/'maps').mkdir(exist_ok=True)
-    if not .03<=args.minimum_speed<=.25:raise ValueError('Invalid minimum speed profile')
+    parser.add_argument('--gait-handoff',action='store_true');parser.add_argument('--robot-profile',default='')
+    parser.add_argument('--gait-profile',choices=['generic','p2-flat-model'],default='generic')
+    parser.add_argument('--runtime',default='');args=parser.parse_args()
+    if args.gait_handoff or args.gait_profile=='p2-flat-model':os.environ['P2_NAV_GAIT_HANDOFF']='true'
+    selected=args.robot_profile or os.getenv('P2_NAV_ROBOT_PROFILE','')
+    if not selected and not args.simulation and (ROOT.parent/'config/robot.local.json').is_file():selected=str(ROOT.parent/'config/robot.local.json')
+    if selected and args.simulation:raise ValueError('Physical robot profiles are not used by simulation; choose an independent runtime')
+    if selected:
+        import sys
+        sys.path.insert(0,str(ROOT.parent))
+        from robot_profile import load,check_machine,bind_runtime,workflow_paths
+        profile=load(selected);check_machine(profile)
+        if os.getenv('P2_NAV_BODY_CALIBRATION'):
+            from robot_profile import check_calibration
+            check_calibration(profile,json.loads(Path(os.environ['P2_NAV_BODY_CALIBRATION']).read_text()))
+        sensor_runtime,workflow_runtime=workflow_paths(profile,ROOT.parent/'runtime/robots',os.getenv('P2_NAV_RUNTIME',''),args.runtime)
+        bind_runtime(profile,sensor_runtime)
+        runtime=bind_runtime(profile,workflow_runtime)
+        os.environ['P2_NAV_ROBOT_PROFILE']=str(Path(selected).resolve())
+        os.environ.setdefault('P2_LIDAR_ALIGNMENT',str(sensor_runtime/'map_alignment.json'))
+    else:
+        runtime=Path(args.runtime or ROOT.parent/('runtime/simulation/workflow' if args.simulation else 'runtime/workflow')).resolve()
+        if args.simulation:
+            import sys
+            sys.path.insert(0,str(ROOT.parent))
+            from robot_profile import check_simulation_runtime
+            check_simulation_runtime(runtime)
+    runtime.mkdir(parents=True,exist_ok=True);(runtime/'maps').mkdir(exist_ok=True)
+    if not .03<=args.minimum_speed<=(.15 if args.gait_profile=='p2-flat-model' else .25):raise ValueError('Invalid minimum speed profile')
     from footprint import load as load_footprint
     vertices=load_footprint(args.footprint_profile) if args.footprint_profile else None
-    rclpy.init();node=Console(runtime,args.simulation,args.minimum_speed,vertices,args.odometry_model);executor=MultiThreadedExecutor(num_threads=3);executor.add_node(node)
+    if selected and args.footprint_profile:
+        data=json.loads(Path(args.footprint_profile).read_text())
+        if data.get('hardware_verified') is True:
+            from robot_profile import check_calibration
+            check_calibration(profile,data)
+    rclpy.init();node=Console(runtime,args.simulation,args.minimum_speed,vertices,args.odometry_model,args.gait_profile);node.robot_name=profile['name'] if selected else None;executor=MultiThreadedExecutor(num_threads=3);executor.add_node(node)
     thread=threading.Thread(target=executor.spin,daemon=True);thread.start()
     class Handler(BaseHTTPRequestHandler):
         def log_message(self,*a):pass

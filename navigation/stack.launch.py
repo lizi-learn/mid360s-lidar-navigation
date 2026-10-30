@@ -2,7 +2,7 @@
 from pathlib import Path
 import os
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, OpaqueFunction, ExecuteProcess
+from launch.actions import DeclareLaunchArgument, OpaqueFunction, ExecuteProcess, TimerAction
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 import yaml
@@ -14,16 +14,19 @@ def setup(context):
     assert mode in ('mapping','navigation')
     common={'use_sim_time':False}
     nodes=[]
-    if simulation:
-        shape=yaml.safe_load(Path(params).read_text())['global_costmap']['global_costmap']['ros__parameters']['footprint']
-        nodes.append(ExecuteProcess(cmd=['/usr/bin/python3','-S',str(root/'sim_world.py')],additional_env={'P2_NAV_FOOTPRINT':shape},output='screen'))
-    else:
+    if get('simulation_sensor_fixture')=='true' and not simulation:raise ValueError('External simulation sensors require simulation mode')
+    if simulation and get('simulation_sensor_fixture')!='true':
+        shape=yaml.safe_load(Path(params).read_text())['local_costmap']['local_costmap']['ros__parameters']['footprint']
+        sim_env={'P2_NAV_FOOTPRINT':shape}
+        if get('gait_handoff')=='true':sim_env['P2_NAV_VELOCITY_WINDOW']=os.getenv('P2_NAV_VELOCITY_WINDOW','.4')
+        nodes.append(ExecuteProcess(cmd=['/usr/bin/python3','-S',str(root/'sim_world.py')],additional_env=sim_env,output='screen'))
+    elif not simulation:
         alignment=get('alignment')
         assert Path(alignment).is_file(),'Live preview needs the running sensor gravity-alignment file'
         nodes.append(ExecuteProcess(cmd=['/usr/bin/python3','-S',str(root/'live_adapter.py'),
-            '--alignment',alignment,'--body-reference',get('body_reference'),'--source-domain',get('source_domain'),'--target-domain',os.getenv('ROS_DOMAIN_ID','194')],output='screen'))
+            '--alignment',alignment,'--robot-profile',get('robot_profile'),'--body-reference',get('body_reference'),'--source-domain',get('source_domain'),'--target-domain',os.getenv('ROS_DOMAIN_ID','194')],output='screen'))
     nodes.append(ExecuteProcess(cmd=['/usr/bin/python3','-S',str(root/'gate_node.py'),'--ros-args',
-        '-p','simulation:='+str(simulation).lower(),'-p','require_localization:='+str(mode=='navigation').lower()],output='screen'))
+        '-p','simulation:='+str(simulation).lower(),'-p','gait_handoff:='+get('gait_handoff'),'-p','require_localization:='+str(mode=='navigation').lower()],output='screen'))
     if mode=='mapping':
         slam={'use_sim_time':False,'solver_plugin':'solver_plugins::CeresSolver','ceres_linear_solver':'SPARSE_NORMAL_CHOLESKY',
             'ceres_preconditioner':'SCHUR_JACOBI','ceres_trust_strategy':'LEVENBERG_MARQUARDT','ceres_dogleg_type':'TRADITIONAL_DOGLEG',
@@ -43,13 +46,14 @@ def setup(context):
             'coarse_search_angle_offset':.349,'coarse_angle_resolution':.0349,'minimum_angle_penalty':.9,
             'minimum_distance_penalty':.5,'use_response_expansion':True}
         nodes.append(Node(package='slam_toolbox',executable='async_slam_toolbox_node',name='slam_toolbox',parameters=[slam],output='screen'))
-        navigation=['velocity_smoother','collision_monitor']
+        nodes.append(Node(package='nav2_map_server',executable='map_saver_server',name='map_saver',parameters=[dict(use_sim_time=False,save_map_timeout=5.,map_subscribe_transient_local=True,free_thresh_default=.25,occupied_thresh_default=.65)],output='screen'))
+        navigation=['map_saver','velocity_smoother','collision_monitor']
     else:
         assert map_file and Path(map_file).is_file(),'Navigation needs a saved map'
         nodes += [Node(package='nav2_map_server',executable='map_server',name='map_server',parameters=[params,{'yaml_filename':map_file}],output='screen'),
                   Node(package='nav2_amcl',executable='amcl',name='amcl',parameters=[params,{'set_initial_pose':simulation}],output='screen'),
-                  Node(package='nav2_lifecycle_manager',executable='lifecycle_manager',name='lifecycle_manager_localization',
-                       parameters=[{'use_sim_time':False,'autostart':True,'node_names':['map_server','amcl'],'bond_timeout':4.}],output='screen')]
+                  TimerAction(period=3.,actions=[Node(package='nav2_lifecycle_manager',executable='lifecycle_manager',name='lifecycle_manager_localization',
+                       parameters=[{'use_sim_time':False,'autostart':True,'node_names':['map_server','amcl'],'bond_timeout':4.}],output='screen')])]
         for package,executable in [('nav2_planner','planner_server'),('nav2_controller','controller_server'),
                                    ('nav2_behaviors','behavior_server'),('nav2_bt_navigator','bt_navigator')]:
             nodes.append(Node(package=package,executable=executable,name=executable,parameters=[params],
@@ -58,13 +62,16 @@ def setup(context):
     nodes += [Node(package='nav2_velocity_smoother',executable='velocity_smoother',name='velocity_smoother',parameters=[params],
                    remappings=[('cmd_vel','/p2_nav/cmd_raw'),('cmd_vel_smoothed','/p2_nav/cmd_smooth')],output='screen'),
               Node(package='nav2_collision_monitor',executable='collision_monitor',name='collision_monitor',parameters=[params],output='screen'),
-              Node(package='nav2_lifecycle_manager',executable='lifecycle_manager',name='lifecycle_manager_navigation',
-                   parameters=[{'use_sim_time':False,'autostart':True,'node_names':navigation,'bond_timeout':4.}],output='screen')]
+              TimerAction(period=6.,actions=[Node(package='nav2_lifecycle_manager',executable='lifecycle_manager',name='lifecycle_manager_navigation',
+                   parameters=[{'use_sim_time':False,'autostart':True,'node_names':navigation,'bond_timeout':4.}],output='screen')])]
     return nodes
 
 def generate_launch_description():
     return LaunchDescription([DeclareLaunchArgument('mode',default_value='navigation'),
+        DeclareLaunchArgument('simulation_sensor_fixture',default_value='false'),
+        DeclareLaunchArgument('gait_handoff',default_value=os.getenv('P2_NAV_GAIT_HANDOFF','false')),
         DeclareLaunchArgument('simulation',default_value='false'),DeclareLaunchArgument('params'),
+        DeclareLaunchArgument('robot_profile',default_value=os.getenv('P2_NAV_ROBOT_PROFILE','')),
         DeclareLaunchArgument('body_reference',default_value=os.getenv('P2_NAV_BODY_CALIBRATION','')),
         DeclareLaunchArgument('map',default_value=''),DeclareLaunchArgument('source_domain',default_value='188'),
         DeclareLaunchArgument('alignment',default_value=os.getenv('P2_LIDAR_ALIGNMENT',str(Path(__file__).resolve().parents[1]/'runtime/map_alignment.json'))),

@@ -22,3 +22,10 @@ The GPL v2 text is provided in `LICENSES/GPL-2.0.txt`. Apply the patch to the ex
 FAST-LIO revision in `dependencies.lock.json`. If distributing the patched
 algorithm or a binary, comply with its upstream license and source obligations;
 the MIT application license does not replace them.
+
+The optional `navigation/p2_nav_controller` package contains this project's own
+Nav2 Humble extensions. It links to separately installed RPP and Smac packages
+from Nav2 1.1.20; their Apache-2.0 notices and upstream licenses remain applicable.
+No robot vendor source, model mesh or policy weight is included.
+
+可选通信实现使用 ROS Humble 的 [rmw_cyclonedds](https://github.com/ros2/rmw_cyclonedds) 与 [Eclipse Cyclone DDS](https://github.com/eclipse-cyclonedds/cyclonedds) 系统包；不随本源码包分发，使用时保留各上游许可。

@@ -35,10 +35,14 @@ class World(Node):
         self.grid=make_world();self.x=2.;self.y=2.5;self.yaw=0.;self.cmd=(0.,0.);self.cmd_at=0.
         self.last=time.monotonic();self.start=self.last;self.collision_count=0;self.travel=0.;self.path=[]
         self.native=None
+        self.velocity=None
+        if os.getenv('P2_NAV_VELOCITY_WINDOW'):
+            from odometry_velocity import PlanarVelocity
+            self.velocity=PlanarVelocity(window=float(os.environ['P2_NAV_VELOCITY_WINDOW']))
         if os.environ.get('P2_NAV_NATIVE_EXEC'):
             from native_backend import NativeBackend
             self.native=NativeBackend()
-        self.drop_scan=False;self.drop_odom=False;self.ground_ok=True;self.obstacle=None;self.pause=False
+        self.drop_scan=False;self.drop_odom=False;self.ground_ok=True;self.obstacle=None;self.pause=False;self.control_id=''
         self.odom=self.create_publisher(Odometry,'/odom',10)
         self.scan=self.create_publisher(LaserScan,'/scan',qos_profile_sensor_data)
         self.truth=self.create_publisher(String,'/p2_nav/sim_truth',10)
@@ -59,6 +63,7 @@ class World(Node):
             if k in v:setattr(self,k,bool(v[k]))
         if 'obstacle' in v:self.obstacle=v['obstacle']
         if 'pose' in v:self.x,self.y,self.yaw=map(float,v['pose'])
+        if isinstance(v.get('control_id'),str):self.control_id=v['control_id']
     def occupied(self,x,y):
         ix=np.clip((x/RES).astype(int),0,self.grid.shape[1]-1)
         iy=np.clip((y/RES).astype(int),0,self.grid.shape[0]-1)
@@ -92,6 +97,12 @@ class World(Node):
                 v=w=0.
             else:self.travel+=math.hypot(x-self.x,y-self.y);self.x,self.y,self.yaw=x,y,yaw
         stamp=self.get_clock().now().to_msg()
+        if self.velocity:
+            try:filtered=self.velocity.update(stamp.sec+stamp.nanosec*1e-9,(self.x,self.y,self.yaw))
+            except ValueError:filtered=None
+            if filtered is None:
+                b=Bool();b.data=False;self.ground.publish(b);return
+            v,actual_vy,w=filtered
         if not self.drop_odom:
             t=TransformStamped();t.header.stamp=stamp;t.header.frame_id='odom';t.child_frame_id='base_link'
             t.transform.translation.x=self.x;t.transform.translation.y=self.y
@@ -117,6 +128,7 @@ class World(Node):
             scan.angle_min=-math.pi;scan.angle_increment=2*math.pi/360;scan.angle_max=scan.angle_min+359*scan.angle_increment
             scan.range_min=.12;scan.range_max=14.;scan.scan_time=.1;scan.ranges=ranges.astype(float).tolist();self.scan.publish(scan)
         msg=String();msg.data=json.dumps({'pose':[self.x,self.y,self.yaw],'collision_attempts':self.collision_count,
+            'controls':{'control_id':self.control_id,'drop_scan':self.drop_scan,'drop_odom':self.drop_odom,'ground_ok':self.ground_ok,'pause':self.pause,'obstacle':self.obstacle},
             'travelled_m':self.travel,'command':self.cmd,'elapsed_s':time.monotonic()-self.start,
             'simulation':'native dynamics + ray-cast scan' if self.native else 'planar kinematics + ray-cast scan; not a humanoid dynamics validation'})
         self.truth.publish(msg)

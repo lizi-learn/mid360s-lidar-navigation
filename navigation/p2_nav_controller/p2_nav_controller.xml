@@ -1,0 +1,5 @@
+<library path="p2_nav_controller">
+  <class name="p2_nav_controller::SettledGoalRPP" type="p2_nav_controller::SettledGoalRPP" base_class_type="nav2_core::Controller">
+    <description>Humble RPP with terminal heading retained across same-goal replans, bounded by pose drift and control freshness.</description>
+  </class>
+</library>

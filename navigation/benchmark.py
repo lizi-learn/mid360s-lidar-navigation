@@ -9,7 +9,8 @@ from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped, Twist
 from nav_msgs.msg import OccupancyGrid
 from nav2_msgs.action import NavigateToPose, ComputePathToPose
 from nav2_msgs.msg import SpeedLimit
-from slam_toolbox.srv import SaveMap, SerializePoseGraph
+from slam_toolbox.srv import SerializePoseGraph
+from nav2_msgs.srv import SaveMap
 from std_msgs.msg import String
 
 def angle(x):return (x+math.pi)%(2*math.pi)-math.pi
@@ -18,7 +19,7 @@ class Bench(Node):
     def __init__(self):
         super().__init__('navigation_validation_client')
         self.truth={};self.gate={};self.map=None;self.amcl=None
-        self.commands=[];self.events=[];self.gate_history=[];self.raw=[]
+        self.commands=[];self.events=[];self.gate_history=[];self.raw=[];self.control_receipts=[]
         self.create_subscription(String,'/p2_nav/sim_truth',lambda m:setattr(self,'truth',json.loads(m.data)),10)
         self.create_subscription(String,'/p2_nav/gate_status',self.on_gate,10)
         self.create_subscription(Twist,'/p2_nav/cmd_safe',self.on_command,100)
@@ -26,7 +27,7 @@ class Bench(Node):
         from rclpy.qos import QoSProfile,DurabilityPolicy,ReliabilityPolicy
         qos=QoSProfile(depth=1,durability=DurabilityPolicy.TRANSIENT_LOCAL,reliability=ReliabilityPolicy.RELIABLE)
         self.create_subscription(OccupancyGrid,'/map',lambda m:setattr(self,'map',m),qos)
-        self.create_subscription(PoseWithCovarianceStamped,'/amcl_pose',lambda m:setattr(self,'amcl',m),10)
+        self.create_subscription(PoseWithCovarianceStamped,'/amcl_pose',lambda m:setattr(self,'amcl',m),qos)
         self.operator=self.create_publisher(String,'/p2_nav/operator',10)
         self.sim=self.create_publisher(String,'/p2_nav/sim_control',10)
         self.twist=self.create_publisher(Twist,'/p2_nav/cmd_raw',10)
@@ -40,13 +41,42 @@ class Bench(Node):
     def wait(self,seconds):
         end=time.monotonic()+seconds
         while time.monotonic()<end:rclpy.spin_once(self,timeout_sec=min(.05,max(0.,end-time.monotonic())))
+    def wait_ready(self,navigation=True,timeout=45):
+        from lifecycle_msgs.srv import GetState
+        names=['velocity_smoother','collision_monitor']+(['map_server','amcl','planner_server','controller_server','bt_navigator'] if navigation else ['map_saver'])
+        clients=[self.create_client(GetState,'/'+name+'/get_state') for name in names]
+        deadline=time.monotonic()+timeout
+        try:
+            while time.monotonic()<deadline:
+                if all(c.service_is_ready() for c in clients):
+                    futures=[c.call_async(GetState.Request()) for c in clients];end=min(deadline,time.monotonic()+1.)
+                    while time.monotonic()<end and not all(f.done() for f in futures):self.wait(.05)
+                    active=all(f.done() and f.result() and f.result().current_state.id==3 for f in futures)
+                    if active and self.truth and self.gate.get('simulation') is True and (self.gate.get('localized') if navigation else self.map is not None):return
+                self.wait(.2)
+            raise RuntimeError('Simulation stack did not become active/localized before validation')
+        finally:
+            for client in clients:self.destroy_client(client)
     def future(self,f,timeout=10):
         end=time.monotonic()+timeout
         while not f.done() and time.monotonic()<end:rclpy.spin_once(self,timeout_sec=.05)
         if not f.done():raise TimeoutError('ROS future timed out')
         return f.result()
-    def publish(self,publisher,values):
-        msg=String();msg.data=json.dumps(values);publisher.publish(msg)
+    def publish(self,publisher,values,require_ack=True):
+        payload=dict(values)
+        if publisher is self.sim and require_ack:
+            deadline=time.monotonic()+3
+            while publisher.get_subscription_count()<1 and time.monotonic()<deadline:self.wait(.02)
+            if publisher.get_subscription_count()<1:raise RuntimeError('Simulation control has no matched receiver')
+            payload['control_id']=format(time.monotonic_ns(),'x')
+        msg=String();msg.data=json.dumps(payload);publisher.publish(msg)
+        if publisher is self.sim and require_ack:
+            deadline=time.monotonic()+3
+            while time.monotonic()<deadline:
+                self.wait(.02);state=self.truth.get('controls',{})
+                if state.get('control_id')==payload['control_id'] and all(state.get(k)==v for k,v in values.items()):
+                    self.control_receipts.append({'request_id':payload['control_id'],'requested':dict(values),'confirmed':True});return
+            raise RuntimeError('Simulator did not confirm the requested control state')
     def arm(self,speed=.25):
         self.publish(self.operator,{'armed':True,'paused':False,'speed':speed})
         limit=SpeedLimit();limit.percentage=False;limit.speed_limit=speed;self.speed_pub.publish(limit)
@@ -76,10 +106,10 @@ class Bench(Node):
               'truth_yaw_error_rad':abs(angle(truth[2]-goal[2])),'truth_pose':truth,'gate':self.gate}
         self.event('navigation_result',**item);return item
 
-def mapping(bench,directory):
-    bench.wait(4);bench.arm(.25)
+def mapping(bench,directory,targets=None):
+    bench.wait_ready(navigation=False);bench.arm(.25)
     assert bench.truth,'Simulator did not publish truth'
-    start=bench.truth['pose'];targets=[(4.5,2.5),(4.5,4.),(2.,4.),(2.,2.5)]
+    start=bench.truth['pose'];targets=targets or [(4.,2.5),(4.,3.5),(2.,3.5),(2.,2.5)]
     for tx,ty in targets:
         end=time.monotonic()+80
         while time.monotonic()<end:
@@ -97,12 +127,13 @@ def mapping(bench,directory):
         cmd.angular.z=max(-.30,min(.30,err*1.8));bench.twist.publish(cmd)
     bench.twist.publish(Twist());bench.wait(3)
     directory=Path(directory);directory.mkdir(parents=True,exist_ok=True);stem=str(directory/'mapped')
-    for service,typ in [('/slam_toolbox/save_map',SaveMap),('/slam_toolbox/serialize_map',SerializePoseGraph)]:
+    for service,typ in [('/map_saver/save_map',SaveMap),('/slam_toolbox/serialize_map',SerializePoseGraph)]:
         client=bench.create_client(typ,service);assert client.wait_for_service(timeout_sec=15.)
         req=typ.Request()
-        if typ==SaveMap:req.name.data=stem
+        if typ==SaveMap:req.map_topic='/map';req.map_url=stem;req.image_format='pgm';req.map_mode='trinary';req.free_thresh=.25;req.occupied_thresh=.65
         else:req.filename=stem
         response=bench.future(client.call_async(req),20)
+        if not (response.result if typ==SaveMap else response.result==0):raise RuntimeError('Map save failed: '+service)
         bench.event('map_saved',service=service,result=int(response.result))
     grid=bench.map
     assert grid and (directory/'mapped.yaml').is_file() and (directory/'mapped.pgm').is_file()
@@ -114,8 +145,8 @@ def mapping(bench,directory):
         'closed_route_yaw_error_rad':abs(angle(final[2]-start[2])),
         'artifacts':[p.name for p in directory.iterdir()],'truth':bench.truth}
 
-def navigation(bench):
-    bench.wait(6)
+def navigation(bench,inject_faults=True):
+    bench.wait_ready()
     assert bench.truth,'Simulator unavailable'
     bench.arm(.25);bench.wait(2)
     results=[]
@@ -148,7 +179,7 @@ def navigation(bench):
             bad=Twist();bad.linear.x=.1;bad.linear.y=.08;b.inject.publish(bad);b.wait(.07)
         rejected=any(s.get('reason')=='lateral_command_rejected' for t,s in b.gate_history if t>=begin)
         b.event('lateral_fault_rejected',passed=rejected and all(abs(c[2])<1e-8 for c in b.commands if c[0]>=begin))
-    results.append(bench.navigate([9.3,2.5,0.],timeout=95,inject=speed_and_faults))
+    results.append(bench.navigate([9.3,2.5,0.],timeout=95,inject=speed_and_faults if inject_faults else None))
     # A goal behind the base must be reached by turning then moving forward.
     results.append(bench.navigate([7.2,2.2,math.pi],timeout=95))
     bench.publish(bench.operator,{'armed':False});bench.wait(.3)
@@ -161,17 +192,63 @@ def navigation(bench):
         'safe_command_messages':len(bench.commands),'truth':bench.truth,'raw_commands':bench.raw,
         'physics_scope':bench.truth.get('simulation','unknown')+'; no physical robot acceptance'}
 
+def faults(bench):
+    """Test fault gates from established motion, independently of goal completion."""
+    b=bench;b.wait_ready();assert b.truth,'Simulator unavailable'
+    if not b.gate.get('localized'):raise RuntimeError('Localization unavailable; fault checks were not exercised')
+    drive={'active':True}
+    def tick():
+        if drive['active']:
+            cmd=Twist();cmd.linear.x=.12;b.twist.publish(cmd)
+    timer=b.create_timer(.05,tick)
+    def establish():
+        b.arm(.20);end=time.monotonic()+5
+        while time.monotonic()<end:
+            b.wait(.05)
+            recent=[c for c in b.commands if c[0]>time.monotonic()-.2]
+            if len(recent)>=3 and all(abs(c[1])+abs(c[3])>.005 for c in recent[-3:]):return True
+        return False
+    try:
+        exercised=establish();b.arm(.10);b.wait(1.2);cut=time.monotonic();b.wait(.5)
+        values=[abs(c[1]) for c in b.commands if c[0]>=cut]
+        b.event('speed_cap',exercised=exercised,passed=exercised and bool(values) and .02<max(values)<=.100001,observed_max=max(values,default=0.))
+        for name,control,duration,settle in [('ground_missing_stop','ground_ok',.45,.15),('scan_dropout_stop','drop_scan',.85,.65),('odometry_dropout_stop','drop_odom',.85,.65)]:
+            exercised=establish();b.publish(b.sim,{control:False if control=='ground_ok' else True});start=time.monotonic();b.wait(duration)
+            samples=[c for c in b.commands if c[0]>start+settle]
+            b.event(name,exercised=exercised,passed=exercised and bool(samples) and all(abs(c[1])+abs(c[3])<1e-8 for c in samples))
+            b.publish(b.sim,{control:True if control=='ground_ok' else False});b.wait(.3)
+        exercised=establish();x,y,yaw=b.truth['pose'];b.publish(b.sim,{'obstacle':[x+.70*math.cos(yaw),y+.70*math.sin(yaw),.12]});start=time.monotonic();b.wait(.8)
+        samples=[c for c in b.commands if c[0]>start+.3]
+        b.event('dynamic_obstacle_stop',exercised=exercised,passed=exercised and bool(samples) and all(abs(c[1])+abs(c[3])<1e-8 for c in samples))
+        b.publish(b.sim,{'obstacle':None});b.wait(.3)
+        for name,v,y,reason in [('lateral_fault_rejected',.1,.08,'lateral_command_rejected'),('reverse_fault_rejected',-.1,0.,'reverse_command_rejected')]:
+            exercised=establish();start=time.monotonic()
+            for _ in range(35):
+                cmd=Twist();cmd.linear.x=v;cmd.linear.y=y;b.inject.publish(cmd);b.wait(.02)
+            rejected=any(state.get('reason')==reason for t,state in b.gate_history if t>=start)
+            samples=[c for c in b.commands if c[0]>=start]
+            b.event(name,exercised=exercised,passed=exercised and rejected and bool(samples) and all(c[1]>=0 and abs(c[2])<1e-8 for c in samples))
+        exercised=establish();b.publish(b.operator,{'paused':True});start=time.monotonic();b.wait(.3)
+        samples=[c for c in b.commands if c[0]>start+.1]
+        b.event('operator_pause_stop',exercised=exercised,passed=exercised and bool(samples) and all(abs(c[1])+abs(c[3])<1e-8 for c in samples))
+    finally:
+        drive['active']=False;b.destroy_timer(timer);b.twist.publish(Twist());b.publish(b.operator,{'armed':False});b.wait(.3)
+        for key,value in [('ground_ok',True),('drop_scan',False),('drop_odom',False),('obstacle',None)]:b.publish(b.sim,{key:value},require_ack=False)
+    return {'workflow':'actual smoother + collision monitor + command gate during bounded forward drive; independent of navigation goal arrival','all_fault_checks_passed':bool(b.events) and all(e.get('passed') is True for e in b.events),'events':b.events,'truth':b.truth,'scope':'output command checks; no physical stopping-distance or gait balance certification'}
+
+
 def main():
-    p=argparse.ArgumentParser();p.add_argument('mode',choices=['mapping','navigation']);p.add_argument('--directory',required=True)
+    p=argparse.ArgumentParser();p.add_argument('mode',choices=['mapping','navigation','faults']);p.add_argument('--directory',required=True);p.add_argument('--no-fault-injection',action='store_true')
     args=p.parse_args();rclpy.init();bench=Bench();report={}
     try:
-        report=mapping(bench,args.directory) if args.mode=='mapping' else navigation(bench)
+        report=mapping(bench,args.directory) if args.mode=='mapping' else faults(bench) if args.mode=='faults' else navigation(bench,not args.no_fault_injection)
     except Exception as e:
         report={'error_type':type(e).__name__,'error':str(e),'events':bench.events,'truth':bench.truth,'gate':bench.gate}
         raise
     finally:
         bench.publish(bench.operator,{'armed':False});bench.twist.publish(Twist())
         report['gate_history']=bench.gate_history[-100:]
+        report['control_receipts']=bench.control_receipts
         report['commands']=bench.commands
         target=Path(args.directory);target.mkdir(parents=True,exist_ok=True)
         (target/(args.mode+'-report.json')).write_text(json.dumps(report,indent=2)+'\n')

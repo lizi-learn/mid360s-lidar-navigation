@@ -17,6 +17,7 @@ from geometry_msgs.msg import TransformStamped
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import PointCloud2,LaserScan,JointState
 from biped_reference import BodyReference,rigid
+from odometry_velocity import PlanarVelocity
 from std_msgs.msg import Bool,String
 from tf2_ros import TransformBroadcaster,StaticTransformBroadcaster
 from terrain import local_floor,classify,observed_front_support
@@ -32,8 +33,17 @@ class Adapter:
     def __init__(self,args):
         self.lock=threading.Lock();self.cloud=None;self.odom=None;self.processed_stamp=None
         self.alignment_path=Path(args.alignment);self.alignment_mtime=self.alignment_path.stat().st_mtime_ns
-        self.reference_fault='';self.previous=None
-        alignment=json.loads(Path(args.alignment).read_text());self.rotation=np.asarray(alignment['rotation'])
+        self.reference_fault='';self.previous=None;self.velocity=PlanarVelocity(window=getattr(args,'velocity_window',.4))
+        alignment=json.loads(Path(args.alignment).read_text())
+        selected=getattr(args,'robot_profile','')
+        if selected:
+            import sys
+            sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
+            from robot_profile import load,check_machine,identity,check_calibration
+            profile=load(selected);check_machine(profile)
+            if alignment.get('robot_identity')!=identity(profile):raise ValueError('Sensor alignment belongs to another robot/installation')
+            if args.body_reference:check_calibration(profile,json.loads(Path(args.body_reference).read_text()))
+        self.rotation=np.asarray(alignment['rotation'])
         self.initial_height=float(alignment['initial_height_m'])
         if self.rotation.shape!=(3,3) or not np.allclose(self.rotation@self.rotation.T,np.eye(3),atol=1e-4):raise ValueError('Invalid gravity alignment')
         self.source_context=Context();self.sink_context=Context()
@@ -47,7 +57,7 @@ class Adapter:
         self.source.create_subscription(Odometry,'/Odometry',self.on_odom,qos_profile_sensor_data)
         self.odom_pub=self.sink.create_publisher(Odometry,'/odom',10)
         self.scan_pub=self.sink.create_publisher(LaserScan,'/scan',qos_profile_sensor_data)
-        self.ground_pub=self.sink.create_publisher(Bool,'/p2_nav/ground_ok',10)
+        self.ground_pub=self.sink.create_publisher(Bool,getattr(args,'ground_topic','/p2_nav/ground_ok'),10)
         self.status_pub=self.sink.create_publisher(String,'/p2_nav/terrain_status',10)
         self.tf=TransformBroadcaster(self.sink);self.static=StaticTransformBroadcaster(self.sink)
         t=TransformStamped();t.header.frame_id='base_link';t.child_frame_id='laser';t.transform.rotation.w=1.;self.static.sendTransform(t)
@@ -102,9 +112,14 @@ class Adapter:
                 self.ground_pub.publish(ground);return
         self.previous=(stamp(odom),origin[:2].copy())
         yaw=math.atan2(orientation[1,0],orientation[0,0])
+        try:velocity=self.velocity.update(stamp(odom),(origin[0],origin[1],yaw))
+        except ValueError as e:
+            self.reference_fault='invalid navigation velocity: '+str(e);self.ground_pub.publish(ground);return
+        if velocity is None:self.ground_pub.publish(ground);return
         t=TransformStamped();t.header.stamp=odom.header.stamp;t.header.frame_id='odom';t.child_frame_id='base_link'
         t.transform.translation.x=float(origin[0]);t.transform.translation.y=float(origin[1]);t.transform.rotation.z=math.sin(yaw/2);t.transform.rotation.w=math.cos(yaw/2);self.tf.sendTransform(t)
         out=Odometry();out.header=t.header;out.child_frame_id='base_link';out.pose.pose.position.x=float(origin[0]);out.pose.pose.position.y=float(origin[1]);out.pose.pose.orientation=t.transform.rotation
+        out.twist.twist.linear.x,out.twist.twist.linear.y,out.twist.twist.angular.z=velocity
         self.odom_pub.publish(out)
         if self.processed_stamp==stamp(cloud):return
         self.processed_stamp=stamp(cloud)
@@ -127,7 +142,7 @@ class Adapter:
             ground.data=observed and (verified if self.body_reference else True);self.ground_pub.publish(ground)
             report.update(ground_ok=ground.data,finite_scan_bins=int(np.isfinite(output).sum()),
                 source_age_s=now-stamp(cloud),base_reference='timestamped body kinematics' if self.body_reference else 'uncalibrated lidar ground projection',
-                body_reference_ready=verified,kinematic_feedback_ready=bool(self.body_reference),observed_front_support=observed,hardware_execution_enabled=False)
+                body_reference_ready=verified,kinematic_feedback_ready=bool(self.body_reference),velocity_ready=True,velocity_window_s=self.velocity.window,observed_front_support=observed,hardware_execution_enabled=False)
         except ValueError as e:
             self.ground_pub.publish(ground);report={'error':str(e),'ground_ok':False,'hardware_execution_enabled':False}
         msg=String();msg.data=json.dumps(report);self.status_pub.publish(msg)
@@ -141,5 +156,5 @@ class Adapter:
 
 if __name__=='__main__':
     p=argparse.ArgumentParser();p.add_argument('--source-domain',type=int,default=188);p.add_argument('--target-domain',type=int,default=194);p.add_argument('--alignment',required=True)
-    p.add_argument('--body-reference',default='')
+    p.add_argument('--ground-topic',default='/p2_nav/ground_ok');p.add_argument('--robot-profile',default='');p.add_argument('--body-reference',default='');p.add_argument('--velocity-window',type=float,default=.4)
     Adapter(p.parse_args()).run()

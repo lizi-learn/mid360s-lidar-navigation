@@ -46,7 +46,7 @@ bash navigation/console.sh --simulation
 2. 点击“运行仿真建图路线并保存”。模拟机器人沿前向路线运动并转向，结束后保存 `mapped.pgm`、`mapped.yaml`、`mapped.posegraph` 和 `mapped.data`。
 3. 选择已保存地图，点击“载入地图，进入导航”。默认仿真起点为已知的 `(2, 2.5, 0)`；实际部署不能假设机器人每次都在这个位置。
 4. 点击已观察的空白地面选目标，调整到达朝向，点击“导航到选点”。页面显示路径、位置、速度指令和定位状态。
-5. 速度滑块设定的是**上限**，默认 0.20 m/s、通用范围 0.03–0.30 m/s；实际执行速度还受转弯、障碍和模型限制。点击“停止并取消目标”立即撤销授权并取消目标。
+5. 速度滑块设定的是**上限**，默认 0.20 m/s、通用范围 0.03–0.30 m/s；显式选择 `p2-flat-model` 时上限为 0.15 m/s；实际执行速度还受转弯、障碍和模型限制。点击“停止并取消目标”立即撤销授权并取消目标。
 
 地图与日志默认保存在 `runtime/workflow/`。切换模式会停止本页面启动的进程；停止服务也会终止其仿真和建图路线。没有安装导航依赖时，原有的纯 Python 合成演示仍可使用。
 
@@ -69,7 +69,7 @@ bash navigation/console.sh
 
 链路：`cmd_raw → velocity_smoother → cmd_smooth → collision_monitor → cmd_collision → ForwardGate → cmd_safe/preview`。
 
-- 最大前进 0.30 m/s、角速度 0.35 rad/s；加速度 0.15 m/s²，减速度 0.30 m/s²，角加速度 0.5 rad/s²。
+- 通用配置最大前进 0.30 m/s、角速度 0.35 rad/s；P2 模型候选配置为 0.15 m/s、0.24 rad/s；加速度 0.15 m/s²，减速度 0.30 m/s²，角加速度 0.5 rad/s²。
 - 命令超时 0.30 s；扫描或里程计超过 0.50 s、定位无效、地面缺失、暂停或取消目标均立即输出零。
 - 缩放线速度与角速度时保持曲率；最终门拒绝侧向、倒退、无穷数及无效时间。
 - `velocity_contract.hpp` 定义独立 C++ 消费协议：48 字节、单调时间、实例号、序列号和 300 ms 租约。检查健康、标定、步态状态、导航授权以及急停/人工控制优先级。它不打开串口或共享内存，也不等于已接入厂商整机程序。
@@ -94,3 +94,19 @@ export PYTHONPATH="/usr/lib/python3/dist-packages:$PWD/navigation:${PYTHONPATH:-
 `benchmark.py` 使用实际 Nav2 动作服务器。包含三个目标、速度上限、无地面、扫描/里程计中断、动态障碍与侧向错误注入。场景碰撞计数、模拟真值误差与 ROS 状态全部写入报告。它的默认世界是平面运动学，不能据此宣称双足动力学已通过。可选的 `native_backend.py` 使用独立进程、超时租约和有界时长连接外部动力学后端；厂商模型、权重与专有源码不随本仓库分发。
 
 对真实录包的 `bag_to_scan.py` 和 `replay_scan.py` 只读取已经关闭并确认完整的 SQLite 录包；使用原始点时间和录制的 LIO 位姿作运动补偿，再回放到隔离 ROS 域。它不重新运行 FAST-LIO，也没有独立位置真值，因此回放完成、启用回环或地图看起来闭合都不能代表精确闭合误差已经测定。
+
+定位与导航生命周期管理器现在分别在启动后 3 / 6 秒创建，给节点与服务发现留出时间；工作台仍检查实际 Active 状态。若启动失败，保留日志并重新启动该隔离会话，不能仅因服务名已出现就发送运动目标。这个处理已复测，不代表所有 DDS 启动问题已经解决。
+
+## 可选：Cyclone DDS 本机仿真
+
+本轮 Fast DDS 数次出现服务响应超时，节点未进入 Active，速度门保持零。阶段启动只改善了部分试验。可使用下面的隔离对比配置；它不自动修改传感器或整机服务。
+
+```bash
+sudo apt-get install ros-humble-rmw-cyclonedds-cpp
+export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+export ROS_LOCALHOST_ONLY=1
+export CYCLONEDDS_URI="file://$(pwd)/config/cyclonedds-local.xml"
+bash navigation/console.sh --simulation --gait-profile p2-flat-model
+```
+
+同一验证会话中的所有进程需要统一设置，并先停止旧会话。Humble RMW 根据 `ROS_LOCALHOST_ONLY=1` 选择回环接口，XML 中不重复指定接口；配置将自动参与者索引范围扩大到 64，避免多进程导航栈启动时报无可用索引。该文件用于本机隔离测试，不是跨机器联网配置。配置依据见 [Cyclone DDS 0.10.5 说明](https://cyclonedds.io/docs/cyclonedds/0.10.5/config/cyclonedds_specifics.html) 与 [Humble RMW 实现](https://github.com/ros2/rmw_cyclonedds/blob/1.3.5/rmw_cyclonedds_cpp/src/rmw_node.cpp)。实际对比与限制见本轮验证报告。

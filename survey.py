@@ -22,8 +22,8 @@ def shifted_grid(points,res=.1):
     return lo*res,image[::-1]
 
 class Survey:
-    def __init__(self,root):
-        self.root=pathlib.Path(root);self.lock=threading.RLock();self.active=False;self.latest_pose=None
+    def __init__(self,root,runtime=None):
+        self.root=pathlib.Path(root);self.runtime=pathlib.Path(runtime) if runtime else self.root/'runtime';self.lock=threading.RLock();self.active=False;self.latest_pose=None
         self.session=None;self.proc=None;self.files=[];self.last_result=None;self.history=deque(maxlen=100)
         self.imu_recent={'lidar':deque(maxlen=400),'body':deque(maxlen=400)};self.imu_seen={'lidar':0,'body':0}
         self.cloud_last=0;self.voxels={};self.initial_cloud=None;self.current_cloud=None;self.view_cache={};self.cache_time=0
@@ -76,15 +76,15 @@ class Survey:
             if not self.latest_pose or time.monotonic()-self.latest_pose['t']>.5 or health.get('map_age',10)>.7 or health.get('imu_age',10)>.2:raise ValueError('等待实时定位和雷达IMU稳定后再开始')
             poses=[p for p in self.history if time.monotonic()-p['t']<5]
             if len(poses)<30 or np.ptp([p['x'] for p in poses])>.05 or np.ptp([p['y'] for p in poses])>.05:raise ValueError('请在地面起点标记处静止5秒，待定位稳定后再开始')
-            if shutil.disk_usage(self.root).free<5*1024**3:raise ValueError('剩余磁盘不足5GB，不能开始录包')
-            self.session=time.strftime('%Y%m%d-%H%M%S')+'-'+uuid.uuid4().hex[:6];self.folder=self.root/'runtime/surveys'/self.session;self.folder.mkdir(parents=True)
+            if shutil.disk_usage(self.runtime).free<5*1024**3:raise ValueError('剩余磁盘不足5GB，不能开始录包')
+            self.session=time.strftime('%Y%m%d-%H%M%S')+'-'+uuid.uuid4().hex[:6];self.folder=self.runtime/'surveys'/self.session;self.folder.mkdir(parents=True)
             self.voxels={};self.initial_cloud=None;self.current_cloud=None;self.view_cache={};self.cache_time=0;self.cloud_last=0
             self.distance=0.;self.start_time=time.monotonic();self.start_pose=dict(self.latest_pose);self.start_pose.update({k:float(np.mean([p[k] for p in poses[-10:]])) for k in ['x','y','z']});self.distance_anchor=[self.start_pose["x"],self.start_pose["y"]];self.last_pose=None;self.trajectory=[];self.samples=[];self.issues=set();self.returns=[]
             self.files=[];self.writers={}
             for k,header in [('trajectory',['host_time_s','lidar_stamp_s','x_m','y_m','z_m','yaw_rad','pitch_rad']),('lidar',['host_time_s','stamp_s','ax_m_s2','ay_m_s2','az_m_s2','wx_rad_s','wy_rad_s','wz_rad_s']),('body',['host_time_s','stamp_s','ax_m_s2','ay_m_s2','az_m_s2','wx_rad_s','wy_rad_s','wz_rad_s'])]:
                 f=(self.folder/(k+'.csv')).open('w',buffering=65536);self.files.append(f);self.writers[k]=csv.writer(f);self.writers[k].writerow(header)
-            for x in ['config/mid360s_lio.yaml','config/MID360S.json','runtime/map_alignment.json','runtime/neck_status.json']:
-                path=self.root/x
+            for x in ['config/robot.local.json','config/mid360s_lio.yaml','config/MID360S.json','runtime/map_alignment.json','runtime/neck_status.json']:
+                path=self.runtime/x.removeprefix('runtime/') if x.startswith('runtime/') else self.root/x
                 if path.exists():shutil.copy2(path,self.folder/path.name)
             self.baglog=(self.folder/'rosbag.log').open('w')
             # Preserve directly readable originals during acquisition. A saved
@@ -174,6 +174,6 @@ class Survey:
             if not self.active:return
             if self.latest_pose and time.monotonic()-self.latest_pose['t']>1:self.issues.add('定位数据间断超过1秒')
             if time.monotonic()-self.start_time>1200:reason='单段达到20分钟，自动保存'
-            elif shutil.disk_usage(self.root).free<3*1024**3:reason='磁盘余量低于3GB，自动保存'
+            elif shutil.disk_usage(self.runtime).free<3*1024**3:reason='磁盘余量低于3GB，自动保存'
             elif self.proc.poll() is not None:reason='原始录包进程退出，自动保存现有数据'
         if reason:self.stop(reason)

@@ -19,5 +19,19 @@
     "url": "https://github.com/hku-mars/ikd-Tree.git",
     "commit": "e2e3f4e9d3b95a9e66b1ba83dc98d4a05ed8a3c4",
     "note": "FAST_LIO submodule; retain its upstream notices"
+  },
+  "Nav2-Humble": {
+    "url": "https://github.com/ros-navigation/navigation2.git",
+    "version": "1.1.20",
+    "source_commit": "a097086719c88f781aa59788eca29ac6ca5e56db",
+    "license": "Apache-2.0",
+    "note": "Use ROS Humble packages; the optional p2_nav_controller extension was compiled and integrated against this version."
+  },
+  "Cyclone-DDS-optional": {
+    "url": "https://github.com/eclipse-cyclonedds/cyclonedds",
+    "DDS_tested_version": "0.10.5",
+    "RMW_tested_version": "1.3.5",
+    "RMW_url": "https://github.com/ros2/rmw_cyclonedds/tree/1.3.5",
+    "note": "Optional ROS Humble binary packages, localhost simulation only; select with RMW_IMPLEMENTATION and the supplied Cyclone profile. Not bundled."
   }
 }
