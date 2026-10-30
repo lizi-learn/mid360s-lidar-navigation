@@ -34,6 +34,21 @@ class BufferTest(unittest.TestCase):
             out=b.step((0,0,0) if fault=='zero' else (.1,0,0),(.1,0,0),1.,.2 if fault=='stale' else .01,
                 frame_verified=fault!='frame',hard_stop=fault=='hard')
             self.assertEqual(out,(0,0,0));self.assertEqual(b.phase,'immediate_zero')
+    def test_pivot_rechecks_translation_after_turn_has_started(self):
+        b=MotionBuffer()
+        self.run_steps(b,(0,0,.2),(0,0,0),101)
+        self.assertEqual(b.phase,'pivot');self.assertAlmostEqual(b.w,.2)
+        # A body can translate again after the initial settling interval.
+        # A zero forward command is not evidence that translation stayed zero.
+        out=b.step((0,0,.2),(.12,0,0),1.01,.01,frame_verified=True)
+        self.assertEqual(out,(0,0,0));self.assertEqual(b.phase,'braking_translation')
+        held=self.run_steps(b,(0,0,.2),(0,.10,0),30,start=1.02)
+        self.assertTrue(all(x==(0,0,0) for x in held))
+        settling=self.run_steps(b,(0,0,.2),(0,0,0),15,start=1.32)
+        self.assertTrue(all(x==(0,0,0) for x in settling))
+        resumed=self.run_steps(b,(0,0,.2),(0,0,0),70,start=1.47)
+        self.assertGreater(resumed[-1][2],0)
+        self.assertTrue(all(0<=x[2]<=.2 for x in resumed))
     def test_no_sideways_reverse_or_excess_request(self):
         for target in ((.151,0,0),(.1,.01,0),(-.01,0,0),(0,0,.241),(float('nan'),0,0)):
             self.assertEqual(MotionBuffer().step(target,(0,0,0),0.,.01,frame_verified=True),(0,0,0))
