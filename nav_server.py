@@ -46,8 +46,11 @@ class NavigationView(Node):
         self.map_pub=self.create_publisher(OccupancyGrid,'/map',latched)
         self.path_pub=self.create_publisher(Path,'/p2_nav/planned_path',latched)
         self.cloud_pub=self.create_publisher(PointCloud2,'/p2_nav/cloud_level',qos_profile_sensor_data)
-        self.create_subscription(Imu,'/livox/imu',self.on_imu,qos_profile_sensor_data)
-        self.create_subscription(Imu,'/p2_nav/body_imu',lambda msg:self.survey.imu('body',msg),qos_profile_sensor_data)
+        # Cloud/map callbacks can occupy more than the default five IMU samples.
+        # Keep a bounded backlog; source stamps and stale-data checks stay unchanged.
+        imu_qos=QoSProfile(depth=64,reliability=ReliabilityPolicy.BEST_EFFORT)
+        self.create_subscription(Imu,'/livox/imu',self.on_imu,imu_qos)
+        self.create_subscription(Imu,'/p2_nav/body_imu',lambda msg:self.survey.imu('body',msg),imu_qos)
         self.create_subscription(PointCloud2,'/cloud_registered',self.on_cloud,qos_profile_sensor_data)
         self.create_subscription(Odometry,'/Odometry',self.on_odom,qos_profile_sensor_data)
         self.create_subscription(PoseStamped,'/goal_pose',self.on_rviz_goal,10)

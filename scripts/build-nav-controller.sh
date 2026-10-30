@@ -2,6 +2,8 @@
 # Build our optional Humble extension in a separate workspace. No hardware starts.
 set -eo pipefail
 nav_root="$(cd "$(dirname "$0")/.." && pwd)"
+export PYTHONNOUSERSITE=1
+export PYTHONPATH="/usr/lib/python3/dist-packages:${PYTHONPATH:-}"
 source /opt/ros/humble/setup.bash
 /usr/bin/python3 - <<'PY'
 from pathlib import Path

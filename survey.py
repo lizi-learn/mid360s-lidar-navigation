@@ -83,13 +83,13 @@ class Survey:
             self.files=[];self.writers={}
             for k,header in [('trajectory',['host_time_s','lidar_stamp_s','x_m','y_m','z_m','yaw_rad','pitch_rad']),('lidar',['host_time_s','stamp_s','ax_m_s2','ay_m_s2','az_m_s2','wx_rad_s','wy_rad_s','wz_rad_s']),('body',['host_time_s','stamp_s','ax_m_s2','ay_m_s2','az_m_s2','wx_rad_s','wy_rad_s','wz_rad_s'])]:
                 f=(self.folder/(k+'.csv')).open('w',buffering=65536);self.files.append(f);self.writers[k]=csv.writer(f);self.writers[k].writerow(header)
-            for x in ['config/robot.local.json','config/mid360s_lio.yaml','config/MID360S.json','runtime/map_alignment.json','runtime/neck_status.json']:
+            for x in ['config/robot.local.json','config/mid360s_lio.yaml','config/MID360S.json','config/recording-qos.yaml','runtime/map_alignment.json','runtime/neck_status.json']:
                 path=self.runtime/x.removeprefix('runtime/') if x.startswith('runtime/') else self.root/x
                 if path.exists():shutil.copy2(path,self.folder/path.name)
             self.baglog=(self.folder/'rosbag.log').open('w')
             # Preserve directly readable originals during acquisition. A saved
             # stationary bag had a corrupt zstd split despite a clean exit.
-            args=['ros2','bag','record','--storage','sqlite3','--output',str(self.folder/'raw_bag'),'--max-bag-size','268435456','--max-cache-size','67108864','/livox/lidar','/livox/imu','/Odometry','/p2_nav/body_imu','/p2_nav/body_imu_meta','/tf_static']
+            args=['ros2','bag','record','--storage','sqlite3','--output',str(self.folder/'raw_bag'),'--max-bag-size','268435456','--max-cache-size','67108864','--qos-profile-overrides-path',str(self.root/'config/recording-qos.yaml'),'/livox/lidar','/livox/imu','/Odometry','/p2_nav/body_imu','/p2_nav/body_imu_meta','/tf_static']
             try:self.proc=subprocess.Popen(args,stdout=self.baglog,stderr=subprocess.STDOUT,start_new_session=True)
             except Exception:
                 for f in self.files:f.close()

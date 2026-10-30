@@ -21,3 +21,5 @@ nav_controller_ws/
 continuous_nav_ws/
 
 gait_nav_ws/
+installation/
+config/*.local.json

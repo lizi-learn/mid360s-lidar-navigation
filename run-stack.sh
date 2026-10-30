@@ -3,6 +3,8 @@ set -euo pipefail
 nav_root="$(cd "$(dirname "$0")" && pwd)"
 cd "$nav_root"
 if [[ -f .env ]]; then set -a; source .env; set +a; fi
+export OPENBLAS_NUM_THREADS="${P2_NAV_BLAS_THREADS:-1}"
+export OMP_NUM_THREADS="${P2_NAV_OMP_THREADS:-1}"
 nav_profile="${P2_NAV_ROBOT_PROFILE:-$nav_root/config/robot.local.json}"
 if [[ -f "$nav_profile" ]]; then
   nav_runtime="$(python3 "$nav_root/robot_profile.py" --profile "$nav_profile" --runtime "${P2_NAV_RUNTIME:-}" --runtime-base "$nav_root/runtime/robots" --sensor-config "$nav_root/config/MID360S.json")"

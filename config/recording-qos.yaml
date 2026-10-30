@@ -1,0 +1,12 @@
+# Bound the IMU backlog independently of the display and cloud subscribers.
+# Keep sensor reliability compatible with the Livox BEST_EFFORT publisher.
+/livox/imu:
+  history: keep_last
+  depth: 512
+  reliability: best_effort
+  durability: volatile
+/p2_nav/body_imu:
+  history: keep_last
+  depth: 512
+  reliability: best_effort
+  durability: volatile

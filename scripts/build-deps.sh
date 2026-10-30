@@ -3,6 +3,8 @@
 set -eo pipefail
 nav_root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$nav_root"
+export PYTHONNOUSERSITE=1
+export PYTHONPATH="/usr/lib/python3/dist-packages:${PYTHONPATH:-}"
 source /opt/ros/humble/setup.bash
 mkdir -p .deps ros_ws/src sdk
 checkout_pinned(){
