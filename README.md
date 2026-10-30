@@ -9,6 +9,7 @@
 - [双足平地适配、头身变换与三维扫描验证](docs/BIPED.md)
 - [换机与实机操作](docs/MIGRATION.md)
 - [本轮持续仿真与迁移验证](docs/VALIDATION_2026-10-30.md)
+- [窄门起点量化与冻结地图诊断补充](docs/PLANNER_DIAGNOSTIC_2026-10-30.md)
 - [历史验证与已知问题](docs/VALIDATION.md)
 - [第三方依赖与许可](THIRD_PARTY_NOTICES.md)
 

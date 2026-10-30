@@ -1,0 +1,373 @@
+{
+  "source_commit": "f00cd0580c6f3e3f092abd4392ac6671c5a1bb5c",
+  "experiment": "One bounded planner-only group; no NavigateToPose, model gait, physical actuation, or obstacle acceptance",
+  "source_versions": {
+    "Nav2": "1.1.20",
+    "middleware": "rmw_cyclonedds_cpp 1.3.5 / Cyclone DDS 0.10.5"
+  },
+  "seed": 0,
+  "input_costmap_sha256": "01fe0c13766a8a7fbc7061b6176cc87f0fe735881c58af63fea985dc62f00f18",
+  "footprint": [
+    [
+      1.0,
+      0.72
+    ],
+    [
+      1.0,
+      -0.72
+    ],
+    [
+      -0.58,
+      -0.72
+    ],
+    [
+      -0.58,
+      0.72
+    ]
+  ],
+  "padding_m": 0.05,
+  "obstacle": [
+    5.85,
+    2.5,
+    0.38
+  ],
+  "acknowledged_obstacle_control": true,
+  "no_motion_commands": true,
+  "queries": [
+    {
+      "case": "detour_start",
+      "budget_s": 3.0,
+      "status": 4,
+      "planning_s": 0.21842966200000002,
+      "elapsed_s": 0.2979776889551431,
+      "path_poses": 329,
+      "requested_start": [
+        4.0,
+        2.5,
+        0.0
+      ],
+      "snapped_start": [
+        3.9750000592321157,
+        2.475000036880374,
+        0.0
+      ],
+      "nav2_cpp_continuous_start_cost": 253.0,
+      "nav2_cpp_snapped_start_cost": 253.0,
+      "checked_dense_poses": 1039,
+      "path_interior_collision_samples": 6,
+      "nav2_cpp_path_collision_samples": 6
+    },
+    {
+      "case": "upper_staging",
+      "budget_s": 3.0,
+      "status": 4,
+      "planning_s": 0.077911274,
+      "elapsed_s": 0.11809077090583742,
+      "path_poses": 177,
+      "requested_start": [
+        4.2,
+        8.3,
+        0.0
+      ],
+      "snapped_start": [
+        4.175000062212348,
+        8.275000123307109,
+        0.0
+      ],
+      "nav2_cpp_continuous_start_cost": 253.0,
+      "nav2_cpp_snapped_start_cost": 253.0,
+      "checked_dense_poses": 543,
+      "path_interior_collision_samples": 3,
+      "nav2_cpp_path_collision_samples": 3
+    },
+    {
+      "case": "previous_failure",
+      "budget_s": 3.0,
+      "status": 6,
+      "planning_s": 0.0,
+      "elapsed_s": 0.0019365318585187197,
+      "path_poses": 0,
+      "requested_start": [
+        5.07,
+        8.46,
+        -0.201408
+      ],
+      "snapped_start": [
+        5.075000075623393,
+        8.475000126287341,
+        0.0
+      ],
+      "nav2_cpp_continuous_start_cost": 253.0,
+      "nav2_cpp_snapped_start_cost": 254.0,
+      "checked_dense_poses": 0,
+      "path_interior_collision_samples": 0,
+      "nav2_cpp_path_collision_samples": 0
+    },
+    {
+      "case": "same_xy_aligned",
+      "budget_s": 3.0,
+      "status": 6,
+      "planning_s": 0.0,
+      "elapsed_s": 0.002012144075706601,
+      "path_poses": 0,
+      "requested_start": [
+        5.07,
+        8.46,
+        0.0
+      ],
+      "snapped_start": [
+        5.075000075623393,
+        8.475000126287341,
+        0.0
+      ],
+      "nav2_cpp_continuous_start_cost": 254.0,
+      "nav2_cpp_snapped_start_cost": 254.0,
+      "checked_dense_poses": 0,
+      "path_interior_collision_samples": 0,
+      "nav2_cpp_path_collision_samples": 0
+    },
+    {
+      "case": "door_center",
+      "budget_s": 3.0,
+      "status": 4,
+      "planning_s": 0.023243285000000002,
+      "elapsed_s": 0.058995937928557396,
+      "path_poses": 159,
+      "requested_start": [
+        5.07,
+        8.3,
+        0.0
+      ],
+      "snapped_start": [
+        5.075000075623393,
+        8.275000123307109,
+        0.0
+      ],
+      "nav2_cpp_continuous_start_cost": 253.0,
+      "nav2_cpp_snapped_start_cost": 253.0,
+      "checked_dense_poses": 490,
+      "path_interior_collision_samples": 3,
+      "nav2_cpp_path_collision_samples": 3
+    },
+    {
+      "case": "detour_start",
+      "budget_s": 10.0,
+      "status": 4,
+      "planning_s": 0.216415147,
+      "elapsed_s": 0.29106994112953544,
+      "path_poses": 329,
+      "requested_start": [
+        4.0,
+        2.5,
+        0.0
+      ],
+      "snapped_start": [
+        3.9750000592321157,
+        2.475000036880374,
+        0.0
+      ],
+      "nav2_cpp_continuous_start_cost": 253.0,
+      "nav2_cpp_snapped_start_cost": 253.0,
+      "checked_dense_poses": 1039,
+      "path_interior_collision_samples": 6,
+      "nav2_cpp_path_collision_samples": 6
+    },
+    {
+      "case": "upper_staging",
+      "budget_s": 10.0,
+      "status": 4,
+      "planning_s": 0.084539457,
+      "elapsed_s": 0.12928809388540685,
+      "path_poses": 177,
+      "requested_start": [
+        4.2,
+        8.3,
+        0.0
+      ],
+      "snapped_start": [
+        4.175000062212348,
+        8.275000123307109,
+        0.0
+      ],
+      "nav2_cpp_continuous_start_cost": 253.0,
+      "nav2_cpp_snapped_start_cost": 253.0,
+      "checked_dense_poses": 543,
+      "path_interior_collision_samples": 3,
+      "nav2_cpp_path_collision_samples": 3
+    },
+    {
+      "case": "previous_failure",
+      "budget_s": 10.0,
+      "status": 6,
+      "planning_s": 0.0,
+      "elapsed_s": 0.0023749119136482477,
+      "path_poses": 0,
+      "requested_start": [
+        5.07,
+        8.46,
+        -0.201408
+      ],
+      "snapped_start": [
+        5.075000075623393,
+        8.475000126287341,
+        0.0
+      ],
+      "nav2_cpp_continuous_start_cost": 253.0,
+      "nav2_cpp_snapped_start_cost": 254.0,
+      "checked_dense_poses": 0,
+      "path_interior_collision_samples": 0,
+      "nav2_cpp_path_collision_samples": 0
+    },
+    {
+      "case": "same_xy_aligned",
+      "budget_s": 10.0,
+      "status": 6,
+      "planning_s": 0.0,
+      "elapsed_s": 0.0012569050304591656,
+      "path_poses": 0,
+      "requested_start": [
+        5.07,
+        8.46,
+        0.0
+      ],
+      "snapped_start": [
+        5.075000075623393,
+        8.475000126287341,
+        0.0
+      ],
+      "nav2_cpp_continuous_start_cost": 254.0,
+      "nav2_cpp_snapped_start_cost": 254.0,
+      "checked_dense_poses": 0,
+      "path_interior_collision_samples": 0,
+      "nav2_cpp_path_collision_samples": 0
+    },
+    {
+      "case": "door_center",
+      "budget_s": 10.0,
+      "status": 4,
+      "planning_s": 0.02168552,
+      "elapsed_s": 0.06902139098383486,
+      "path_poses": 159,
+      "requested_start": [
+        5.07,
+        8.3,
+        0.0
+      ],
+      "snapped_start": [
+        5.075000075623393,
+        8.275000123307109,
+        0.0
+      ],
+      "nav2_cpp_continuous_start_cost": 253.0,
+      "nav2_cpp_snapped_start_cost": 253.0,
+      "checked_dense_poses": 490,
+      "path_interior_collision_samples": 3,
+      "nav2_cpp_path_collision_samples": 3
+    }
+  ],
+  "offline_forward_connection_candidates": [
+    {
+      "forward_distance_m": 0.0,
+      "endpoint": [
+        5.07,
+        8.46,
+        -0.0
+      ],
+      "sample_count": 23,
+      "filled_grid_collision_samples": 14,
+      "nav2_cpp_collision_samples": 13
+    },
+    {
+      "forward_distance_m": 0.1,
+      "endpoint": [
+        5.167978588004272,
+        8.439995093284665,
+        -0.0
+      ],
+      "sample_count": 32,
+      "filled_grid_collision_samples": 12,
+      "nav2_cpp_collision_samples": 11
+    },
+    {
+      "forward_distance_m": 0.2,
+      "endpoint": [
+        5.265957176008543,
+        8.419990186569331,
+        -0.0
+      ],
+      "sample_count": 42,
+      "filled_grid_collision_samples": 10,
+      "nav2_cpp_collision_samples": 10
+    },
+    {
+      "forward_distance_m": 0.3,
+      "endpoint": [
+        5.3639357640128145,
+        8.399985279853995,
+        -0.0
+      ],
+      "sample_count": 52,
+      "filled_grid_collision_samples": 6,
+      "nav2_cpp_collision_samples": 3
+    },
+    {
+      "forward_distance_m": 0.4,
+      "endpoint": [
+        5.461914352017086,
+        8.379980373138661,
+        -0.0
+      ],
+      "sample_count": 62,
+      "filled_grid_collision_samples": 0,
+      "nav2_cpp_collision_samples": 0
+    },
+    {
+      "forward_distance_m": 0.5,
+      "endpoint": [
+        5.559892940021357,
+        8.359975466423325,
+        -0.0
+      ],
+      "sample_count": 72,
+      "filled_grid_collision_samples": 0,
+      "nav2_cpp_collision_samples": 0
+    },
+    {
+      "forward_distance_m": 0.6,
+      "endpoint": [
+        5.657871528025629,
+        8.33997055970799,
+        -0.0
+      ],
+      "sample_count": 82,
+      "filled_grid_collision_samples": 0,
+      "nav2_cpp_collision_samples": 0
+    },
+    {
+      "forward_distance_m": 0.7,
+      "endpoint": [
+        5.755850116029899,
+        8.319965652992655,
+        -0.0
+      ],
+      "sample_count": 92,
+      "filled_grid_collision_samples": 0,
+      "nav2_cpp_collision_samples": 0
+    },
+    {
+      "forward_distance_m": 0.8,
+      "endpoint": [
+        5.8538287040341705,
+        8.29996074627732,
+        -0.0
+      ],
+      "sample_count": 102,
+      "filled_grid_collision_samples": 0,
+      "nav2_cpp_collision_samples": 0
+    }
+  ],
+  "frozen_map_audit_scope": "One frozen global costmap before queries; per-query map changes not recorded. Actual simulator pose/scan were static, but path audit is evidence for a follow-up, not executed collision or proof smoothing is the sole cause.",
+  "sampling_correction": "Early Python sampling exceeded the Y boundary by 0.01m; those preliminary counts were discarded. Final audit samples remain inside exact padded bounds and are independently checked with the actual Nav2 C++ footprint checker.",
+  "production_parameter_changes": false,
+  "navigation_or_physical_acceptance": false
+}
