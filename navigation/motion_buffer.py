@@ -34,6 +34,11 @@ class MotionBuffer:
                 self.reset();self.phase='immediate_zero';return (0.,0.,0.)
             self.phase='normal_braking'
         elif v==0:
+            if self.phase=='pivot' and linear>.06:
+                # Recheck throughout a turn: a zero forward command does not
+                # prove the body stayed still. Withdraw yaw immediately, then
+                # require a fresh translation-settling interval before pivoting.
+                self.w=0.;self.phase='braking_translation';self.stable_since=None
             if self.phase not in ('braking_translation','pivot'):
                 self.phase='braking_translation';self.stable_since=None
             if self.phase=='braking_translation':
