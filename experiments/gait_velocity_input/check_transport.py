@@ -15,7 +15,12 @@ def scenario(binary,commissioned):
         path=directory+'/gait.sock';process=subprocess.Popen([binary,path,'--synthetic-commissioned' if commissioned else '--uncommissioned'],stdout=subprocess.PIPE,text=True)
         try:
             wait(lambda:pathlib.Path(path+'.operator').exists())
-            source=socket.socket(socket.AF_UNIX,socket.SOCK_SEQPACKET);source.connect(path+'.operator')
+            source=socket.socket(socket.AF_UNIX,socket.SOCK_SEQPACKET)
+            # bind() creates the path before listen(); wait for a real endpoint.
+            def connected():
+                try:source.connect(path+'.operator');return True
+                except (FileNotFoundError,ConnectionRefusedError):return False
+            wait(connected)
             state={'mode':1,'activity':False,'pause':False,'instance':40,'stale_command':False}
             def publish():
                 seq=0
