@@ -399,7 +399,7 @@ class Console(Node):
             **({'truth':self.truth} if self.simulation else {}),
             'maps':sorted(p.parent.name for p in (self.runtime/'maps').glob('*/mapped.yaml')),
             'hardware_execution_enabled':bool(getattr(self,'gait',None) and self.gait.status()['navigation_owned']),
-            'scope':'平面导航仿真' if self.simulation else ('实机步态接口已连接；机身外参、驱动保护与行走验收未完成' if self.gait else '实机导航预演；机身外参、整机零位和步态接入待验收')}
+            'scope':'平面导航仿真' if self.simulation else ('雷达中心坐标导航；定位、传感器和步态状态见实时数据' if self.gate.get('navigation_reference')=='lidar_projection' else ('实机步态接口已连接；坐标与控制状态见实时数据' if self.gait else '实机导航预演'))}
 
 def main():
     parser=argparse.ArgumentParser();parser.add_argument('--simulation',action='store_true');parser.add_argument('--port',type=int,default=8930)

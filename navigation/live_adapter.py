@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Read sensors in their ROS domain; publish isolated navigation preview inputs.
 
-base_link here is a LiDAR ground-projection proxy, NOT a calibrated robot base.
+base_link can explicitly represent the LiDAR center ground projection, or a
+timestamped body transform. LiDAR mode never asserts body/joint calibration.
 No motor, joystick, or vendor shared-memory interface is opened.
 """
 import argparse,json,math,threading,time
@@ -21,6 +22,8 @@ from odometry_velocity import PlanarVelocity
 from std_msgs.msg import Bool,String
 from tf2_ros import TransformBroadcaster,StaticTransformBroadcaster
 from terrain import local_floor,classify,observed_front_support
+from navigation_reference import select_reference,reference_status
+from terrain_history import SupportHistory
 
 def xyz(msg):
     fields={f.name:f.offset for f in msg.fields}
@@ -52,6 +55,8 @@ class Adapter:
         self.source=Node('navigation_sensor_reader',context=self.source_context)
         self.sink=Node('navigation_sensor_preview_adapter',context=self.sink_context)
         self.body_reference=BodyReference(args.body_reference) if args.body_reference else None
+        self.navigation_reference=select_reference(getattr(args,'navigation_reference','auto'),bool(self.body_reference))
+        self.support_history=SupportHistory() if getattr(args,'support_history',False) else None
         if self.body_reference:self.source.create_subscription(JointState,self.body_reference.topic,self.on_joints,qos_profile_sensor_data)
         self.source.create_subscription(PointCloud2,'/cloud_registered',self.on_cloud,qos_profile_sensor_data)
         self.source.create_subscription(Odometry,'/Odometry',self.on_odom,qos_profile_sensor_data)
@@ -140,13 +145,20 @@ class Adapter:
             scan=LaserScan();scan.header.stamp=cloud.header.stamp;scan.header.frame_id='laser'
             scan.angle_min=-math.pi;scan.angle_increment=2*math.pi/360;scan.angle_max=-math.pi+359*scan.angle_increment
             scan.range_min=.12;scan.range_max=14.;scan.scan_time=.1;scan.ranges=output.tolist();self.scan_pub.publish(scan)
-            observed=bool(observed_front_support(points,origin[:2],yaw,plane))
+            instant_observed=bool(observed_front_support(points,origin[:2],yaw,plane))
+            observed=instant_observed;support_report={}
+            if self.support_history:
+                observed,support_report=self.support_history.update(points,origin[:2],yaw,plane,stamp(cloud),now)
             verified=bool(self.body_reference and self.body_reference.verified)
             ground.data=observed and (verified if self.body_reference else True);self.ground_pub.publish(ground)
             report.update(ground_ok=ground.data,finite_scan_bins=int(np.isfinite(output).sum()),
-                source_age_s=now-stamp(cloud),base_reference='timestamped body kinematics' if self.body_reference else 'uncalibrated lidar ground projection',
-                body_reference_ready=verified,kinematic_feedback_ready=bool(self.body_reference),velocity_ready=True,velocity_window_s=self.velocity.window,observed_front_support=observed,hardware_execution_enabled=False)
+                source_age_s=now-stamp(cloud),base_reference='timestamped body kinematics' if self.body_reference else 'LiDAR center ground projection',
+                velocity_ready=True,velocity_window_s=self.velocity.window,observed_front_support=observed,instant_observed_front_support=instant_observed,
+                reference_source_stamp_s=stamp(odom),hardware_execution_enabled=False)
+            report.update(reference_status(self.navigation_reference,body_verified=verified,body_feedback=bool(self.body_reference)))
+            report.update(support_report)
         except ValueError as e:
+            if self.support_history:self.support_history.clear()
             self.ground_pub.publish(ground);report={'error':str(e),'ground_ok':False,'hardware_execution_enabled':False}
         msg=String();msg.data=json.dumps(report);self.status_pub.publish(msg)
     def run(self):
@@ -160,4 +172,6 @@ class Adapter:
 if __name__=='__main__':
     p=argparse.ArgumentParser();p.add_argument('--source-domain',type=int,default=188);p.add_argument('--target-domain',type=int,default=194);p.add_argument('--alignment',required=True)
     p.add_argument('--ground-topic',default='/p2_nav/ground_ok');p.add_argument('--robot-profile',default='');p.add_argument('--body-reference',default='');p.add_argument('--velocity-window',type=float,default=.4)
+    p.add_argument('--navigation-reference',choices=['auto','lidar_projection','body_kinematics','preview'],default='auto')
+    p.add_argument('--support-history',action='store_true',help='Use up to250ms of original registered ground observations')
     Adapter(p.parse_args()).run()

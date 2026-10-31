@@ -28,7 +28,9 @@ def setup(context):
         alignment=get('alignment')
         assert Path(alignment).is_file(),'Live preview needs the running sensor gravity-alignment file'
         nodes.append(ExecuteProcess(cmd=['/usr/bin/python3','-S',str(root/'live_adapter.py'),
-            '--alignment',alignment,'--robot-profile',get('robot_profile'),'--body-reference',get('body_reference'),'--source-domain',get('source_domain'),'--target-domain',os.getenv('ROS_DOMAIN_ID','194')],output='screen'))
+            '--alignment',alignment,'--robot-profile',get('robot_profile'),'--body-reference',get('body_reference'),
+            '--navigation-reference',get('navigation_reference'),'--source-domain',get('source_domain'),'--target-domain',os.getenv('ROS_DOMAIN_ID','194')]+
+            (['--support-history'] if get('support_history')=='true' else []),output='screen'))
     nodes.append(ExecuteProcess(cmd=['/usr/bin/python3','-S',str(root/'gate_node.py'),'--ros-args',
         '-p','simulation:='+str(simulation).lower(),'-p','gait_handoff:='+get('gait_handoff'),'-p','require_localization:='+str(mode=='navigation').lower()],output='screen'))
     if mode=='mapping':
@@ -78,6 +80,8 @@ def generate_launch_description():
         DeclareLaunchArgument('simulation',default_value='false'),DeclareLaunchArgument('params'),
         DeclareLaunchArgument('robot_profile',default_value=os.getenv('P2_NAV_ROBOT_PROFILE','')),
         DeclareLaunchArgument('body_reference',default_value=os.getenv('P2_NAV_BODY_CALIBRATION','')),
+        DeclareLaunchArgument('navigation_reference',default_value=os.getenv('P2_NAV_REFERENCE','auto')),
+        DeclareLaunchArgument('support_history',default_value=os.getenv('P2_NAV_SUPPORT_HISTORY','false')),
         DeclareLaunchArgument('map',default_value=''),DeclareLaunchArgument('source_domain',default_value='188'),
         DeclareLaunchArgument('alignment',default_value=os.getenv('P2_LIDAR_ALIGNMENT',str(Path(__file__).resolve().parents[1]/'runtime/map_alignment.json'))),
         OpaqueFunction(function=setup)])

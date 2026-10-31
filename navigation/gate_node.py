@@ -10,6 +10,7 @@ from sensor_msgs.msg import LaserScan
 from std_msgs.msg import Bool, String
 from tf2_ros import Buffer, TransformListener
 from gate import ForwardGate
+from navigation_reference import reference_ready
 
 class GateNode(Node):
     def __init__(self):
@@ -30,6 +31,7 @@ class GateNode(Node):
         self.invalid_command_until=0.;self.invalid_command=(0.,0.,0.)
         self.scan_stamp = self.odom_stamp = None
         self.calibration_ready=False;self.calibration_time=0.
+        self.reference_mode='unknown'
         self.command = (0., 0., 0.);self.ground = False;self.ground_time = 0.;self.paused = False
         self.covariance_ok = False
         self.covariance = None
@@ -71,7 +73,8 @@ class GateNode(Node):
     def on_ground(self, msg):self.ground = msg.data;self.ground_time = time.monotonic()
     def on_terrain(self,msg):
         try:
-            d=json.loads(msg.data);self.calibration_ready=d.get('body_reference_ready') is True and d.get('kinematic_feedback_ready') is True
+            d=json.loads(msg.data);self.calibration_ready=reference_ready(d)
+            self.reference_mode=d.get('navigation_reference','body_kinematics') if isinstance(d,dict) else 'unknown'
             self.calibration_time=time.monotonic()
         except (ValueError,TypeError):self.calibration_ready=False
     def on_amcl(self, msg):
@@ -127,6 +130,7 @@ class GateNode(Node):
         if True: #20Hz original evaluations; transport does not restamp cached health
             status = String();status.data = json.dumps({'armed':self.gate.armed,'simulation':self.simulation,
                 'evaluated_monotonic_ns':time.monotonic_ns(),'data_fresh':collision_source_ok and -.05<=min(scan_age,odom_age) and max(scan_age,odom_age)<=self.gate.limits.sensor_timeout,'collision_source_valid':collision_source_ok,'calibration_ready':self.calibration_ready and now-self.calibration_time<.2,
+                'navigation_reference':getattr(self,'reference_mode','unknown'),'navigation_reference_ready':self.calibration_ready and now-self.calibration_time<.2,
                 'hardware_execution_enabled':False,'speed_cap':self.gate.speed,
                 'velocity_scale':self.gate.velocity_scale,'effective_speed_cap':self.gate.speed*self.gate.velocity_scale,'reason':self.gate.reason,
                 'motion_phase':'waiting_clearance' if self.recovery_wait else self.handoff.phase if self.handoff else 'direct','body_velocity_feedback':self.measured,'command':result,'scan_age':scan_age,'odom_age':odom_age,'localized':localized,

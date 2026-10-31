@@ -8,6 +8,7 @@ from nav_msgs.msg import Odometry
 from nav2_msgs.msg import CollisionMonitorState
 from std_msgs.msg import String
 from motion_buffer import MotionBuffer
+from navigation_reference import reference_ready
 
 class MotionBufferNode(Node):
     def __init__(self):
@@ -33,7 +34,7 @@ class MotionBufferNode(Node):
         except (ValueError,TypeError):self.armed=False
     def terrain(self,m):
         try:
-            d=json.loads(m.data);self.reference=d.get('body_reference_ready') is True and d.get('kinematic_feedback_ready') is True
+            d=json.loads(m.data);self.reference=reference_ready(d)
             self.reference_time=time.monotonic()
         except (ValueError,TypeError):self.reference=False
     def collision_state(self,m):self.collision=m.action_type==CollisionMonitorState.STOP

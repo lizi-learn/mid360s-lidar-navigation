@@ -8,6 +8,7 @@
 - [前向导航工作台与完整流程](docs/NAVIGATION.md)
 - [实验性步态速度接管与实际验收边界](docs/GAIT_HANDOFF.md)：原手柄不变；本地协议、零速度待机已验证，完整导航未验收。
 - [双足平地适配、头身变换与三维扫描验证](docs/BIPED.md)
+- [显式雷达中心坐标与短时地面观测](docs/LIDAR_REFERENCE.md)：雷达投影坐标和关节机身坐标分别报告，不伪造关节数据。
 - [换机与实机操作](docs/MIGRATION.md)
 - [本轮持续仿真与迁移验证](docs/VALIDATION_2026-10-30.md)
 - [窄门起点量化与冻结地图诊断补充](docs/PLANNER_DIAGNOSTIC_2026-10-30.md)
