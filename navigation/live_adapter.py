@@ -31,7 +31,7 @@ def xyz(msg):
 
 class Adapter:
     def __init__(self,args):
-        self.lock=threading.Lock();self.cloud=None;self.odom=None;self.processed_stamp=None
+        self.lock=threading.Lock();self.cloud=None;self.odom=None;self.processed_stamp=None;self.published_odom_stamp=None
         self.alignment_path=Path(args.alignment);self.alignment_mtime=self.alignment_path.stat().st_mtime_ns
         self.reference_fault='';self.previous=None;self.velocity=PlanarVelocity(window=getattr(args,'velocity_window',.4))
         alignment=json.loads(Path(args.alignment).read_text())
@@ -61,7 +61,9 @@ class Adapter:
         self.status_pub=self.sink.create_publisher(String,'/p2_nav/terrain_status',10)
         self.tf=TransformBroadcaster(self.sink);self.static=StaticTransformBroadcaster(self.sink)
         t=TransformStamped();t.header.frame_id='base_link';t.child_frame_id='laser';t.transform.rotation.w=1.;self.static.sendTransform(t)
-        self.sink.create_timer(.1,self.tick)
+        # Forward each new source-stamped pose promptly. Do not add another
+        # scan-period wait before TF, and do not renew cached pose timestamps.
+        self.sink.create_timer(.02,self.tick)
         self.executor=SingleThreadedExecutor(context=self.source_context);self.executor.add_node(self.source)
         self.thread=threading.Thread(target=self.executor.spin,daemon=True);self.thread.start()
     def on_joints(self,msg):
@@ -116,11 +118,12 @@ class Adapter:
         except ValueError as e:
             self.reference_fault='invalid navigation velocity: '+str(e);self.ground_pub.publish(ground);return
         if velocity is None:self.ground_pub.publish(ground);return
-        t=TransformStamped();t.header.stamp=odom.header.stamp;t.header.frame_id='odom';t.child_frame_id='base_link'
-        t.transform.translation.x=float(origin[0]);t.transform.translation.y=float(origin[1]);t.transform.rotation.z=math.sin(yaw/2);t.transform.rotation.w=math.cos(yaw/2);self.tf.sendTransform(t)
-        out=Odometry();out.header=t.header;out.child_frame_id='base_link';out.pose.pose.position.x=float(origin[0]);out.pose.pose.position.y=float(origin[1]);out.pose.pose.orientation=t.transform.rotation
-        out.twist.twist.linear.x,out.twist.twist.linear.y,out.twist.twist.angular.z=velocity
-        self.odom_pub.publish(out)
+        if self.published_odom_stamp!=stamp(odom):
+            t=TransformStamped();t.header.stamp=odom.header.stamp;t.header.frame_id='odom';t.child_frame_id='base_link'
+            t.transform.translation.x=float(origin[0]);t.transform.translation.y=float(origin[1]);t.transform.rotation.z=math.sin(yaw/2);t.transform.rotation.w=math.cos(yaw/2);self.tf.sendTransform(t)
+            out=Odometry();out.header=t.header;out.child_frame_id='base_link';out.pose.pose.position.x=float(origin[0]);out.pose.pose.position.y=float(origin[1]);out.pose.pose.orientation=t.transform.rotation
+            out.twist.twist.linear.x,out.twist.twist.linear.y,out.twist.twist.angular.z=velocity
+            self.odom_pub.publish(out);self.published_odom_stamp=stamp(odom)
         if self.processed_stamp==stamp(cloud):return
         self.processed_stamp=stamp(cloud)
         try:
