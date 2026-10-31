@@ -7,7 +7,8 @@ LOCAL_READY=1|2|4|8|16|128
 def readiness_error(r):
     checks=((1,'未选择 D13 策略'),(2,'步态尚未进入可行走状态'),(4,'硬件状态未就绪'),
         (8,'驱动保护未核验'),(16,'实机标定未核验'),(128,'真实手柄数据已过期'))
-    missing=[name for bit,name in checks if not r.readiness&bit]
+    missing=['遥控急停已锁定，请在现场复位'] if getattr(r,'reason','')=='estop' else []
+    missing.extend(name for bit,name in checks if not r.readiness&bit)
     if not r.operator_verified:missing.append('手柄身份未核验')
     if r.operator_mode!=1:missing.append('E 未在导航档')
     if r.manual_activity:missing.append('摇杆已介入')
@@ -26,7 +27,7 @@ class GaitTransport:
     def ready(self):
         with self.lock:
             r=self.feedback
-            return bool(r and 0<=time.monotonic_ns()-r.monotonic_ns<=100_000_000 and
+            return bool(r and getattr(r,'reason','')!='estop' and 0<=time.monotonic_ns()-r.monotonic_ns<=100_000_000 and
                 r.readiness&LOCAL_READY==LOCAL_READY and r.operator_verified and r.operator_mode==1
                 and not r.manual_activity and not r.cancel_pending and self.phase not in ('failed','disconnected'))
     def update(self,gate,command_enabled):
@@ -118,7 +119,8 @@ class GaitTransport:
                 'receiver_instance':r.receiver_instance if r else 0,'receiver_generation':r.receiver_generation if r else 0,
                 'native_source_sequence':r.native_sequence if r else 0,
                 'native_source_age_ms':(time.monotonic_ns()-r.native_stamp)/1e6 if r and r.native_stamp else None,
-                'readiness':r.readiness if r else 0,'blockers':readiness_error(r) if r else '步态接口尚未连接',
+                'readiness':r.readiness if r else 0,'native_reason':getattr(r,'reason','') if r else '',
+                'blockers':readiness_error(r) if r else '步态接口尚未连接',
                 'operator_mode':r.operator_mode if r else 0,'source_monotonic_ns':r.monotonic_ns if r else None}
     def close(self):
         self.stop();self.running=False;self.thread.join(timeout=.5)
