@@ -83,6 +83,7 @@ class GateNode(Node):
         try:
             v = json.loads(msg.data)
             if 'speed' in v:self.gate.set_speed(float(v['speed']))
+            if 'velocity_scale' in v:self.gate.set_velocity_scale(v['velocity_scale'])
             if 'armed' in v:
                 generation=v.get('arm_generation')
                 fresh_generation=(type(generation) is int and generation>=0
@@ -126,7 +127,8 @@ class GateNode(Node):
         if True: #20Hz original evaluations; transport does not restamp cached health
             status = String();status.data = json.dumps({'armed':self.gate.armed,'simulation':self.simulation,
                 'evaluated_monotonic_ns':time.monotonic_ns(),'data_fresh':collision_source_ok and -.05<=min(scan_age,odom_age) and max(scan_age,odom_age)<=self.gate.limits.sensor_timeout,'collision_source_valid':collision_source_ok,'calibration_ready':self.calibration_ready and now-self.calibration_time<.2,
-                'hardware_execution_enabled':False,'speed_cap':self.gate.speed,'reason':self.gate.reason,
+                'hardware_execution_enabled':False,'speed_cap':self.gate.speed,
+                'velocity_scale':self.gate.velocity_scale,'effective_speed_cap':self.gate.speed*self.gate.velocity_scale,'reason':self.gate.reason,
                 'motion_phase':'waiting_clearance' if self.recovery_wait else self.handoff.phase if self.handoff else 'direct','body_velocity_feedback':self.measured,'command':result,'scan_age':scan_age,'odom_age':odom_age,'localized':localized,
                 'ground_ok':self.ground and now - self.ground_time < .5,
                 'localization_covariance':self.covariance,'map_transform_age':age})

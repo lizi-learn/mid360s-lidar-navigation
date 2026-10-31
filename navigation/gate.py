@@ -16,6 +16,7 @@ class ForwardGate:
     def __init__(self, limits=None):
         self.limits = limits or Limits()
         self.speed = .20
+        self.velocity_scale = 1.
         self.armed = False
         self.v = self.w = 0.
         self.reason = 'disarmed'
@@ -24,6 +25,15 @@ class ForwardGate:
         if not math.isfinite(value) or not .03 <= value <= self.limits.max_v:
             raise ValueError('speed must be finite and between 0.03 and 0.30 m/s')
         self.speed = value
+
+    def set_velocity_scale(self, value):
+        if type(value) not in (int, float) or value not in (.5, 1.):
+            raise ValueError('velocity scale must be 0.5 or 1.0')
+        if value < self.velocity_scale:
+            ratio=value/self.velocity_scale
+            self.v *= ratio
+            self.w *= ratio
+        self.velocity_scale = float(value)
 
     @staticmethod
     def command_fault(command):
@@ -53,14 +63,16 @@ class ForwardGate:
         scale = 1.
         if command[0] > 0:scale = min(scale, self.speed / command[0], self.limits.max_v / command[0])
         if abs(command[2]) > 0:scale = min(scale, self.limits.max_w / abs(command[2]))
-        target_v, target_w = command[0] * scale, command[2] * scale
-        dv = self.limits.accel if target_v > self.v else self.limits.decel
+        target_v, target_w = command[0] * scale * self.velocity_scale, command[2] * scale * self.velocity_scale
+        dv = (self.limits.accel if target_v > self.v else self.limits.decel) * self.velocity_scale
         delta_v, delta_w = target_v - self.v, target_w - self.w
         fraction = min(1., dv * dt / max(abs(delta_v),1e-12),
-                       self.limits.angular_accel * dt / max(abs(delta_w),1e-12))
+                       self.limits.angular_accel * self.velocity_scale * dt / max(abs(delta_w),1e-12))
         self.v += delta_v * fraction
         self.w += delta_w * fraction
         # Enforce a newly lowered speed cap immediately, even while decelerating.
-        self.v = min(self.v, self.speed)
+        self.v = min(self.v, self.speed * self.velocity_scale)
+        self.w = max(-self.limits.max_w * self.velocity_scale,
+                     min(self.limits.max_w * self.velocity_scale, self.w))
         self.reason = 'tracking'
         return (self.v, 0., self.w)

@@ -44,6 +44,7 @@ class Console(Node):
         self.virtual_operator=None;self.virtual_sequence=0;self.virtual_source=secrets.randbits(63)+1
         self.request_token=secrets.token_urlsafe(24)
         self.speed_value=min(.20,self.maximum_speed)
+        self.velocity_scale=.5 if gait_profile=='p2-flat-model' else 1.
         qos=QoSProfile(depth=1,durability=DurabilityPolicy.TRANSIENT_LOCAL,reliability=ReliabilityPolicy.RELIABLE)
         self.create_subscription(OccupancyGrid,'/map',self.on_map,qos)
         self.create_subscription(RosPath,'/plan',self.on_path,10)
@@ -361,13 +362,15 @@ class Console(Node):
         return {'accepted':True,'generation':generation,'hardware_execution_enabled':bool(gait and gait.status()['navigation_owned'])}
     def on_feedback(self,feedback):
         f=feedback.feedback;self.feedback={'distance_remaining':f.distance_remaining,'recoveries':f.number_of_recoveries}
-    def speed(self,value):
+    def speed(self,value,velocity_scale=None):
         v=float(value)
         if not math.isfinite(v) or not self.minimum_speed<=v<=self.maximum_speed:raise ValueError(f'此步态配置的速度范围为 {self.minimum_speed:.2f}–{self.maximum_speed:.2f} m/s')
-        self.speed_value=v;self.publish_speed()
-        return {'speed_m_s':v}
+        scale=getattr(self,'velocity_scale',1.) if velocity_scale is None else velocity_scale
+        if type(scale) not in (int,float) or scale not in (.5,1.):raise ValueError('速度倍率仅支持 0.5 或 1.0')
+        self.speed_value=v;self.velocity_scale=float(scale);self.publish_speed()
+        return {'speed_m_s':v,'velocity_scale':self.velocity_scale,'effective_speed_m_s':v*self.velocity_scale}
     def publish_speed(self):
-        self.op(speed=self.speed_value)
+        self.op(speed=self.speed_value,velocity_scale=getattr(self,'velocity_scale',1.))
         limit=SpeedLimit();limit.percentage=False;limit.speed_limit=self.speed_value;self.limiter.publish(limit)
     def status(self,include_cells=True):
         from feedback_status import read_neck_feedback
@@ -384,7 +387,8 @@ class Console(Node):
         except Exception:pass
         grid=self.grid
         return {'robot_name':self.robot_name,'gait_profile':self.gait_profile,'request_token':self.request_token,'mode':self.mode,'simulation':self.simulation,'controller':self.controller,'message':self.last_action,
-            'minimum_speed':self.minimum_speed,'maximum_speed':self.maximum_speed,'simulation_kind':'native_dynamics' if os.getenv('P2_NAV_NATIVE_EXEC') else 'planar',
+            'minimum_speed':self.minimum_speed,'maximum_speed':self.maximum_speed,'velocity_scale':self.velocity_scale,
+            'effective_speed_cap':self.speed_value*self.velocity_scale,'simulation_kind':'native_dynamics' if os.getenv('P2_NAV_NATIVE_EXEC') else 'planar',
             'process_alive':self.process is not None and self.process.poll() is None,'gate':self.gate,'pose':pose,
             'session':self.session.status(time.monotonic()),'map_revision':self.map_revision,'neck':head_feedback,
             'execution_ready':self.execution_ready(),'gait_transport':getattr(self,'gait',None).status() if getattr(self,'gait',None) else None,'map':None if grid is None else {'width':grid.info.width,'height':grid.info.height,'resolution':grid.info.resolution,
@@ -463,7 +467,7 @@ def main():
                     '/api/sim_mapping_route':lambda:node.simulated_mapping_route(d['name']),
                     '/api/save':lambda:node.save_map(d['name']),'/api/goal':lambda:node.set_goal(d),
                     '/api/confirm':lambda:node.confirm_goal(d),'/api/sim_operator':lambda:node.simulation_operator(d),
-                    '/api/initialpose':lambda:node.set_pose(d),'/api/speed':lambda:node.speed(d['speed']),
+                    '/api/initialpose':lambda:node.set_pose(d),'/api/speed':lambda:node.speed(d['speed'],d.get('velocity_scale')),
                     '/api/stop':lambda:(node.stop() or {'stopped':True})}
                 if self.path not in routes:self.send({'error':'Not found'},404);return
                 self.send(routes[self.path]())
