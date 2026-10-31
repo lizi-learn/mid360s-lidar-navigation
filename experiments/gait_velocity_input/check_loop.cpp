@@ -66,16 +66,16 @@ int main(){
   auto bad=r.frame(Operation::velocity);bad.velocity.vx=.1f;r.box.post(bad);r.tick();assert(!r.reply.armed);}
  // Missing archival acceptance is not a live kinematic fault.
  {Rig r;auto n=native();n.commissioning_verified=false;
-  r.authority();r.box.post(r.frame(Operation::arm));r.tick(n);assert(r.reply.armed&&(r.reply.readiness&16U));
+  r.authority();r.box.post(r.frame(Operation::arm));r.tick(n);assert(r.reply.armed&&(r.reply.readiness&256U)&&!(r.reply.readiness&16U));
   r.box.post(r.frame(Operation::velocity));r.tick(n);assert(r.reply.navigation_owned);
   auto f=r.frame(Operation::velocity);f.velocity.vx=.05f;r.box.post(f);r.tick(n);assert(r.reply.vx>.049f);
   // An actual runtime reference failure still zeros and revokes that lease.
   auto a=r.frame(Operation::authority);a.flags&=~health_calibrated;r.box.post(a);r.tick(n);
-  assert(!r.reply.navigation_owned&&r.reply.force_zero&&r.reply.cancel_pending&&!(r.reply.readiness&16U));
+  assert(!r.reply.navigation_owned&&r.reply.force_zero&&r.reply.cancel_pending&&!(r.reply.readiness&256U));
  }
  // An archival true bit cannot substitute for absent runtime kinematics.
  {Rig r;r.authority();auto a=r.frame(Operation::authority);a.flags&=~health_calibrated;r.box.post(a);
-  r.box.post(r.frame(Operation::arm));r.tick();assert(!r.reply.armed&&!(r.reply.readiness&16U));}
+  r.box.post(r.frame(Operation::arm));r.tick();assert(!r.reply.armed&&!(r.reply.readiness&256U));}
  // Missing navigation authority/protection must NEVER prevent original manual.
  {Rig r;auto n=native();r.raw.mode=3;r.physical();n.commissioning_verified=n.driver_protection_verified=false;
   r.tick(n);assert(!r.reply.force_zero&&!r.reply.navigation_owned);}

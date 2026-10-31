@@ -47,7 +47,7 @@ def decode_reply(data,now_ns):
         raise ValueError('gait_reply_expired')
     if any(x not in (0,1) for x in (r.armed,r.navigation_owned,r.force_zero,r.cancel_pending)):
         raise ValueError('gait_reply_flags')
-    if not all(math.isfinite(x) for x in (r.vx,r.vy,r.wz)) or r.readiness&~255:
+    if not all(math.isfinite(x) for x in (r.vx,r.vy,r.wz)) or r.readiness&~511:
         raise ValueError('gait_reply_nonfinite')
     return r
 

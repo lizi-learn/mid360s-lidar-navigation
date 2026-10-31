@@ -162,8 +162,8 @@ class GaitNavigationInput {
     r.operator_mode=native_fresh?native.mode:0;r.operator_verified=native_fresh;r.manual_activity=activity;
     r.seen_command=std::max({arm_,packet_,ack_});r.cancel_generation=selected.cancel_generation;
     r.readiness=(n.d13_selected?1U:0U)|(n.walking_ready?2U:0U)|(n.hardware_healthy?4U:0U)|
-      (n.driver_protection_verified?8U:0U)|(f.calibrated?16U:0U)|
-      (f.ground_ok?32U:0U)|(f.localized?64U:0U)|(native_fresh?128U:0U);
+      (n.driver_protection_verified?8U:0U)|(n.commissioning_verified?16U:0U)|
+      (f.ground_ok?32U:0U)|(f.localized?64U:0U)|(native_fresh?128U:0U)|(f.calibrated?256U:0U);
     r.armed=lease_.armed();r.navigation_owned=selected.navigation_owns_velocity;
     r.cancel_pending=selected.cancel_navigation_goal;r.vx=selected.vx;r.wz=selected.wz;
     r.manual_owned=manual_override_&&native_fresh&&native.mode==1&&!f.estop&&n.walking_ready&&n.hardware_healthy;

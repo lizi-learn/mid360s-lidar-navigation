@@ -2,7 +2,7 @@
 
 Linux-only, vendor-independent checks. No ROS, SDK, bus, actuator, robot identity or office data is included.
 
-RuntimeReadiness stores separately verified installation facts. Its archival commissioning/acceptance-file bit is no longer a motion prerequisite. Live body-reference readiness is reported separately by the original source-stamped kinematic observer; absent or stale runtime kinematics still revokes motion. Driver-protection verification remains required.
+RuntimeReadiness stores separately verified installation facts. Its archival commissioning/acceptance-file bit is no longer a motion prerequisite. Live body-reference readiness is reported separately by the original source-stamped kinematic observer; absent or stale runtime kinematics still revokes motion. Driver-protection verification remains required. Reply bit16 retains its archival meaning; new bit256 reports live kinematics, and clients require bit256 rather than16. Mixed versions cannot silently count an archive as live data.
 
 RuntimeReadiness records separately verified installation facts. A root-owned record is bound to the machine ID, driver PID/start time and executable device/inode. A calibration acceptance bit additionally requires the same protected calibration file identity, modification time and length. Missing, replaced, writable or mismatched evidence is rejected. Reading happens in an ordinary worker; control-loop consumers use atomics. If that worker stops evaluating, its result expires after 200 ms.
 
