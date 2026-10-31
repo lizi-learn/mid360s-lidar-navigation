@@ -370,6 +370,8 @@ class Console(Node):
         self.op(speed=self.speed_value)
         limit=SpeedLimit();limit.percentage=False;limit.speed_limit=self.speed_value;self.limiter.publish(limit)
     def status(self,include_cells=True):
+        from feedback_status import read_neck_feedback
+        head_feedback=read_neck_feedback(os.getenv('P2_NAV_NECK_FEEDBACK',''),getattr(self,'robot_identity',None))
         if self.route_process is not None and self.route_process.poll() is not None:
             report=self.route_directory/'mapping-report.json'
             good=report.exists() and 'error' not in json.loads(report.read_text())
@@ -384,7 +386,7 @@ class Console(Node):
         return {'robot_name':self.robot_name,'gait_profile':self.gait_profile,'request_token':self.request_token,'mode':self.mode,'simulation':self.simulation,'controller':self.controller,'message':self.last_action,
             'minimum_speed':self.minimum_speed,'maximum_speed':self.maximum_speed,'simulation_kind':'native_dynamics' if os.getenv('P2_NAV_NATIVE_EXEC') else 'planar',
             'process_alive':self.process is not None and self.process.poll() is None,'gate':self.gate,'pose':pose,
-            'session':self.session.status(time.monotonic()),'map_revision':self.map_revision,
+            'session':self.session.status(time.monotonic()),'map_revision':self.map_revision,'neck':head_feedback,
             'execution_ready':self.execution_ready(),'gait_transport':getattr(self,'gait',None).status() if getattr(self,'gait',None) else None,'map':None if grid is None else {'width':grid.info.width,'height':grid.info.height,'resolution':grid.info.resolution,
                 'origin':[grid.info.origin.position.x,grid.info.origin.position.y],**({'cells':list(grid.data)} if include_cells else {})},
             'path':self.path,'goal':self.goal,'feedback':self.feedback,
@@ -409,7 +411,7 @@ def main():
     if selected:
         import sys
         sys.path.insert(0,str(ROOT.parent))
-        from robot_profile import load,check_machine,bind_runtime,workflow_paths
+        from robot_profile import load,check_machine,bind_runtime,workflow_paths,identity
         profile=load(selected);check_machine(profile)
         if os.getenv('P2_NAV_BODY_CALIBRATION'):
             from robot_profile import check_calibration
@@ -435,7 +437,7 @@ def main():
         if data.get('hardware_verified') is True:
             from robot_profile import check_calibration
             check_calibration(profile,data)
-    rclpy.init();node=Console(runtime,args.simulation,args.minimum_speed,vertices,args.odometry_model,args.gait_profile,args.gait_socket);node.robot_name=profile['name'] if selected else None;executor=MultiThreadedExecutor(num_threads=3);executor.add_node(node)
+    rclpy.init();node=Console(runtime,args.simulation,args.minimum_speed,vertices,args.odometry_model,args.gait_profile,args.gait_socket);node.robot_name=profile['name'] if selected else None;node.robot_identity=identity(profile) if selected else None;executor=MultiThreadedExecutor(num_threads=3);executor.add_node(node)
     thread=threading.Thread(target=executor.spin,daemon=True);thread.start()
     class Handler(BaseHTTPRequestHandler):
         def log_message(self,*a):pass
