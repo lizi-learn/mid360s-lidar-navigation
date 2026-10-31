@@ -2,6 +2,7 @@
 // Fixed-size local transport contract. No joint/joystick publisher.
 #include "physical_speed_input.hpp"
 #include "native_operator.hpp"
+#include "speed_response.hpp"
 #include <algorithm>
 #include <array>
 #include <mutex>
@@ -9,7 +10,7 @@
 
 namespace p2_nav {
 constexpr std::uint32_t frame_magic=0x504e4731;
-enum class Operation : std::uint32_t { authority=1, arm=2, velocity=3, stop=4, cancel_ack=5 };
+enum class Operation : std::uint32_t { authority=1, arm=2, velocity=3, stop=4, cancel_ack=5, measured_velocity=6 };
 struct LocalFrame {
   std::uint32_t magic=frame_magic, version=1;
   Operation operation=Operation::stop;
@@ -28,7 +29,7 @@ enum FrameFlag : std::uint32_t {
 };
 constexpr std::uint32_t frame_flags=127;
 struct MailboxSnapshot {
-  LocalFrame authority{}, arm{}, velocity{}, acknowledgement{};
+  LocalFrame authority{}, arm{}, velocity{}, acknowledgement{}, measured_velocity{};
   std::uint64_t stop_serial=0;
   std::uint64_t transport_epoch=0;
   NativeOperatorPacket native{};
@@ -64,6 +65,7 @@ class LocalMailbox {
   std::mutex input_mutex_, reply_mutex_;
   MailboxSnapshot input_{};
   LoopReply reply_{};
+  SpeedTrackingState tracking_{};
  public:
   void post(const LocalFrame& f){
     std::lock_guard<std::mutex> g(input_mutex_);
@@ -73,6 +75,7 @@ class LocalMailbox {
       case Operation::velocity:input_.velocity=f;break;
       case Operation::cancel_ack:input_.acknowledgement=f;break;
       case Operation::stop:++input_.stop_serial;break;
+      case Operation::measured_velocity:input_.measured_velocity=f;break;
     }
   }
   void connect(){
@@ -98,6 +101,11 @@ class LocalMailbox {
   }
   std::uint64_t epoch(){std::lock_guard<std::mutex> g(input_mutex_);return input_.transport_epoch;}
   LoopReply reply(){std::lock_guard<std::mutex> g(reply_mutex_);return reply_;}
+  void publish_tracking(const SpeedTrackingState& s){
+    std::unique_lock<std::mutex> g(reply_mutex_,std::try_to_lock);
+    if(g.owns_lock())tracking_=s;
+  }
+  SpeedTrackingState tracking(){std::lock_guard<std::mutex> g(reply_mutex_);return tracking_;}
 };
 
 class GaitNavigationInput {
@@ -106,10 +114,13 @@ class GaitNavigationInput {
   std::uint64_t stop_=0, arm_=0, packet_=0, ack_=0, tick_=0;
   std::uint64_t operator_instance_=0, receiver_instance_=0, receiver_generation_=0,client_=0;
   bool manual_override_=false;
+  SpeedResponse response_;
+  std::uint64_t response_tick_=0;
   static bool fresh(std::uint64_t t,std::uint64_t now,std::uint64_t limit){
     return t && (t>now?t-now<=5000000ULL:now-t<=limit);
   }
  public:
+  const SpeedTrackingState& policy_state()const{return response_.state();}
   LoopReply step(LocalMailbox& box,const NativeGaitState& n){
     box.try_input(snapshot_);
     const auto& a=snapshot_.authority;const auto& native=snapshot_.native;
@@ -174,6 +185,17 @@ class GaitNavigationInput {
     r.force_zero=!r.navigation_owned&&!r.manual_owned&&!factory_manual;
     const char* reason=r.manual_owned?"native_stick_manual_takeover":
       native_fresh&&native.mode==3?"native_manual_priority":selected.reason;
+    const auto& measured=snapshot_.measured_velocity;
+    const bool measured_matches=belongs(measured)&&measured.velocity.magic==0x504e4156&&
+      measured.velocity.version==1&&measured.velocity.flags==1&&
+      measured.velocity.instance==a.client&&measured.velocity.sequence==measured.sequence&&
+      !measured.velocity.reserved&&std::isfinite(measured.velocity.vy)&&std::abs(measured.velocity.vy)<=2.;
+    const double response_dt=response_tick_&&now>response_tick_?(now-response_tick_)*1e-9:.01;
+    response_tick_=now;
+    const auto tracking=response_.step(selected.vx,selected.wz,
+      measured.velocity.vx,measured.velocity.wz,response_dt,
+      measured_matches?measured.velocity.monotonic_ns:0,now,r.navigation_owned);
+    box.publish_tracking(tracking);
     std::strncpy(r.reason.data(),reason,r.reason.size()-1);box.publish(r);return r;
   }
 };

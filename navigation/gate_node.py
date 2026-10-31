@@ -30,9 +30,11 @@ class GateNode(Node):
         self.last = time.monotonic();self.command_time = 0.
         self.invalid_command_until=0.;self.invalid_command=(0.,0.,0.)
         self.scan_stamp = self.odom_stamp = None
+        self.velocity_source_ns=0
         self.calibration_ready=False;self.calibration_time=0.
         self.reference_mode='unknown';self.terrain_details={}
         self.command = (0., 0., 0.);self.ground = False;self.ground_time = 0.;self.paused = False
+        self.velocity_stages={}
         self.covariance_ok = False
         self.covariance = None
         self.collision_source_valid=False;self.collision_source_time=0.
@@ -41,6 +43,8 @@ class GateNode(Node):
         self.output = self.create_publisher(Twist, '/p2_nav/cmd_safe' if self.simulation else '/p2_nav/cmd_preview', 10)
         self.status = self.create_publisher(String, '/p2_nav/gate_status', 10)
         self.create_subscription(Twist, '/p2_nav/cmd_collision', self.on_command, 10)
+        for stage,topic in (('raw','/p2_nav/cmd_raw'),('buffered','/p2_nav/cmd_buffered'),('smoothed','/p2_nav/cmd_smooth')):
+            self.create_subscription(Twist,topic,lambda m,s=stage:self.on_stage(s,m),10)
         self.create_subscription(LaserScan, '/scan', self.on_scan, qos_profile_sensor_data)
         self.create_subscription(Odometry, '/odom', self.on_odom, 10)
         self.create_subscription(Bool, '/p2_nav/ground_ok', self.on_ground, 10)
@@ -54,8 +58,12 @@ class GateNode(Node):
 
     @staticmethod
     def stamp(msg):return msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+    def on_stage(self,stage,msg):
+        self.velocity_stages[stage]={'command':[msg.linear.x,msg.linear.y,msg.angular.z],
+            'received_monotonic_ns':time.monotonic_ns()}
     def on_command(self, msg):
         self.command = (msg.linear.x, msg.linear.y, msg.angular.z);self.command_time = time.monotonic()
+        self.on_stage('collision',msg)
         if self.gate.command_fault(self.command):
             self.invalid_command=self.command;self.invalid_command_until=self.command_time+.75
     def on_intent(self,msg):
@@ -70,6 +78,10 @@ class GateNode(Node):
     def on_scan(self, msg):self.scan_stamp = self.stamp(msg)
     def on_odom(self, msg):
         self.odom_stamp = self.stamp(msg);v=(msg.twist.twist.linear.x,msg.twist.twist.linear.y,msg.twist.twist.angular.z);self.measured=v if all(math.isfinite(x) for x in v) else None
+        # Translate the original ROS source age into this host's monotonic
+        # domain once at receipt. Repeated status/RPC sends retain this value.
+        source_age=(self.get_clock().now().nanoseconds*1e-9)-self.odom_stamp
+        self.velocity_source_ns=time.monotonic_ns()-round(source_age*1e9) if self.measured else 0
     def on_ground(self, msg):self.ground = msg.data;self.ground_time = time.monotonic()
     def on_terrain(self,msg):
         try:
@@ -134,7 +146,7 @@ class GateNode(Node):
                 'navigation_reference':getattr(self,'reference_mode','unknown'),'navigation_reference_ready':self.calibration_ready and now-self.calibration_time<.2,
                 'hardware_execution_enabled':False,'speed_cap':self.gate.speed,
                 'velocity_scale':self.gate.velocity_scale,'effective_speed_cap':self.gate.speed*self.gate.velocity_scale,'reason':self.gate.reason,
-                'motion_phase':'waiting_clearance' if self.recovery_wait else self.handoff.phase if self.handoff else 'direct','body_velocity_feedback':self.measured,'command':result,'scan_age':scan_age,'odom_age':odom_age,'localized':localized,
+                'motion_phase':'waiting_clearance' if self.recovery_wait else self.handoff.phase if self.handoff else 'direct','body_velocity_feedback':self.measured,'velocity_source_monotonic_ns':self.velocity_source_ns,'velocity_stages':self.velocity_stages,'command':result,'scan_age':scan_age,'odom_age':odom_age,'localized':localized,
                 'ground_ok':self.ground and now - self.ground_time < .5,
                 'localization_covariance':self.covariance,'map_transform_age':age})
             self.status.publish(status)

@@ -31,7 +31,7 @@ class Console(Node):
         if gait_socket:
             if simulation:raise ValueError('Physical gait transport requires a separate explicit contract fixture, never normal simulation')
             from gait_transport import GaitTransport
-            self.gait=GaitTransport(gait_socket)
+            self.gait=GaitTransport(gait_socket,trace_path=runtime/'gait-velocity.private.jsonl')
         self.robot_name=None;self.runtime=runtime;self.simulation=simulation;self.mode='idle';self.controller='rpp';self.process=None
         self.minimum_speed=minimum_speed;self.footprint=footprint;self.odometry_model=odometry_model;self.gait_profile=gait_profile
         self.maximum_speed=.15 if gait_profile=='p2-flat-model' else .30

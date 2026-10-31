@@ -20,7 +20,7 @@ class CollisionSourceGateTests(unittest.TestCase):
         n.gate=ForwardGate();n.gate.armed=True;n.simulation=False;n.require_localization=False
         n.handoff=n.recovery=None;n.recovery_wait=False;n.collision_stop=False
         n.last=now-.05;n.command_time=now;n.command=(.1,0.,0.);n.invalid_command_until=0.
-        n.scan_stamp=n.odom_stamp=100.;n.calibration_ready=True;n.calibration_time=now
+        n.scan_stamp=n.odom_stamp=100.;n.velocity_source_ns=0;n.velocity_stages={};n.calibration_ready=True;n.calibration_time=now
         n.ground=True;n.ground_time=now;n.paused=False;n.measured=(0,0,0);n.covariance=None
         n.collision_source_valid=True;n.collision_source_time=now;n.counter=0
         n.arm_generation=4;n.collision_fault_generation=-1

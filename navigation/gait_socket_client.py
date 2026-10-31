@@ -9,6 +9,7 @@ MAGIC=0x504E4731
 HEADER=struct.Struct('<4I12Q2I')
 VELOCITY=struct.Struct('<IHHQQQfffI')
 REPLY=struct.Struct('<2I12Q8I3fI96s')
+TRACKING=struct.Struct('<6dQ2I')
 assert HEADER.size+VELOCITY.size==168 and REPLY.size==248
 
 class Operation(enum.IntEnum):
@@ -17,6 +18,7 @@ class Operation(enum.IntEnum):
     VELOCITY=3
     STOP=4
     CANCEL_ACK=5
+    MEASURED_VELOCITY=6
 
 @dataclasses.dataclass(frozen=True)
 class Authority:
@@ -56,6 +58,10 @@ def encode_frame(operation,client,sequence,now_ns,authority,reply=None,velocity=
         vx,vy,wz=velocity
         if not all(math.isfinite(v) for v in velocity) or not(0<=vx<=.15 and vy==0 and abs(wz)<=.24):
             raise ValueError('physical_forward_speed_contract')
+    elif operation==Operation.MEASURED_VELOCITY:
+        if (not all(math.isfinite(v) for v in velocity) or abs(velocity[0])>2 or
+                abs(velocity[1])>2 or abs(velocity[2])>4 or not command_stamp_ns):
+            raise ValueError('invalid_measured_velocity')
     elif velocity!=(0.,0.,0.):raise ValueError('velocity_only_in_velocity_operation')
     if not client or not sequence:raise ValueError('missing_client_identity')
     if authority.mode not in (0,1,2,3) or authority.flags&~127:raise ValueError('authority_flags')
@@ -69,7 +75,7 @@ def encode_frame(operation,client,sequence,now_ns,authority,reply=None,velocity=
 class GaitClient:
     def __init__(self,path,client_instance):
         if not client_instance:raise ValueError('client_instance_required')
-        self.client=client_instance;self.sequence=0;self.reply=None
+        self.client=client_instance;self.sequence=0;self.reply=None;self.tracking=None
         self.socket=socket.socket(socket.AF_UNIX,socket.SOCK_SEQPACKET)
         self.socket.settimeout(.1)
         try:self.socket.connect(path)
@@ -83,7 +89,16 @@ class GaitClient:
         frame=encode_frame(operation,self.client,self.sequence,time.monotonic_ns(),authority,self.reply,velocity,command_stamp_ns)
         try:
             if self.socket.send(frame)!=len(frame):raise ValueError('short_gait_request')
-            r=decode_reply(self.socket.recv(REPLY.size+1),time.monotonic_ns())
+            extended=operation==Operation.MEASURED_VELOCITY
+            data=self.socket.recv(REPLY.size+TRACKING.size+1)
+            if len(data)!=REPLY.size+(TRACKING.size if extended else 0):raise ValueError('gait_reply_size')
+            r=decode_reply(data[:REPLY.size],time.monotonic_ns())
+            if extended:
+                v=TRACKING.unpack(data[REPLY.size:])
+                if not all(math.isfinite(x) for x in v[:6]) or v[-2] not in (0,1) or v[-1]>4:
+                    raise ValueError('invalid_speed_tracking_reply')
+                self.tracking=dict(zip(('target_x','target_yaw','measured_x','measured_yaw',
+                    'policy_input_x','policy_input_yaw','source_monotonic_ns','valid','reason'),v))
             if self.reply and (r.controller,r.generation,r.transport_epoch)!=(self.reply.controller,self.reply.generation,self.reply.transport_epoch):
                 raise ValueError('controller_or_connection_changed_explicit_reconnect_required')
             self.reply=r;return r

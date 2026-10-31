@@ -1,5 +1,5 @@
 """Ordinary thread for explicit session->physical-speed lease, no actuator I/O."""
-import threading,time,secrets
+import threading,time,secrets,math
 from gait_socket_client import GaitClient,Operation,Authority
 
 LOCAL_READY=1|2|4|8|128|256
@@ -16,10 +16,15 @@ def readiness_error(r):
     return '；'.join(missing)
 
 class GaitTransport:
-    def __init__(self,path):
+    def __init__(self,path,trace_path=None):
         self.path=path;self.lock=threading.RLock();self.running=True;self.client=None
         self.feedback=None;self.error='步态接口尚未连接';self.health_stamp=0;self.health_flags=0
         self.command=(0.,0.,0.);self.command_stamp=0;self.start_request=None
+        self.measured=None;self.measured_source_ns=0;self.speed_tracking=None
+        self.stage_commands={};self.trace=None
+        if trace_path:
+            from velocity_trace import VelocityTrace
+            self.trace=VelocityTrace(trace_path)
         self.operator_observer=None
         self.phase='idle';self.generation=None;self.stop_serial=0;self.sent_stop=0
         self.ack_requested=None;self.started=threading.Event();self.attempt_started=0.
@@ -37,6 +42,12 @@ class GaitTransport:
                 (32 if gate.get('ground_ok') else 0)|(64 if gate.get('localized') else 0)
             self.command=tuple(gate.get('command',(0.,0.,0.))) if command_enabled else (0.,0.,0.)
             self.command_stamp=self.health_stamp
+            self.stage_commands=gate.get('velocity_stages',{})
+            measured=gate.get('body_velocity_feedback')
+            if (isinstance(measured,(tuple,list)) and len(measured)==3 and
+                    all(isinstance(v,(int,float)) and math.isfinite(v) for v in measured)):
+                self.measured=tuple(measured);self.measured_source_ns=int(gate.get('velocity_source_monotonic_ns',0))
+            else:self.measured=None;self.measured_source_ns=0
     def arm(self,generation,timeout=2.):
         with self.lock:
             if not self.ready():raise ValueError(self.error or '当前步态或物理开关未就绪')
@@ -55,7 +66,7 @@ class GaitTransport:
             self.ack_requested=(r.controller,r.generation,r.transport_epoch,r.cancel_generation) if r and r.cancel_pending else None
     def _fault(self,message):
         with self.lock:
-            self.error=message;self.phase='disconnected';self.feedback=None
+            self.error=message;self.phase='disconnected';self.feedback=None;self.speed_tracking=None
             self.start_request=None;self.generation=None;self.started.set()
         if self.client:self.client.close()
         self.client=None
@@ -75,6 +86,9 @@ class GaitTransport:
                     if self.phase in ('idle','stopped'):self.error=readiness_error(r)
                     authority=Authority(r.receiver_instance,r.receiver_generation,r.native_instance,r.native_stamp,
                         self.health_stamp,0,self.health_flags)
+                    if self.measured is not None and self.measured_source_ns:
+                        self.client.exchange(Operation.MEASURED_VELOCITY,authority,self.measured,self.measured_source_ns)
+                        self.speed_tracking=self.client.tracking
                     if self.stop_serial!=self.sent_stop:
                         self.client.exchange(Operation.STOP,authority);self.sent_stop=self.stop_serial
                     elif self.ack_requested:
@@ -97,6 +111,13 @@ class GaitTransport:
             except (OSError,ValueError,KeyError,TypeError,OverflowError) as exc:self._fault(str(exc))
             observer=self.operator_observer
             if observer:observer()
+            if self.trace:
+                with self.lock:
+                    self.trace.submit({'phase':self.phase,'error':self.error,'generation':self.generation,
+                        'target':self.command,'target_source_ns':self.command_stamp,
+                        'velocity_stages':self.stage_commands,'speed_tracking':self.speed_tracking,
+                        'controller_tick':self.feedback.tick if self.feedback else None,
+                        'native_reason':self.feedback.reason if self.feedback else None})
             time.sleep(max(.001,.02-(time.monotonic()-start)))
     def operator_authority(self):
         with self.lock:
@@ -115,6 +136,8 @@ class GaitTransport:
                 'controller_instance':r.controller if r else None,'policy_generation':r.generation if r else None,
                 'navigation_owned':bool(r and r.navigation_owned),'manual_owned':bool(r and r.manual_owned),
                 'tick':r.tick if r else 0,'velocity':[r.vx,r.vy,r.wz] if r else None,
+                'velocity_semantics':'requested_physical_target_not_measured_speed',
+                'speed_tracking':self.speed_tracking,
                 'armed':bool(r and r.armed),'force_zero':bool(r and r.force_zero),
                 'receiver_instance':r.receiver_instance if r else 0,'receiver_generation':r.receiver_generation if r else 0,
                 'native_source_sequence':r.native_sequence if r else 0,
@@ -125,3 +148,4 @@ class GaitTransport:
     def close(self):
         self.stop();self.running=False;self.thread.join(timeout=.5)
         if self.client:self.client.close()
+        if self.trace:self.trace.close()

@@ -25,7 +25,7 @@ class GaitNavigationServer {
   static bool valid(const LocalFrame& p){
     return p.magic==frame_magic&&p.version==1&&p.client&&p.sequence&&p.monotonic_ns&&
       !p.reserved&&!(p.flags&~frame_flags)&&
-      static_cast<unsigned>(p.operation)>=1&&static_cast<unsigned>(p.operation)<=5;
+      static_cast<unsigned>(p.operation)>=1&&static_cast<unsigned>(p.operation)<=6;
   }
   bool trusted(int fd) const {
     ucred cred{};socklen_t length=sizeof(cred);
@@ -67,7 +67,12 @@ class GaitNavigationServer {
         for(int i=0;reply.transport_epoch!=epoch&&i<25;++i){
           std::this_thread::sleep_for(std::chrono::milliseconds(1));reply=box_.reply();
         }
-        if(reply.transport_epoch!=epoch||::send(peer,&reply,sizeof(reply),MSG_DONTWAIT|MSG_NOSIGNAL)!=sizeof(reply))close_peer();
+        if(reply.transport_epoch!=epoch){close_peer();continue;}
+        if(f.operation==Operation::measured_velocity){
+          struct TrackingReply {LoopReply loop;SpeedTrackingState tracking;} extended{reply,box_.tracking()};
+          static_assert(sizeof(TrackingReply)==312);
+          if(::send(peer,&extended,sizeof(extended),MSG_DONTWAIT|MSG_NOSIGNAL)!=sizeof(extended))close_peer();
+        } else if(::send(peer,&reply,sizeof(reply),MSG_DONTWAIT|MSG_NOSIGNAL)!=sizeof(reply))close_peer();
       }
     }
     close_peer();close_native();
@@ -115,5 +120,6 @@ class GaitNavigationServer {
     path_.clear();
   }
   LoopReply step(const NativeGaitState& n){return loop_.step(box_,n);}
+  const SpeedTrackingState& policy_state()const{return loop_.policy_state();}
 };
 } // namespace p2_nav
