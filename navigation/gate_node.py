@@ -33,6 +33,8 @@ class GateNode(Node):
         self.command = (0., 0., 0.);self.ground = False;self.ground_time = 0.;self.paused = False
         self.covariance_ok = False
         self.covariance = None
+        self.collision_source_valid=False;self.collision_source_time=0.
+        self.arm_generation=-1;self.collision_fault_generation=-1
         self.buffer = Buffer();self.listener = TransformListener(self.buffer, self)
         self.output = self.create_publisher(Twist, '/p2_nav/cmd_safe' if self.simulation else '/p2_nav/cmd_preview', 10)
         self.status = self.create_publisher(String, '/p2_nav/gate_status', 10)
@@ -41,6 +43,7 @@ class GateNode(Node):
         self.create_subscription(Odometry, '/odom', self.on_odom, 10)
         self.create_subscription(Bool, '/p2_nav/ground_ok', self.on_ground, 10)
         self.create_subscription(String,'/p2_nav/terrain_status',self.on_terrain,10)
+        self.create_subscription(Bool,'/p2_nav/collision_source_valid',self.on_collision_source,10)
         self.create_subscription(String, '/p2_nav/operator', self.on_operator, 10)
         localization_qos=QoSProfile(depth=1,durability=DurabilityPolicy.TRANSIENT_LOCAL,reliability=ReliabilityPolicy.RELIABLE)
         self.create_subscription(PoseWithCovarianceStamped, '/amcl_pose', self.on_amcl, localization_qos)
@@ -56,6 +59,12 @@ class GateNode(Node):
     def on_intent(self,msg):
         self.intent=(msg.linear.x,msg.linear.y,msg.angular.z);self.intent_time=time.monotonic()
     def on_collision_state(self,msg):self.collision_stop=msg.action_type==CollisionMonitorState.STOP
+    def on_collision_source(self,msg):
+        self.collision_source_valid=msg.data is True;self.collision_source_time=time.monotonic()
+        if not self.collision_source_valid:self.revoke_collision_authority()
+    def revoke_collision_authority(self):
+        self.gate.armed=False
+        self.collision_fault_generation=max(self.collision_fault_generation,self.arm_generation)
     def on_scan(self, msg):self.scan_stamp = self.stamp(msg)
     def on_odom(self, msg):
         self.odom_stamp = self.stamp(msg);v=(msg.twist.twist.linear.x,msg.twist.twist.linear.y,msg.twist.twist.angular.z);self.measured=v if all(math.isfinite(x) for x in v) else None
@@ -74,7 +83,12 @@ class GateNode(Node):
         try:
             v = json.loads(msg.data)
             if 'speed' in v:self.gate.set_speed(float(v['speed']))
-            if 'armed' in v:self.gate.armed = bool(v['armed'])
+            if 'armed' in v:
+                generation=v.get('arm_generation')
+                fresh_generation=(type(generation) is int and generation>=0
+                    and generation>=self.arm_generation and generation>self.collision_fault_generation)
+                self.gate.armed=bool(v['armed']) and fresh_generation
+                if self.gate.armed:self.arm_generation=generation
             if 'paused' in v:self.paused = bool(v['paused'])
         except (ValueError, TypeError, KeyError):self.gate.armed = False
 
@@ -91,10 +105,12 @@ class GateNode(Node):
             except Exception:localized = False
         scan_age = stamp - self.scan_stamp if self.scan_stamp is not None else 999.
         odom_age = stamp - self.odom_stamp if self.odom_stamp is not None else 999.
+        collision_source_ok=self.collision_source_valid and 0<=now-self.collision_source_time<.3
+        if not collision_source_ok:self.revoke_collision_authority()
         # A subsequent valid message must not erase an unsafe input between ticks.
         command=self.invalid_command if now<self.invalid_command_until else self.command
         if self.recovery:
-            clear=(not self.collision_stop and self.ground and now-self.ground_time<.5 and localized
+            clear=(collision_source_ok and not self.collision_stop and self.ground and now-self.ground_time<.5 and localized
                 and -.05<=scan_age<=self.gate.limits.sensor_timeout and -.05<=odom_age<=self.gate.limits.sensor_timeout
                 and 0<=now-self.command_time<=self.gate.limits.command_timeout and not self.gate.command_fault(command))
             self.recovery_wait=not self.recovery.step(now,clear)
@@ -109,7 +125,7 @@ class GateNode(Node):
         self.counter += 1
         if True: #20Hz original evaluations; transport does not restamp cached health
             status = String();status.data = json.dumps({'armed':self.gate.armed,'simulation':self.simulation,
-                'evaluated_monotonic_ns':time.monotonic_ns(),'data_fresh':-.05<=min(scan_age,odom_age) and max(scan_age,odom_age)<=self.gate.limits.sensor_timeout,'calibration_ready':self.calibration_ready and now-self.calibration_time<.2,
+                'evaluated_monotonic_ns':time.monotonic_ns(),'data_fresh':collision_source_ok and -.05<=min(scan_age,odom_age) and max(scan_age,odom_age)<=self.gate.limits.sensor_timeout,'collision_source_valid':collision_source_ok,'calibration_ready':self.calibration_ready and now-self.calibration_time<.2,
                 'hardware_execution_enabled':False,'speed_cap':self.gate.speed,'reason':self.gate.reason,
                 'motion_phase':'waiting_clearance' if self.recovery_wait else self.handoff.phase if self.handoff else 'direct','body_velocity_feedback':self.measured,'command':result,'scan_age':scan_age,'odom_age':odom_age,'localized':localized,
                 'ground_ok':self.ground and now - self.ground_time < .5,

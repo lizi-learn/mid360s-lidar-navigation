@@ -49,7 +49,7 @@ class Console(Node):
         self.create_subscription(RosPath,'/plan',self.on_path,10)
         self.create_subscription(CollisionMonitorState,'/p2_nav/collision_state',self.on_collision,10)
         self.create_subscription(String,'/p2_nav/operator_authority',self.on_authority,10)
-        self.create_subscription(String,'/p2_nav/gate_status',lambda m:setattr(self,'gate',json.loads(m.data)),10)
+        self.create_subscription(String,'/p2_nav/gate_status',self.on_gate,10)
         self.create_subscription(String,'/p2_nav/sim_truth',lambda m:setattr(self,'truth',json.loads(m.data)),10)
         self.operator=self.create_publisher(String,'/p2_nav/operator',10)
         self.limiter=self.create_publisher(SpeedLimit,'/speed_limit',10)
@@ -93,9 +93,16 @@ class Console(Node):
     def execution_ready(self):
         gait=getattr(self,'gait',None)
         return self.simulation or bool(gait and gait.ready())
+    def on_gate(self,msg):
+        with self.lock:
+            try:self.gate=json.loads(msg.data)
+            except (ValueError,TypeError):self.gate={}
+            if self.gate.get('collision_source_valid') is not True and self.session.phase in ('starting','executing','replanning'):
+                self.session.cancel();self.stop_actions()
+                self.session._notice('避障观测失效，导航已停止；恢复后请重新确认目标')
     def health_ready(self):
         g=self.gate
-        return bool(g.get('localized') and g.get('ground_ok') and
+        return bool(g.get('collision_source_valid') is True and g.get('data_fresh') is True and g.get('localized') and g.get('ground_ok') and
             -.05<=g.get('scan_age',999)<=.5 and -.05<=g.get('odom_age',999)<=.5)
     def poll_gait_authority(self,now):
         gait=getattr(self,'gait',None)
@@ -134,7 +141,7 @@ class Console(Node):
             if self.session.phase=='replanning':self.session.reroute(now,False,not self.collision_stop and self.health_ready())
             if self.session.phase in ('starting','executing','replanning'):
                 if not self.health_ready():self.session.cancel();self.session._notice('地面、定位或传感器未就绪，导航已停止')
-                self.op(armed=not self.session.status(now)['force_navigation_zero'],paused=self.session.status(now)['force_navigation_zero'])
+                self.op(armed=not self.session.status(now)['force_navigation_zero'],paused=self.session.status(now)['force_navigation_zero'],arm_generation=self.session.generation)
     def stop_actions(self):
         gait=getattr(self,'gait',None)
         if gait and gait.phase!='stopped':gait.stop()
@@ -278,7 +285,7 @@ class Console(Node):
             if self.session.generation!=generation or self.session.phase!=expected:
                 handle.cancel_goal_async();self.cancel_sent_handles.append(handle)
             elif kind=='nav':
-                if self.session.started(generation,time.monotonic()):self.op(armed=True,paused=False,speed=self.speed_value)
+                if self.session.started(generation,time.monotonic()):self.op(armed=True,paused=False,speed=self.speed_value,arm_generation=generation)
                 else:handle.cancel_goal_async();self.cancel_sent_handles.append(handle)
             return handle
     def action_terminal(self,kind,generation,handle,future):

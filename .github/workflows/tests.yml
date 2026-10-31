@@ -33,6 +33,21 @@ jobs:
       - uses: actions/checkout@v4
       - run: apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ros-humble-nav2-smac-planner ros-humble-nav2-regulated-pure-pursuit-controller ros-humble-nav2-collision-monitor python3-colcon-common-extensions patch
       - run: bash scripts/build-nav-controller.sh
+      - name: Reject missing, stale, unknown and untransformable obstacle observations
+        shell: bash
+        env:
+          ROS_LOCALHOST_ONLY: '1'
+          ROS_DOMAIN_ID: '215'
+        run: |
+          source /opt/ros/humble/setup.bash
+          source nav_controller_ws/install/setup.bash
+          python3 experiments/collision_source_guard/check.py --binary "$GITHUB_WORKSPACE/nav_controller_ws/install/p2_nav_controller/lib/p2_nav_controller/observed_collision_monitor" --output /tmp/collision-source-guard.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: collision-source-component-evidence
+          path: /tmp/collision-source-guard*
+          if-no-files-found: ignore
       - run: bash experiments/continuous_forward/build.sh
       - run: bash experiments/continuous_forward/check_collision.sh
 

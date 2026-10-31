@@ -1,7 +1,7 @@
 """Exercise the actual Console action tracking with controlled action futures.
 No ROS imports or transport/motors are involved; callback order is deliberate.
 """
-import ast,unittest,threading,time
+import ast,unittest,threading,time,json
 from pathlib import Path
 from concurrent.futures import Future
 import sys
@@ -10,7 +10,7 @@ from session import NavigationSession
 
 source=Path(__file__).resolve().parents[1]/'navigation/console.py'
 cls=next(n for n in ast.parse(source.read_text()).body if isinstance(n,ast.ClassDef) and n.name=='Console')
-ns={'Node':object,'time':time};exec(compile(ast.Module(body=[cls],type_ignores=[]),str(source),'exec'),ns)
+ns={'Node':object,'time':time,'json':json};exec(compile(ast.Module(body=[cls],type_ignores=[]),str(source),'exec'),ns)
 Console=ns['Console']
 class Handle:
     accepted=True
@@ -29,6 +29,16 @@ def fixture():
     c.goal_generation=g;c.emitted=[];c.op=lambda **kw:c.emitted.append(kw);return c,g
 
 class ConsoleCancellationTests(unittest.TestCase):
+    def test_collision_source_fault_cancels_goal_and_recovery_does_not_resume(self):
+        c,g=fixture();c.session.planned(g,8,time.monotonic());c.session.start(g,time.monotonic(),True,True)
+        h=Handle();f=Future();f.set_result(h);c.track_acceptance('nav',g,f)
+        message=type('Message',(),{})();message.data=json.dumps({'collision_source_valid':False})
+        c.on_gate(message)
+        self.assertEqual(h.cancel_count,1);self.assertTrue(c.session.cancel_pending)
+        message.data=json.dumps({'collision_source_valid':True,'data_fresh':True,'localized':True,'ground_ok':True,'scan_age':0.,'odom_age':0.})
+        c.on_gate(message);self.assertTrue(c.health_ready())
+        self.assertNotEqual(c.session.phase,'executing')
+        self.assertEqual(c.emitted[-1],{'armed':False,'paused':True})
     def test_cancel_before_delayed_nav_acceptance_waits_for_terminal(self):
         c,g=fixture();c.session.planned(g,8,time.monotonic());c.session.start(g,time.monotonic(),True,True)
         c.pending_nav_accept=True;c.session.cancel();c.stop_actions();self.assertTrue(c.session.cancel_pending)

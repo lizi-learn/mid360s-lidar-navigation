@@ -1,0 +1,180 @@
+{
+  "scope": "Synthetic isolated monitor component, no robot model/plant or gait socket, actuator writes0. Static TF fixture, original source stamps except explicitly stale fault injection.",
+  "seed": 0,
+  "network_mode": "none (verified by docker inspect)",
+  "ros_domain": 214,
+  "old_binary_faults_reproduced": true,
+  "baseline": [
+    {
+      "case": "missing",
+      "output_samples": 13,
+      "max_abs_velocity": 0.1,
+      "state_values": [
+        0
+      ],
+      "source_health_values": [],
+      "passed_expected_behavior": true
+    },
+    {
+      "case": "clear",
+      "output_samples": 13,
+      "max_abs_velocity": 0.1,
+      "state_values": [
+        0
+      ],
+      "source_health_values": [],
+      "passed_expected_behavior": true
+    },
+    {
+      "case": "obstacle",
+      "output_samples": 13,
+      "max_abs_velocity": 0.0,
+      "state_values": [
+        1
+      ],
+      "source_health_values": [],
+      "passed_expected_behavior": true
+    },
+    {
+      "case": "unknown",
+      "output_samples": 13,
+      "max_abs_velocity": 0.1,
+      "state_values": [
+        0
+      ],
+      "source_health_values": [],
+      "passed_expected_behavior": true
+    },
+    {
+      "case": "stale",
+      "output_samples": 13,
+      "max_abs_velocity": 0.1,
+      "state_values": [
+        0
+      ],
+      "source_health_values": [],
+      "passed_expected_behavior": true
+    },
+    {
+      "case": "bad_tf",
+      "output_samples": 5,
+      "max_abs_velocity": 0.1,
+      "state_values": [
+        0
+      ],
+      "source_health_values": [],
+      "passed_expected_behavior": true
+    },
+    {
+      "case": "clear_recovery",
+      "output_samples": 13,
+      "max_abs_velocity": 0.1,
+      "state_values": [
+        0
+      ],
+      "source_health_values": [],
+      "passed_expected_behavior": true
+    }
+  ],
+  "fixed": [
+    {
+      "case": "missing",
+      "output_samples": 13,
+      "max_abs_velocity": 0.0,
+      "state_values": [
+        1
+      ],
+      "source_health_values": [
+        false
+      ],
+      "passed_expected_behavior": true
+    },
+    {
+      "case": "clear",
+      "output_samples": 13,
+      "max_abs_velocity": 0.1,
+      "state_values": [
+        0
+      ],
+      "source_health_values": [
+        true
+      ],
+      "passed_expected_behavior": true
+    },
+    {
+      "case": "obstacle",
+      "output_samples": 13,
+      "max_abs_velocity": 0.0,
+      "state_values": [
+        1
+      ],
+      "source_health_values": [
+        true
+      ],
+      "passed_expected_behavior": true
+    },
+    {
+      "case": "unknown",
+      "output_samples": 13,
+      "max_abs_velocity": 0.0,
+      "state_values": [
+        1
+      ],
+      "source_health_values": [
+        false
+      ],
+      "passed_expected_behavior": true
+    },
+    {
+      "case": "stale",
+      "output_samples": 13,
+      "max_abs_velocity": 0.0,
+      "state_values": [
+        1
+      ],
+      "source_health_values": [
+        false
+      ],
+      "passed_expected_behavior": true
+    },
+    {
+      "case": "bad_tf",
+      "output_samples": 5,
+      "max_abs_velocity": 0.0,
+      "state_values": [
+        1
+      ],
+      "source_health_values": [
+        false
+      ],
+      "passed_expected_behavior": true
+    },
+    {
+      "case": "clear_recovery",
+      "output_samples": 13,
+      "max_abs_velocity": 0.1,
+      "state_values": [
+        0
+      ],
+      "source_health_values": [
+        true
+      ],
+      "passed_expected_behavior": true
+    }
+  ],
+  "component_cases_passed": 7,
+  "python_tests_passed": 137,
+  "physical_navigation_accepted": false,
+  "robot_commands_sent": 0,
+  "full_biped_failure_records_retained": true,
+  "limits_changed": false,
+  "sources": {
+    "monitor_sha256": "c44c3e715e5b39cc6fdc772f3cd20ecad81d252efe581fb7db79f07c1eb94eb3"
+  },
+  "prior_attempts": [
+    "a1 isolation preflight failed before execution",
+    "a2 fixture array-slice TypeError; no final verdict",
+    "a3 old defect reproduced; candidate configure failed from temporary parameter lifetime, repaired before a4"
+  ],
+  "isolation_audit": "The older reusable navigation container currently has bridge networking. Prior network-none claims without an inspect receipt are unverified; a4 used a separate network-none container, now stopped."
+}
