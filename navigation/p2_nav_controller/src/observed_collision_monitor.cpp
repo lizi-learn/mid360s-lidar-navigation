@@ -2,6 +2,7 @@
 // Reuse Humble source projection and native polygon decisions, with an explicit
 // unknown-source stop before publishing any velocity. Never infer obstacles
 // from a zero command or substitute a duplicate polygon implementation.
+#include <chrono>
 #include <memory>
 #include <vector>
 #include "nav2_collision_monitor/collision_monitor_node.hpp"
@@ -30,7 +31,24 @@ public:
     const double age=(now-rclcpp::Time(this->data_->header.stamp,now.get_clock_type())).seconds();
     if(age<-.05 || age>this->source_timeout_.seconds())return;
     const auto before=points.size();
-    Base::getData(now,points);
+    // Sensor/odometry pipelines report already sampled poses, not a pose at
+    // the wall-clock instant. Project into the newest actually available base
+    // pose, while checking BOTH original source and TF age against real now.
+    // Never extrapolate, renew a timestamp, or turn failed TF into clear space.
+    auto projection_time=now;
+    if(this->base_shift_correction_) {
+      try {
+        const auto tf=this->tf_buffer_->lookupTransform(
+          this->global_frame_id_,this->base_frame_id_,tf2::TimePointZero);
+        const rclcpp::Time pose_time(tf.header.stamp,now.get_clock_type());
+        if(pose_time.nanoseconds()!=0) { // A static fixture transform is timeless.
+          const auto pose_age=(now-pose_time).seconds();
+          if(pose_age<-.05 || pose_age>this->source_timeout_.seconds())return;
+          if(pose_time<now)projection_time=pose_time;
+        }
+      } catch(const tf2::TransformException &) {return;}
+    }
+    Base::getData(projection_time,points);
     this->observed=points.size()>before;
   }
 };
@@ -40,6 +58,7 @@ class ObservedCollisionMonitor : public nav2_collision_monitor::CollisionMonitor
   rclcpp_lifecycle::LifecyclePublisher<State>::SharedPtr state_;
   rclcpp_lifecycle::LifecyclePublisher<std_msgs::msg::Bool>::SharedPtr source_health_;
   std::vector<std::shared_ptr<ObservationValidity>> checks_;
+  rclcpp::TimerBase::SharedPtr observation_timer_;
 public:
   explicit ObservedCollisionMonitor(const rclcpp::NodeOptions &options)
   : CollisionMonitor(options) {}
@@ -87,6 +106,14 @@ protected:
         // Leave its name empty instead of inventing an attribution.
         state_->publish(out);
       });
+    // Source readiness must not depend on a movement request: otherwise an
+    // idle robot cannot start because the gate waits for this very health bit.
+    observation_timer_=create_wall_timer(std::chrono::milliseconds(100),[this] {
+      if(!process_active_)return;
+      std::vector<nav2_collision_monitor::Point> points;
+      observe_sources(points);
+    });
+    observation_timer_->cancel();
     return result;
   }
   template<class Source> void add_source(const std::string &name,const std::string &base,
@@ -94,15 +121,19 @@ protected:
     auto source=std::make_shared<CheckedSource<Source>>(shared_from_this(),name,tf_buffer_,base,odom,tolerance,timeout,shift);
     source->configure();sources_.push_back(source);checks_.push_back(source);
   }
-  void verified_process(const nav2_collision_monitor::Velocity &requested) {
-    using namespace nav2_collision_monitor;
-    std::vector<Point> points;bool valid=true;std::size_t enabled=0;
+  bool observe_sources(std::vector<nav2_collision_monitor::Point> &points) {
+    bool valid=true;std::size_t enabled=0;
     const auto now=this->now();
     for(std::size_t i=0;i<sources_.size();++i)if(sources_[i]->getEnabled()) {
       ++enabled;sources_[i]->getData(now,points);valid=valid && checks_[i]->observed;
     }
     valid=valid && enabled>0;
     std_msgs::msg::Bool health;health.data=valid;source_health_->publish(health);
+    return valid;
+  }
+  void verified_process(const nav2_collision_monitor::Velocity &requested) {
+    using namespace nav2_collision_monitor;
+    std::vector<Point> points;const bool valid=observe_sources(points);
     Action action{DO_NOTHING,requested};std::shared_ptr<Polygon> cause;
     if(!valid) {
       // No nonzero velocity is published before checking every active source.
@@ -122,13 +153,18 @@ protected:
     publishVelocity(action);publishPolygons();robot_action_prev_=action;
   }
   nav2_util::CallbackReturn on_activate(const rclcpp_lifecycle::State &s) override {
-    state_->on_activate();source_health_->on_activate();return CollisionMonitor::on_activate(s);
+    state_->on_activate();source_health_->on_activate();
+    const auto result=CollisionMonitor::on_activate(s);
+    if(result==nav2_util::CallbackReturn::SUCCESS)observation_timer_->reset();
+    return result;
   }
   nav2_util::CallbackReturn on_deactivate(const rclcpp_lifecycle::State &s) override {
+    if(observation_timer_)observation_timer_->cancel();
     const auto result=CollisionMonitor::on_deactivate(s);state_->on_deactivate();source_health_->on_deactivate();return result;
   }
   nav2_util::CallbackReturn on_cleanup(const rclcpp_lifecycle::State &s) override {
-    checks_.clear();const auto result=CollisionMonitor::on_cleanup(s);state_.reset();source_health_.reset();return result;
+    if(observation_timer_)observation_timer_->cancel();
+    observation_timer_.reset();checks_.clear();const auto result=CollisionMonitor::on_cleanup(s);state_.reset();source_health_.reset();return result;
   }
 };
 int main(int argc,char **argv){
