@@ -6,6 +6,6 @@
   <license>MIT</license>
   <buildtool_depend>ament_cmake</buildtool_depend>
   <depend>nav2_regulated_pure_pursuit_controller</depend><depend>nav2_core</depend><depend>nav2_smac_planner</depend><depend>pluginlib</depend>
-  <depend>nav2_collision_monitor</depend><depend>nav2_msgs</depend>
+  <depend>nav2_collision_monitor</depend><depend>nav2_msgs</depend><depend>std_msgs</depend>
   <export><build_type>ament_cmake</build_type></export>
 </package>
