@@ -31,7 +31,7 @@ class BufferTest(unittest.TestCase):
     def test_fault_and_unclassified_zero_immediate(self):
         for fault in ('hard','stale','frame','zero'):
             b=MotionBuffer();self.run_steps(b,(.1,0,0),(.1,0,0),100)
-            out=b.step((0,0,0) if fault=='zero' else (.1,0,0),(.1,0,0),1.,.2 if fault=='stale' else .01,
+            out=b.step((0,0,0) if fault=='zero' else (.1,0,0),(.1,0,0),1.,.501 if fault=='stale' else .01,
                 frame_verified=fault!='frame',hard_stop=fault=='hard')
             self.assertEqual(out,(0,0,0));self.assertEqual(b.phase,'immediate_zero')
     def test_pivot_rechecks_translation_after_turn_has_started(self):
@@ -49,6 +49,18 @@ class BufferTest(unittest.TestCase):
         resumed=self.run_steps(b,(0,0,.2),(0,0,0),70,start=1.47)
         self.assertGreater(resumed[-1][2],0)
         self.assertTrue(all(0<=x[2]<=.2 for x in resumed))
+    def test_ten_hz_original_feedback_does_not_repeatedly_reset_start_ramp(self):
+        b=MotionBuffer();outputs=[]
+        # 10Hz feedback with92ms processing age, sampled by the50Hz buffer.
+        # Every sample remains within the unchanged500ms sensor contract.
+        for i in range(100):
+            outputs.append(b.step((.075,0.,0.),(0.,0.,0.),i*.02,.092+(i%5)*.02,frame_verified=True))
+        self.assertAlmostEqual(outputs[-1][0],.075)
+        self.assertTrue(all(0<=v[0]<=.075 for v in outputs))
+        self.assertTrue(all(b[0]>=a[0] for a,b in zip(outputs,outputs[1:])))
+        self.assertEqual(b.step((.075,0,0),(0,0,0),2.,.501,frame_verified=True),(0,0,0))
+        with self.assertRaises(ValueError):MotionBuffer(feedback_timeout=.501)
+
     def test_no_sideways_reverse_or_excess_request(self):
         for target in ((.151,0,0),(.1,.01,0),(-.01,0,0),(0,0,.241),(float('nan'),0,0)):
             self.assertEqual(MotionBuffer().step(target,(0,0,0),0.,.01,frame_verified=True),(0,0,0))

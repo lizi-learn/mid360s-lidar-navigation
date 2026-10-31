@@ -23,6 +23,12 @@ class AdapterTests(unittest.TestCase):
     def test_zero_without_explicit_normal_intent_is_immediate(self):
         n=self.fixture();n.tick();self.assertEqual(n.sent[-1].linear.x,0.)
         self.assertEqual(n.buffer.phase,'immediate_zero')
+    def test_valid_original_feedback_age_preserves_ramp_without_restamping(self):
+        n=self.fixture();n.target=(.15,0.,0.);n.odom_stamp=99.81
+        n.tick();self.assertGreater(n.sent[-1].linear.x,.1)
+        self.assertEqual(n.odom_stamp,99.81)
+        n=self.fixture();n.target=(.15,0.,0.);n.odom_stamp=99.49
+        n.tick();self.assertEqual(n.sent[-1].linear.x,0.)
     def test_collision_does_not_wait_for_ramp(self):
         n=self.fixture();n.target=(.15,0.,0.);n.collision=True;n.tick()
         self.assertEqual(n.sent[-1].linear.x,0.)

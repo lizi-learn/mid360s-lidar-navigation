@@ -5,11 +5,15 @@ takeover, collision and health loss bypass the ramp. Parameters are candidates,
 not measured P2 stopping performance or proof of dynamic balance.
 """
 import math
+from gate import Limits
 
 class MotionBuffer:
-    def __init__(self,accel=.10,decel=.15,angular_accel=.30,settle_time=.15):
+    def __init__(self,accel=.10,decel=.15,angular_accel=.30,settle_time=.15,feedback_timeout=None):
         if not all(math.isfinite(v) and v>0 for v in (accel,decel,angular_accel,settle_time)):
             raise ValueError('positive_finite_motion_parameters_required')
+        self.feedback_timeout=Limits().sensor_timeout if feedback_timeout is None else feedback_timeout
+        if not math.isfinite(self.feedback_timeout) or not 0<self.feedback_timeout<=Limits().sensor_timeout:
+            raise ValueError('feedback timeout must not exceed the command gate sensor expiry')
         self.accel=accel;self.decel=decel;self.angular_accel=angular_accel;self.settle_time=settle_time
         self.reset()
     def reset(self):
@@ -22,7 +26,7 @@ class MotionBuffer:
         values=(*target,*measured,now,feedback_age)
         dt=.01 if self.last is None else now-self.last
         if (hard_stop or not frame_verified or not all(math.isfinite(x) for x in values)
-                or not 0<dt<=.25 or not -.005<=feedback_age<=.15
+                or not 0<dt<=.25 or not -.005<=feedback_age<=self.feedback_timeout
                 or not 0<=target[0]<=.15 or target[1]!=0 or abs(target[2])>.24):
             self.reset();self.phase='immediate_zero';return (0.,0.,0.)
         self.last=now
