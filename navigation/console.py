@@ -14,6 +14,7 @@ from nav2_msgs.action import NavigateToPose,ComputePathToPose
 from nav2_msgs.msg import SpeedLimit,CollisionMonitorState
 from slam_toolbox.srv import SerializePoseGraph
 from nav2_msgs.srv import SaveMap
+from lifecycle_msgs.srv import GetState
 from std_msgs.msg import String
 from tf2_ros import Buffer,TransformListener
 from map_persistence import configure_save_request,validate_map_metadata
@@ -161,6 +162,23 @@ class Console(Node):
         while not future.done() and time.monotonic()<end:time.sleep(.02)
         if not future.done():raise TimeoutError('服务响应超时')
         return future.result()
+    def wait_planner_active(self,timeout=8.):
+        # The action endpoint may accept requests while on_activate is still
+        # waiting for the first map transform/costmap. Queue that request here
+        # instead of returning a misleading "starting point in lethal space".
+        client=self.create_client(GetState,'/planner_server/get_state')
+        end=time.monotonic()+timeout
+        try:
+            while time.monotonic()<end:
+                remaining=end-time.monotonic()
+                if remaining<=0:break
+                if not client.wait_for_service(timeout_sec=min(.25,remaining)):continue
+                try:response=self.wait_future(client.call_async(GetState.Request()),min(1.,remaining))
+                except TimeoutError:continue
+                if response.current_state.id==3:return
+                time.sleep(min(.05,max(0.,end-time.monotonic())))
+            raise TimeoutError('规划器和代价地图仍在初始化，请稍后再试')
+        finally:self.destroy_client(client)
     def op(self,**values):
         m=String();m.data=json.dumps(values);self.operator.publish(m)
     def stop(self):
@@ -311,6 +329,11 @@ class Console(Node):
             generation=self.session.prepare(data,time.monotonic());self.path=[];self.goal=None
             self.pending_plan_accept=True
             self.op(armed=False,paused=True)
+        try:self.wait_planner_active()
+        except (ValueError,TimeoutError):
+            with self.lock:
+                self.pending_plan_accept=False;self.session.planned(generation,0,time.monotonic());self.acknowledge_if_quiet(generation)
+            raise
         if not self.planner.wait_for_server(timeout_sec=3):
             with self.lock:
                 self.pending_plan_accept=False;self.session.planned(generation,0,time.monotonic());self.acknowledge_if_quiet(generation)
