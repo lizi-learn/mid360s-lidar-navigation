@@ -334,7 +334,9 @@ class Console(Node):
     def confirm_goal(self,data):
         generation=int(data['generation'])
         with self.lock:
-            self.session.start(generation,time.monotonic(),self.execution_ready(),self.health_ready())
+            gait=getattr(self,'gait',None);ready=self.execution_ready()
+            reason=gait.status().get('blockers','') if gait and not ready else ''
+            self.session.start(generation,time.monotonic(),ready,self.health_ready(),execution_reason=reason)
             self.goal_generation=generation;pose=self.checked_pose(self.session.goal)
             self.pending_nav_accept=True
         gait=getattr(self,'gait',None)

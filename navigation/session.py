@@ -68,12 +68,12 @@ class NavigationSession:
             if generation!=self.generation or self.phase!='planning':return False
             if path_points<1:self.phase='blocked';self._notice('未找到可通行路径，速度保持为零');return False
             self.phase='ready';self.path_points=path_points;self._notice('路径已预览，等待确认开始');return True
-    def start(self,generation,now,execution_ready,health_ready):
+    def start(self,generation,now,execution_ready,health_ready,execution_reason=''):
         with self.lock:
             if self.cancel_pending:raise ValueError('上个导航目标取消尚未确认')
             if generation!=self.generation or self.phase!='ready':raise ValueError('请重新选择并预览目标')
             if not self._fresh(now) or self.mode!='navigation_allowed' or self.manual_activity:raise ValueError('请将 E 放到左档并松开摇杆，等待状态核验')
-            if not execution_ready:raise ValueError('真实步态接管接口尚未接通，目前只可预演')
+            if not execution_ready:raise ValueError(execution_reason or '当前步态尚未满足接管条件')
             if not health_ready:raise ValueError('地面观测、定位或传感器未就绪，速度保持为零')
             self.phase='starting';self._notice('正在建立导航控制，尚未收到执行确认');return True
     def started(self,generation,now):

@@ -38,7 +38,8 @@ struct NativeGaitState {
   std::uint64_t receiver_instance=0, receiver_generation=0, receiver_stamp=0;
   bool receiver_connected=false, manual_enabled=false, estop=false;
   bool d13_selected=false, walking_ready=false, hardware_healthy=false;
-  // Must be established independently from the RPC client/GUI.
+  // Driver protection is independently verified. The archival commissioning
+  // field is retained for source compatibility; it is not a motion prerequisite.
   bool commissioning_verified=false, driver_protection_verified=false;
 };
 struct LoopReply {
@@ -139,7 +140,9 @@ class GaitNavigationInput {
     f.operator_mode_verified=native_fresh;
     const bool health_fresh=authority_fresh&&fresh(a.health_stamp,now,100000000ULL);
     f.healthy=n.hardware_healthy&&n.driver_protection_verified&&health_fresh&&(a.flags&health_healthy);
-    f.calibrated=n.commissioning_verified&&health_fresh&&(a.flags&health_calibrated);
+    // A missing human acceptance file must not override current kinematic data.
+    // No data is fabricated: absent/stale runtime health still rejects motion.
+    f.calibrated=health_fresh&&(a.flags&health_calibrated);
     f.ground_ok=health_fresh&&(a.flags&health_ground);f.localized=health_fresh&&(a.flags&health_localized);
     auto selected=lease_.poll(f,now);
     auto belongs=[&](const LocalFrame& p){return native_fresh&&authority_fresh&&p.client==a.client&&
@@ -159,7 +162,7 @@ class GaitNavigationInput {
     r.operator_mode=native_fresh?native.mode:0;r.operator_verified=native_fresh;r.manual_activity=activity;
     r.seen_command=std::max({arm_,packet_,ack_});r.cancel_generation=selected.cancel_generation;
     r.readiness=(n.d13_selected?1U:0U)|(n.walking_ready?2U:0U)|(n.hardware_healthy?4U:0U)|
-      (n.driver_protection_verified?8U:0U)|(n.commissioning_verified?16U:0U)|
+      (n.driver_protection_verified?8U:0U)|(f.calibrated?16U:0U)|
       (f.ground_ok?32U:0U)|(f.localized?64U:0U)|(native_fresh?128U:0U);
     r.armed=lease_.armed();r.navigation_owned=selected.navigation_owns_velocity;
     r.cancel_pending=selected.cancel_navigation_goal;r.vx=selected.vx;r.wz=selected.wz;

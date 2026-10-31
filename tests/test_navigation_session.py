@@ -13,7 +13,7 @@ class SessionTests(unittest.TestCase):
     def test_left_does_not_start_and_confirmation_checks_health(self):
         s=NavigationSession();g=self.ready(s)
         self.assertEqual(s.phase,'ready');self.assertTrue(s.status(10.)['force_navigation_zero'])
-        with self.assertRaisesRegex(ValueError,'尚未接通'):s.start(g,10.,False,True)
+        with self.assertRaisesRegex(ValueError,'尚未满足接管条件'):s.start(g,10.,False,True)
         with self.assertRaisesRegex(ValueError,'未就绪'):s.start(g,10.,True,False)
         self.assertEqual(s.phase,'ready')
     def test_right_wins_without_new_navigation_packet_and_left_no_resume(self):

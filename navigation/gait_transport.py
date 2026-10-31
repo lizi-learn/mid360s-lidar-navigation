@@ -6,7 +6,7 @@ LOCAL_READY=1|2|4|8|16|128
 
 def readiness_error(r):
     checks=((1,'未选择 D13 策略'),(2,'步态尚未进入可行走状态'),(4,'硬件状态未就绪'),
-        (8,'驱动保护未核验'),(16,'实机标定未核验'),(128,'真实手柄数据已过期'))
+        (8,'驱动保护未核验'),(16,'实时机身坐标数据未就绪'),(128,'真实手柄数据已过期'))
     missing=['遥控急停已锁定，请在现场复位'] if getattr(r,'reason','')=='estop' else []
     missing.extend(name for bit,name in checks if not r.readiness&bit)
     if not r.operator_verified:missing.append('手柄身份未核验')

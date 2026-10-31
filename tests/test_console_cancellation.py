@@ -58,7 +58,15 @@ class ConsoleCancellationTests(unittest.TestCase):
         nav.result.set_result(Result());self.assertFalse(c.session.cancel_pending)
     def test_live_confirm_never_infers_bridge_ready_from_switch(self):
         c,g=fixture();c.session.planned(g,8,time.monotonic());c.simulation=False;c.health_ready=lambda:True
-        with self.assertRaisesRegex(ValueError,'尚未接通'):c.confirm_goal({'generation':g})
+        with self.assertRaisesRegex(ValueError,'尚未满足接管条件'):c.confirm_goal({'generation':g})
+        self.assertEqual(c.session.phase,'ready');self.assertFalse(c.emitted)
+    def test_connected_unready_transport_reports_actual_reason(self):
+        c,g=fixture();c.session.planned(g,8,time.monotonic());c.simulation=False;c.health_ready=lambda:True
+        class Connected:
+            def ready(self):return False
+            def status(self):return {'blockers':'实时机身坐标数据未就绪'}
+        c.gait=Connected()
+        with self.assertRaisesRegex(ValueError,'实时机身坐标数据未就绪'):c.confirm_goal({'generation':g})
         self.assertEqual(c.session.phase,'ready');self.assertFalse(c.emitted)
     def test_repeated_cancel_rpc_is_not_acknowledgement(self):
         c,g=fixture();c.session.planned(g,8,time.monotonic());c.session.start(g,time.monotonic(),True,True)
