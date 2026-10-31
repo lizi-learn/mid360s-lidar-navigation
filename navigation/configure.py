@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """Generate explicit Nav2 Humble configuration for forward walking and turning."""
 from pathlib import Path
-import argparse, yaml, json
+import argparse, yaml, json, math
 import numpy as np
 from footprint import checked,DEFAULT,load as load_footprint
 
-def config(controller='rpp', tree=None, minimum_speed=.03, footprint_vertices=None, odometry_model='differential',gait_profile='generic'):
+def config(controller='rpp', tree=None, minimum_speed=.03, footprint_vertices=None, odometry_model='differential',gait_profile='generic',stop_side_margin=.20):
+    if not math.isfinite(stop_side_margin) or not .05<=stop_side_margin<=.20:
+        raise ValueError('Stop side margin must be between 0.05 and 0.20 m; body envelope is independent')
     if gait_profile not in ('generic','p2-flat-model'):raise ValueError('Unknown gait profile')
     if gait_profile=='p2-flat-model':
         if controller!='rpp':raise ValueError('The experimental P2 model profile requires RPP')
@@ -110,7 +112,7 @@ def config(controller='rpp', tree=None, minimum_speed=.03, footprint_vertices=No
     lo,hi=bounds.min(axis=0),bounds.max(axis=0)
     stop_front=float(hi[0]+(.53 if gait_profile=='p2-flat-model' else .25))
     slow_front=float(hi[0]+(.95 if gait_profile=='p2-flat-model' else .75))
-    stop_points=[stop_front,float(hi[1]+.20),stop_front,float(lo[1]-.20),float(lo[0]-.15),float(lo[1]-.20),float(lo[0]-.15),float(hi[1]+.20)]
+    stop_points=[stop_front,float(hi[1]+stop_side_margin),stop_front,float(lo[1]-stop_side_margin),float(lo[0]-.15),float(lo[1]-stop_side_margin),float(lo[0]-.15),float(hi[1]+stop_side_margin)]
     slow_points=[slow_front,float(hi[1]+.32),slow_front,float(lo[1]-.32),float(lo[0]-.25),float(lo[1]-.32),float(lo[0]-.25),float(hi[1]+.32)]
     add('collision_monitor',dict(use_sim_time=False,base_frame_id='base_link',odom_frame_id='odom',
         cmd_vel_in_topic='/p2_nav/cmd_smooth',cmd_vel_out_topic='/p2_nav/cmd_collision',

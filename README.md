@@ -110,3 +110,12 @@ python3 -m venv .venv
 可选的[步态约束规划实验](experiments/gait_space/README.md)保留完整包络检查，增加通道中心代价与连续转身预算；冻结失败起点的规划已恢复。此项只验证规划，整段窄门行走跟踪仍未验收。默认导航配置未变。
 
 - [G12 E 开关、APP 地图与两步确认流程](docs/G12_NAVIGATION_SESSION.md)：取消、人工接管和障碍回执；实机步态尚未接通。
+
+The console supports an explicit per-installation `P2_NAV_STOP_SIDE_MARGIN`
+override in metres (0.05–0.20; default 0.20). This changes only the extra lateral
+StopZone reserve and the matching global planning envelope. The body model,
+local footprint/padding, front/rear reserve, slowdown region, speed limits and
+observation/ground/calibration gates stay independent. A 0.05 setting yields a
+1.24 m padded planning width with the existing nominal P2 model; that model and
+the reduced reserve still require physical commissioning on each installation.
+It does not crop sensor returns or certify the robot fits a passage.

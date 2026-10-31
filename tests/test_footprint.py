@@ -4,6 +4,19 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'navigation'))
 from footprint import checked
 from configure import config
 class FootprintTests(unittest.TestCase):
+ def test_explicit_side_reserve_changes_no_body_or_front_rear_limits(self):
+  import json
+  old=config(gait_profile='p2-flat-model');new=config(gait_profile='p2-flat-model',stop_side_margin=.05)
+  a=old['collision_monitor']['ros__parameters'];b=new['collision_monitor']['ros__parameters']
+  self.assertEqual(a['StopZone']['points'][::2],b['StopZone']['points'][::2]);self.assertEqual(a['SlowZone'],b['SlowZone'])
+  self.assertEqual(old['local_costmap'],new['local_costmap']);self.assertEqual(old['velocity_smoother'],new['velocity_smoother'])
+  self.assertAlmostEqual(max(b['StopZone']['points'][1::2]),.57)
+  shape=json.loads(new['global_costmap']['global_costmap']['ros__parameters']['footprint'])
+  self.assertAlmostEqual(max(p[1] for p in shape),.57)
+  self.assertEqual(a['source_timeout'],b['source_timeout']);self.assertEqual(a['transform_tolerance'],b['transform_tolerance'])
+ def test_side_reserve_cannot_remove_body_clearance_or_accept_nan(self):
+  for value in [0.,.049,.201,float('nan'),float('inf')]:
+   with self.assertRaises(ValueError):config(gait_profile='p2-flat-model',stop_side_margin=value)
  def test_explicit_envelope_is_used_by_both_costmaps(self):
   vertices=[[.47,.52],[.47,-.52],[-.43,-.52],[-.43,.52]];c=config(footprint_vertices=vertices)
   import json
