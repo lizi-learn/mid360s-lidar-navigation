@@ -17,6 +17,15 @@ class FootprintTests(unittest.TestCase):
  def test_side_reserve_cannot_remove_body_clearance_or_accept_nan(self):
   for value in [0.,.049,.201,float('nan'),float('inf')]:
    with self.assertRaises(ValueError):config(gait_profile='p2-flat-model',stop_side_margin=value)
+ def test_removing_duplicate_planning_side_padding_keeps_monitor_and_body_padding(self):
+  import json
+  c=config(gait_profile='p2-flat-model',stop_side_margin=.05,planning_side_padding=0.)
+  local=c['local_costmap']['local_costmap']['ros__parameters'];glob=c['global_costmap']['global_costmap']['ros__parameters']
+  padded=max(p[1] for p in json.loads(glob['footprint']))+glob['footprint_padding']
+  self.assertAlmostEqual(padded,.57);self.assertEqual(local['footprint_padding'],.05)
+  self.assertGreaterEqual(padded,max(c['collision_monitor']['ros__parameters']['StopZone']['points'][1::2]))
+  for value in [-.001,.051,float('nan')]:
+   with self.assertRaises(ValueError):config(planning_side_padding=value)
  def test_explicit_envelope_is_used_by_both_costmaps(self):
   vertices=[[.47,.52],[.47,-.52],[-.43,-.52],[-.43,.52]];c=config(footprint_vertices=vertices)
   import json

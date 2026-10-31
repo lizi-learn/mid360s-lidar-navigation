@@ -198,7 +198,7 @@ class Console(Node):
             self.grid=None;self.gate={};self.buffer.clear()
             from configure import config
             import yaml
-            params=self.runtime/'nav2.yaml';params.write_text(yaml.safe_dump(config(controller,minimum_speed=self.minimum_speed,footprint_vertices=self.footprint,odometry_model=self.odometry_model,gait_profile=self.gait_profile,stop_side_margin=float(os.environ.get('P2_NAV_STOP_SIDE_MARGIN','.20'))),sort_keys=False))
+            params=self.runtime/'nav2.yaml';params.write_text(yaml.safe_dump(config(controller,minimum_speed=self.minimum_speed,footprint_vertices=self.footprint,odometry_model=self.odometry_model,gait_profile=self.gait_profile,stop_side_margin=float(os.environ.get('P2_NAV_STOP_SIDE_MARGIN','.20')),planning_side_padding=float(os.environ.get('P2_NAV_PLANNING_SIDE_PADDING','.05'))),sort_keys=False))
             args=['bash',str(ROOT/'run.sh'),'mode:='+mode,'simulation:='+str(self.simulation).lower(),'params:='+str(params)]
             if mode=='navigation':args+=['map:='+str(map_file)]
             if self.gait:args=['nice','-n','10']+args

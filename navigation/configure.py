@@ -5,9 +5,11 @@ import argparse, yaml, json, math
 import numpy as np
 from footprint import checked,DEFAULT,load as load_footprint
 
-def config(controller='rpp', tree=None, minimum_speed=.03, footprint_vertices=None, odometry_model='differential',gait_profile='generic',stop_side_margin=.20):
+def config(controller='rpp', tree=None, minimum_speed=.03, footprint_vertices=None, odometry_model='differential',gait_profile='generic',stop_side_margin=.20,planning_side_padding=.05):
     if not math.isfinite(stop_side_margin) or not .05<=stop_side_margin<=.20:
         raise ValueError('Stop side margin must be between 0.05 and 0.20 m; body envelope is independent')
+    if not math.isfinite(planning_side_padding) or not 0.<=planning_side_padding<=.05:
+        raise ValueError('Additional planning side padding must be between 0 and 0.05 m')
     if gait_profile not in ('generic','p2-flat-model'):raise ValueError('Unknown gait profile')
     if gait_profile=='p2-flat-model':
         if controller!='rpp':raise ValueError('The experimental P2 model profile requires RPP')
@@ -133,6 +135,11 @@ def config(controller='rpp', tree=None, minimum_speed=.03, footprint_vertices=No
         # Routes must fit the monitor's stop clearance, rather than repeatedly
         # selecting a physical-footprint gap that the monitor will reject.
         clearance=np.asarray(stop_points).reshape(-1,2).tolist()
+        # Global Nav2 padding is applied after this polygon. Keep front/rear
+        # padding and reserve at least the monitor/body-padded lateral bounds,
+        # without requiring duplicate lateral padding in an explicit override.
+        for point in clearance:
+            point[1]-=math.copysign(.05-planning_side_padding,point[1])
         result['global_costmap']['global_costmap']['ros__parameters']['footprint']=json.dumps(checked(clearance))
     return result
 

@@ -119,3 +119,9 @@ observation/ground/calibration gates stay independent. A 0.05 setting yields a
 1.24 m padded planning width with the existing nominal P2 model; that model and
 the reduced reserve still require physical commissioning on each installation.
 It does not crop sensor returns or certify the robot fits a passage.
+`P2_NAV_PLANNING_SIDE_PADDING` optionally controls the additional planner-only
+lateral padding (0–0.05 m; default 0.05). Setting it to 0 together with a 0.05 m
+stop reserve aligns the padded global lateral boundary with the unchanged local
+body padding and the monitor's StopZone: nominal padded width 1.14 m. Front/rear
+padding remains unchanged. This avoids counting lateral padding twice; it is
+still a commissioning candidate, not physical clearance acceptance.
