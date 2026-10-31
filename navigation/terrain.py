@@ -45,3 +45,23 @@ def observed_front_support(points,center,yaw,plane):
     # Require observed points in each of six future leading-edge patches.
     return all(np.count_nonzero((abs(local[:,0]-x)<.18)&(abs(local[:,1]-y)<.18))>=2
                for x in (.7,1.05) for y in (-.25,0.,.25))
+
+
+def forward_lower_surface(points,center,yaw,plane):
+    """Actual below-floor returns in the forward corridor; unknown stays unknown."""
+    points=np.asarray(points,dtype=float)
+    local=(points[:,:2]-np.asarray(center))@np.array([[math.cos(yaw),-math.sin(yaw)],[math.sin(yaw),math.cos(yaw)]])
+    dz=points[:,2]-(points[:,:2]-np.asarray(center))@np.asarray(plane[:2])-plane[2]
+    return bool(np.any(np.isfinite(points).all(axis=1)&(local[:,0]>0)&(local[:,0]<1.23)&
+                       (abs(local[:,1])<.43)&(dz<-.12)))
+
+
+def ground_decision(policy,observed_support,lower_surface):
+    """Called only after a valid, fresh local floor fit, never on fit errors.
+
+    flat_floor is an explicit operating assumption for the requested flat-floor
+    test. It does not certify unobserved terrain or change support observations.
+    """
+    if policy not in ('observed_support','flat_floor'):
+        raise ValueError('Unknown ground policy')
+    return not lower_surface and (policy=='flat_floor' or observed_support)

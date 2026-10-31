@@ -21,7 +21,7 @@ from biped_reference import BodyReference,rigid
 from odometry_velocity import PlanarVelocity
 from std_msgs.msg import Bool,String
 from tf2_ros import TransformBroadcaster,StaticTransformBroadcaster
-from terrain import local_floor,classify,observed_front_support
+from terrain import local_floor,classify,observed_front_support,forward_lower_surface,ground_decision
 from navigation_reference import select_reference,reference_status
 from terrain_history import SupportHistory
 
@@ -56,6 +56,8 @@ class Adapter:
         self.sink=Node('navigation_sensor_preview_adapter',context=self.sink_context)
         self.body_reference=BodyReference(args.body_reference) if args.body_reference else None
         self.navigation_reference=select_reference(getattr(args,'navigation_reference','auto'),bool(self.body_reference))
+        self.ground_policy=getattr(args,'ground_policy','observed_support')
+        ground_decision(self.ground_policy,False,False)
         self.support_history=SupportHistory() if getattr(args,'support_history',False) else None
         if self.body_reference:self.source.create_subscription(JointState,self.body_reference.topic,self.on_joints,qos_profile_sensor_data)
         self.source.create_subscription(PointCloud2,'/cloud_registered',self.on_cloud,qos_profile_sensor_data)
@@ -150,8 +152,10 @@ class Adapter:
             if self.support_history:
                 observed,support_report=self.support_history.update(points,origin[:2],yaw,plane,stamp(cloud),now)
             verified=bool(self.body_reference and self.body_reference.verified)
-            ground.data=observed and (verified if self.body_reference else True);self.ground_pub.publish(ground)
-            report.update(ground_ok=ground.data,finite_scan_bins=int(np.isfinite(output).sum()),
+            lower_surface=forward_lower_surface(points,origin[:2],yaw,plane)
+            ground.data=ground_decision(self.ground_policy,observed,lower_surface) and (verified if self.body_reference else True);self.ground_pub.publish(ground)
+            report.update(ground_ok=ground.data,ground_policy=self.ground_policy,lower_surface_observed=lower_surface,
+                near_support_advisory=not observed,finite_scan_bins=int(np.isfinite(output).sum()),
                 source_age_s=now-stamp(cloud),base_reference='timestamped body kinematics' if self.body_reference else 'LiDAR center ground projection',
                 velocity_ready=True,velocity_window_s=self.velocity.window,observed_front_support=observed,instant_observed_front_support=instant_observed,
                 reference_source_stamp_s=stamp(odom),hardware_execution_enabled=False)
@@ -174,4 +178,5 @@ if __name__=='__main__':
     p.add_argument('--ground-topic',default='/p2_nav/ground_ok');p.add_argument('--robot-profile',default='');p.add_argument('--body-reference',default='');p.add_argument('--velocity-window',type=float,default=.4)
     p.add_argument('--navigation-reference',choices=['auto','lidar_projection','body_kinematics','preview'],default='auto')
     p.add_argument('--support-history',action='store_true',help='Use up to250ms of original registered ground observations')
+    p.add_argument('--ground-policy',choices=['observed_support','flat_floor'],default='observed_support')
     Adapter(p.parse_args()).run()

@@ -29,7 +29,7 @@ def setup(context):
         assert Path(alignment).is_file(),'Live preview needs the running sensor gravity-alignment file'
         nodes.append(ExecuteProcess(cmd=['/usr/bin/python3','-S',str(root/'live_adapter.py'),
             '--alignment',alignment,'--robot-profile',get('robot_profile'),'--body-reference',get('body_reference'),
-            '--navigation-reference',get('navigation_reference'),'--source-domain',get('source_domain'),'--target-domain',os.getenv('ROS_DOMAIN_ID','194')]+
+            '--navigation-reference',get('navigation_reference'),'--ground-policy',get('ground_policy'),'--source-domain',get('source_domain'),'--target-domain',os.getenv('ROS_DOMAIN_ID','194')]+
             (['--support-history'] if get('support_history')=='true' else []),output='screen'))
     nodes.append(ExecuteProcess(cmd=['/usr/bin/python3','-S',str(root/'gate_node.py'),'--ros-args',
         '-p','simulation:='+str(simulation).lower(),'-p','gait_handoff:='+get('gait_handoff'),'-p','require_localization:='+str(mode=='navigation').lower()],output='screen'))
@@ -81,6 +81,7 @@ def generate_launch_description():
         DeclareLaunchArgument('robot_profile',default_value=os.getenv('P2_NAV_ROBOT_PROFILE','')),
         DeclareLaunchArgument('body_reference',default_value=os.getenv('P2_NAV_BODY_CALIBRATION','')),
         DeclareLaunchArgument('navigation_reference',default_value=os.getenv('P2_NAV_REFERENCE','auto')),
+        DeclareLaunchArgument('ground_policy',default_value=os.getenv('P2_NAV_GROUND_POLICY','observed_support')),
         DeclareLaunchArgument('support_history',default_value=os.getenv('P2_NAV_SUPPORT_HISTORY','false')),
         DeclareLaunchArgument('map',default_value=''),DeclareLaunchArgument('source_domain',default_value='188'),
         DeclareLaunchArgument('alignment',default_value=os.getenv('P2_LIDAR_ALIGNMENT',str(Path(__file__).resolve().parents[1]/'runtime/map_alignment.json'))),

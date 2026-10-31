@@ -31,7 +31,7 @@ class GateNode(Node):
         self.invalid_command_until=0.;self.invalid_command=(0.,0.,0.)
         self.scan_stamp = self.odom_stamp = None
         self.calibration_ready=False;self.calibration_time=0.
-        self.reference_mode='unknown'
+        self.reference_mode='unknown';self.terrain_details={}
         self.command = (0., 0., 0.);self.ground = False;self.ground_time = 0.;self.paused = False
         self.covariance_ok = False
         self.covariance = None
@@ -75,6 +75,7 @@ class GateNode(Node):
         try:
             d=json.loads(msg.data);self.calibration_ready=reference_ready(d)
             self.reference_mode=d.get('navigation_reference','body_kinematics') if isinstance(d,dict) else 'unknown'
+            self.terrain_details={k:d.get(k) for k in ('ground_policy','observed_front_support','near_support_advisory','lower_surface_observed')} if isinstance(d,dict) else {}
             self.calibration_time=time.monotonic()
         except (ValueError,TypeError):self.calibration_ready=False
     def on_amcl(self, msg):
@@ -128,7 +129,7 @@ class GateNode(Node):
         out = Twist();out.linear.x, out.linear.y, out.angular.z = result;self.output.publish(out)
         self.counter += 1
         if True: #20Hz original evaluations; transport does not restamp cached health
-            status = String();status.data = json.dumps({'armed':self.gate.armed,'simulation':self.simulation,
+            status = String();status.data = json.dumps({**getattr(self,'terrain_details',{}),'armed':self.gate.armed,'simulation':self.simulation,
                 'evaluated_monotonic_ns':time.monotonic_ns(),'data_fresh':collision_source_ok and -.05<=min(scan_age,odom_age) and max(scan_age,odom_age)<=self.gate.limits.sensor_timeout,'collision_source_valid':collision_source_ok,'calibration_ready':self.calibration_ready and now-self.calibration_time<.2,
                 'navigation_reference':getattr(self,'reference_mode','unknown'),'navigation_reference_ready':self.calibration_ready and now-self.calibration_time<.2,
                 'hardware_execution_enabled':False,'speed_cap':self.gate.speed,
