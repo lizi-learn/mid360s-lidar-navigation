@@ -20,7 +20,7 @@ class Bench(Node):
     def __init__(self):
         super().__init__('navigation_validation_client')
         self.truth={};self.gate={};self.map=None;self.amcl=None
-        self.commands=[];self.events=[];self.gate_history=[];self.raw=[];self.control_receipts=[]
+        self.commands=[];self.events=[];self.gate_history=[];self.raw=[];self.control_receipts=[];self.arm_generation=-1
         self.create_subscription(String,'/p2_nav/sim_truth',lambda m:setattr(self,'truth',json.loads(m.data)),10)
         self.create_subscription(String,'/p2_nav/gate_status',self.on_gate,10)
         self.create_subscription(Twist,'/p2_nav/cmd_safe',self.on_command,100)
@@ -79,7 +79,8 @@ class Bench(Node):
                     self.control_receipts.append({'request_id':payload['control_id'],'requested':dict(values),'confirmed':True});return
             raise RuntimeError('Simulator did not confirm the requested control state')
     def arm(self,speed=.25):
-        self.publish(self.operator,{'armed':True,'paused':False,'speed':speed})
+        self.arm_generation+=1
+        self.publish(self.operator,{'armed':True,'arm_generation':self.arm_generation,'paused':False,'speed':speed})
         limit=SpeedLimit();limit.percentage=False;limit.speed_limit=speed;self.speed_pub.publish(limit)
     def pose(self,x,y,yaw):
         p=PoseStamped();p.header.frame_id='map';p.header.stamp=self.get_clock().now().to_msg()

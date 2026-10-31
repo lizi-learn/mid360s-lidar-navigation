@@ -1,0 +1,482 @@
+{
+  "date": "2026-10-31",
+  "scope": "Motor-free CPU control checks and isolated private D13 dynamics with synthetic ranges and ideal model odometry. No physical motion acceptance.",
+  "hardware_actuator_commands": 0,
+  "identity": {
+    "model_sha256": "bb21056979103835beec516daeb75d27af4de53a1ee8c1f27b0942224d79d5ea",
+    "policy_sha256": "17c3141902acf8593a7ee2777a18989c24337b0f1442c14410ae39057a9c0f3f",
+    "controller_sha256": "14f8c7e4f5cb4825975784892b082a98bfdf4533fd5971327326b533910712bf",
+    "proprietary_assets_distributed": false,
+    "seed": 0,
+    "AMCL_random_seed": null
+  },
+  "limits": {
+    "navigation_target_vx_mps": 0.15,
+    "navigation_target_abs_yaw_rps": 0.24,
+    "lateral_command": 0,
+    "padded_physical_width_m": 1.14,
+    "internal_model_policy_vx_max": 0.3,
+    "internal_model_policy_yaw_max": 0.5,
+    "physical_response_calibrated": false
+  },
+  "native_cpu": {
+    "architecture": "aarch64",
+    "passed": true,
+    "inference_frames": 96,
+    "every_frame_matches_policy_observation": true,
+    "E_middle_zero": true,
+    "original_source_expiry_zero": true,
+    "production_controller_replaced": false,
+    "body_observations": "synthetic default pose",
+    "physical_endpoint_used": false
+  },
+  "dynamic_stop_cancel_restart": {
+    "validation_passed": true,
+    "status": 4,
+    "final_pose": [
+      2.8973248246595302,
+      2.4759180789348956,
+      0.03973736746623737
+    ],
+    "goal_error_m": 0.10546151218990808,
+    "yaw_error_rad": 0.03973736746623737,
+    "stopped_velocity": [
+      0.0006915717095377087,
+      -0.00021936438387541694,
+      -0.0017766358092720653
+    ],
+    "collision_attempts": 0,
+    "max_nav_forward": 0.15,
+    "max_nav_lateral": 0.0,
+    "max_nav_yaw": 0.12864975933124087,
+    "elapsed_s": 24.548037335043773,
+    "additional_metrics": {
+      "actual_move_before_obstacle_m": 0.8778138469496342,
+      "obstacle_inserted": true,
+      "obstacle_removed": true
+    }
+  },
+  "detour_speed_change_final_heading": {
+    "validation_passed": true,
+    "status": 4,
+    "final_pose": [
+      4.272922038975949,
+      3.433523048935625,
+      1.6773999725950726
+    ],
+    "goal_error_m": 0.09867526940031687,
+    "yaw_error_rad": 0.106603645800176,
+    "stopped_velocity": [
+      0.00030007975444827975,
+      -3.839116631078153e-05,
+      -0.003133648937657831
+    ],
+    "collision_attempts": 0,
+    "max_nav_lateral": 0.0,
+    "max_nav_yaw": 0.24,
+    "elapsed_s": 89.25653709215112,
+    "additional_metrics": {
+      "obstacle_evidence": {
+        "ack": {
+          "request_id": "4ab63896e5cac",
+          "requested": {
+            "obstacle": [
+              3.35,
+              3.1,
+              0.15
+            ]
+          },
+          "confirmed": true
+        },
+        "max_scan_hits": 12,
+        "occupied_near_obstacle": 121
+      },
+      "speed_change_exercised": true,
+      "max_forward_before_change": 0.1,
+      "max_forward_after_change": 0.15
+    }
+  },
+  "narrow_door": {
+    "v1": {
+      "validation_passed": false,
+      "error": "RuntimeError('Padded model body entered the door jamb or wall')",
+      "door_width_m": 1.4,
+      "padded_body_width_m": 1.14
+    },
+    "v2": {
+      "validation_passed": false,
+      "status": 5,
+      "final_pose": [
+        4.0068446868285985,
+        2.5034328788885776,
+        0.24765079824857414
+      ],
+      "goal_error_m": 2.893157349815142,
+      "yaw_error_rad": 0.24765079824857414,
+      "stopped_velocity": [
+        2.955792979664193e-06,
+        6.008156153758902e-06,
+        -0.00018520721139186463
+      ],
+      "collision_attempts": 0,
+      "max_nav_forward": 0.0,
+      "max_nav_lateral": 0.0,
+      "max_nav_yaw": 0.19796761949546635,
+      "elapsed_s": 95.0325159530621,
+      "door_width_m": 1.4,
+      "padded_body_width_m": 1.14,
+      "door_exercised": false
+    },
+    "v3": {
+      "validation_passed": false,
+      "status": 5,
+      "final_pose": [
+        4.193209472815978,
+        2.5445262257379593,
+        -0.12440425454266132
+      ],
+      "goal_error_m": 2.707156726684221,
+      "yaw_error_rad": 0.12440425454266132,
+      "stopped_velocity": [
+        -0.00017523266167904935,
+        2.8699440068282227e-05,
+        -0.0018780713468859519
+      ],
+      "collision_attempts": 0,
+      "max_nav_forward": 0.15,
+      "max_nav_lateral": 0.0,
+      "max_nav_yaw": 0.24,
+      "elapsed_s": 95.02993155200966,
+      "door_width_m": 1.4,
+      "padded_body_width_m": 1.14,
+      "door_exercised": false
+    },
+    "v4": {
+      "validation_passed": false,
+      "status": 6,
+      "final_pose": [
+        5.614762698309617,
+        2.3978947564999693,
+        0.05843046651765768
+      ],
+      "goal_error_m": 1.2892867805133883,
+      "yaw_error_rad": 0.05843046651765768,
+      "stopped_velocity": [
+        -0.00010776936454848663,
+        -1.7417932288193635e-05,
+        -0.0012468444179479633
+      ],
+      "collision_attempts": 0,
+      "max_nav_forward": 0.15,
+      "max_nav_lateral": 0.0,
+      "max_nav_yaw": 0.12000000000000001,
+      "elapsed_s": 29.891260328004137,
+      "door_width_m": 1.4,
+      "padded_body_width_m": 1.14,
+      "door_exercised": false
+    },
+    "v5": {
+      "validation_passed": true,
+      "status": 4,
+      "final_pose": [
+        6.847092600672781,
+        2.5364650690259762,
+        0.0062268389188544
+      ],
+      "goal_error_m": 0.06425647175685173,
+      "yaw_error_rad": 0.0062268389188544,
+      "stopped_velocity": [
+        -0.00016620313977454976,
+        -3.6026734555036824e-06,
+        -0.0021298507785867996
+      ],
+      "collision_attempts": 0,
+      "max_nav_forward": 0.15,
+      "max_nav_lateral": 0.0,
+      "max_nav_yaw": 0.12000000000000001,
+      "elapsed_s": 87.3983403199818,
+      "door_width_m": 1.4,
+      "padded_body_width_m": 1.14,
+      "door_exercised": true
+    }
+  },
+  "strict_speed_tracking": {
+    "all_pass": false,
+    "acceptance": "Per-axis steady mean error <= max(0.015,20% of abs target); zero axis error <=0.015. Preserved, not relaxed.",
+    "cases": [
+      {
+        "target": [
+          0.05,
+          0.0
+        ],
+        "steady_mean": {
+          "vx_body": 0.06536457677777792,
+          "wz_body": -0.0016714130738222216
+        },
+        "tracking_pass": false,
+        "stop_max_abs_vx": 0.000205618,
+        "stop_max_abs_wz": 0.00081292
+      },
+      {
+        "target": [
+          0.1,
+          0.0
+        ],
+        "steady_mean": {
+          "vx_body": 0.1160607686666667,
+          "wz_body": 0.003536350013444447
+        },
+        "tracking_pass": true,
+        "stop_max_abs_vx": 0.000240152,
+        "stop_max_abs_wz": 0.00350752
+      },
+      {
+        "target": [
+          0.15,
+          0.0
+        ],
+        "steady_mean": {
+          "vx_body": 0.15364139522222234,
+          "wz_body": 0.004226022878922216
+        },
+        "tracking_pass": true,
+        "stop_max_abs_vx": 0.000132716,
+        "stop_max_abs_wz": 0.00036339
+      },
+      {
+        "target": [
+          0.0,
+          0.05
+        ],
+        "steady_mean": {
+          "vx_body": 0.0001571292147777769,
+          "wz_body": 0.02927414144444442
+        },
+        "tracking_pass": false,
+        "stop_max_abs_vx": 0.00085142,
+        "stop_max_abs_wz": 0.0166796
+      },
+      {
+        "target": [
+          0.0,
+          0.15
+        ],
+        "steady_mean": {
+          "vx_body": 0.01633959962777778,
+          "wz_body": 0.17000451945555567
+        },
+        "tracking_pass": false,
+        "stop_max_abs_vx": 5.87918e-05,
+        "stop_max_abs_wz": 0.00634291
+      },
+      {
+        "target": [
+          0.0,
+          0.24
+        ],
+        "steady_mean": {
+          "vx_body": 0.025250153144888893,
+          "wz_body": 0.21817601474444434
+        },
+        "tracking_pass": false,
+        "stop_max_abs_vx": 0.000238531,
+        "stop_max_abs_wz": 0.0108284
+      }
+    ]
+  },
+  "local_tests": 165,
+  "native_cpu_synthetic_contract_cases": 8,
+  "native_cpu_authority_fault_cases": 16,
+  "native_cpu_response_unit_tests": 9,
+  "native_cpu_start_generation_tests": 2,
+  "retained_failures": [
+    "Model-v1 missing isolated ROS goal-checker overlay; scan observer QoS corrected",
+    "Model-v2 missing explicit modeled body-reference publication; gates correctly kept zero",
+    "Model-v3 fixture generation syntax error corrected before model execution",
+    "Strict tracking four of six cases remain outside declared tolerance",
+    "Door-v1 full padded envelope intrusion",
+    "Door-v2 source clock discrepancy latched navigation off before door",
+    "Door-v3 tight alignment threshold chattered and timed out before door",
+    "Door-v4 safe abort before door after lateral deviation; no intrusion"
+  ],
+  "remaining": [
+    "Native production D13 response mapping and physical speed/stop calibration",
+    "Physical body/neck references and ground coverage commissioning",
+    "Original older AMP narrow-door/turning/tracking failures remain in history",
+    "Synthetic ideal body odometry does not validate real LiDAR drift or SLAM accuracy"
+  ],
+  "private_receipts_sha256": {
+    "arm-control-test.private.json": "f0ad7babc24f85f6222f949d3522084eeea14e8a1c90bdd6365cc48c879e7d78",
+    "candidate-regression-v1/detour/nav-manifest.private.json": "565ca04460ecb8bb7790597fb714abc03f16e7c9dffab24ce778ce9690ac152d",
+    "candidate-regression-v1/detour/response-model.private.json": "b090eb450caacbb3d81d3497c5eb21bb3565cb3b394e481edc116c1de3250c10",
+    "candidate-regression-v1/detour/result.private.json": "c48121e0bebbd505f387d4d86cec0ff962287d542fdc9d834790d0ef7a480289",
+    "candidate-regression-v1/dynamic/nav-manifest.private.json": "84dc04e10f89e0ccafb754a6842e4ed567d0571b8a2bd1aef5679805dfce3002",
+    "candidate-regression-v1/dynamic/response-model.private.json": "b090eb450caacbb3d81d3497c5eb21bb3565cb3b394e481edc116c1de3250c10",
+    "candidate-regression-v1/dynamic/result.private.json": "bd04d6b5faca2bb748748e286210b4d4ff2e393341766c47202751836a45ddda",
+    "candidate-regression-v1/hypothesis.private.json": "06f144f2923043b3a68f536a5265ecdf1798b8cbb755940f06b3c6cbd5f60505",
+    "candidate-regression-v1/isolation.private.json": "a694b15334bfae5e38cd555cf0ac60bf6168adb15801a457931c845da15b142e",
+    "command-response-v1/hypothesis.private.json": "8d8c198c5d8c7edc25dc07fcf736770011a34114f79e153e308483a30b4a8da9",
+    "command-response-v1/isolation.private.json": "d258670047b70e0e08249a6ae6903f3fed6716e60adfcdc5a788f925d4a7f201",
+    "command-response-v1/result.private.json": "9e645a03bf27fa81b8cb48700a223ae19b061e3fb9d5af801eb79b31344d4c83",
+    "command-response-v2/hypothesis.private.json": "a10b3f3b4854df09c0e25f4c1cf1224002027685447a13661736fc6974c1dc2f",
+    "command-response-v2/isolation.private.json": "d6ee46ed5e21bb35f70b3b8c463a322c6f9d2d06184b1b802c9b378fe595de75",
+    "command-response-v2/result.private.json": "7b4f1b811efac60c3616e711b53df7767c5423bcb8e1b3cc52a0b0d3f7302d2f",
+    "model-tracking-v1/hypothesis.private.json": "44372109160a9d93ba1b21b57f73d5e5906d15a2777b0475d2f6d3618a19c489",
+    "model-tracking-v1/isolation.private.json": "cc2f58c6e0345416e54a1dd0badab6e11ca803fc1931a01cdfbd15c3923cd1bd",
+    "model-tracking-v1/response-model.private.json": "0c184332b52d2499b4b60d82d9567995d344fc252f2313121230789bb469276f",
+    "model-tracking-v1/result.private.json": "6cd9b5a04235602d8a625ea1fdf5c401b357f22e039b91aef078191a2d14062a",
+    "model-tracking-v2/hypothesis.private.json": "f844476fafbc25a05dec79c1782ffbd77f00dbe08246b1fef6a2959d6f212181",
+    "model-tracking-v2/isolation.private.json": "794ca8e2fe60aca64e4c574bac5f54c74cb66834b9ab62802b3e7534d384ee2f",
+    "model-tracking-v2/response-model.private.json": "0c184332b52d2499b4b60d82d9567995d344fc252f2313121230789bb469276f",
+    "model-tracking-v2/result.private.json": "2ed43f18c1c16277c56e008993cc71f6ae77d3a08f170757a39175eba8fe83ba",
+    "nav-detour-v1/hypothesis.private.json": "0e780f024ac592bb46067af09d27bacf0a12f040115b5441db269a442cf1a460",
+    "nav-detour-v1/isolation.private.json": "fa5fe93945c709497a00710e75c5b3ab7af5ff167c9a83a938c918dd6a242589",
+    "nav-detour-v1/nav-manifest.private.json": "b916ea2177040f6044b882e3906cdbb498d4842b92ed550d3788909531e207d1",
+    "nav-detour-v1/response-model.private.json": "0c184332b52d2499b4b60d82d9567995d344fc252f2313121230789bb469276f",
+    "nav-detour-v1/result.private.json": "9cc51b1a07555cea1acac61994c54c89446b561d7619dc1ccc6ca821738040ca",
+    "nav-door-v1/hypothesis.private.json": "a21dd99e12bcbd7c6ee0be8ec529ffda0a4a1c6c8498117b73a5135fa4be8686",
+    "nav-door-v1/isolation.private.json": "b6c6fb1fdc93924e4f1907f350f6ca65120ad7b7e631508f429dc52fa5b84f57",
+    "nav-door-v1/nav-manifest.private.json": "56e3cd3500e3790632568b1f3c4c06f74931f1f3a3d258943def851ef7f2f0ef",
+    "nav-door-v1/response-model.private.json": "0c184332b52d2499b4b60d82d9567995d344fc252f2313121230789bb469276f",
+    "nav-door-v1/result.private.json": "18b17eb00ec64729bfd5e56bb6b3a36bba33314fb7c5476b63d1c6fe58c4be67",
+    "nav-door-v2/hypothesis.private.json": "ef67dd5b86cf734079be1001bd89926c2c0ae757a677d8a23d0ca410bf3565fe",
+    "nav-door-v2/isolation.private.json": "3357d39312a41b2f9423334529089dccf640ecad704df55f10fe7a444799fdfb",
+    "nav-door-v2/nav-manifest.private.json": "0d075b5f3be0f15aa51c8bbc2feaf53ab10eee34c10498d6c69e711869e41727",
+    "nav-door-v2/response-model.private.json": "0c184332b52d2499b4b60d82d9567995d344fc252f2313121230789bb469276f",
+    "nav-door-v2/result.private.json": "ebb9dcde290b499224a5577d4d188b0e841939884d3344369f77f9f1654b4ddf",
+    "nav-door-v3/hypothesis.private.json": "4330438bf169595ab10f077a1abb7378178e9d1e41391c2c59265f6d4629c09d",
+    "nav-door-v3/isolation.private.json": "4983622e52aafb92d016fdd70070dc28121ad630b525ec30676979914ec42637",
+    "nav-door-v3/nav-manifest.private.json": "bbd86aab603785f9ce95ffba8d66a640148edc144ea4bd161694d9893112376f",
+    "nav-door-v3/response-model.private.json": "0c184332b52d2499b4b60d82d9567995d344fc252f2313121230789bb469276f",
+    "nav-door-v3/result.private.json": "f0106b5733299c0e0b8001a12c635a6cf2265bd26fd95627c9034548bb5731cf",
+    "nav-door-v4/hypothesis.private.json": "727ae374299a5bf52184f00141cef4f01654dddfe1dab70c4b3a245dc2073559",
+    "nav-door-v4/isolation.private.json": "b2e36de85af57045b0c3fc08fe63fa23721cfcd893d5655b063a500f2983e663",
+    "nav-door-v4/nav-manifest.private.json": "1a5690612288e9632ffcd1ca4244b41a9fc7a2089764db4a63d93d797c7d9d7d",
+    "nav-door-v4/response-model.private.json": "0c184332b52d2499b4b60d82d9567995d344fc252f2313121230789bb469276f",
+    "nav-door-v4/result.private.json": "57167303b65ce4cb445c50186d6812f05926e61fb33d8025926f7ab813654876",
+    "nav-door-v5/hypothesis.private.json": "ff500a2d2fa0121c763fd86b983e17e9584c8093a03a92397b62abd7bc2633eb",
+    "nav-door-v5/isolation.private.json": "53d85dd30a9714155476c2cefe6851664241c4ebb09922b345dcaea47bb35a06",
+    "nav-door-v5/nav-manifest.private.json": "d1ad720ec227c58dfdd06aee954267e247c095635f284d9189c564b5194cacb0",
+    "nav-door-v5/response-model.private.json": "b090eb450caacbb3d81d3497c5eb21bb3565cb3b394e481edc116c1de3250c10",
+    "nav-door-v5/result.private.json": "8a128a5d6a913ef5441aad0a8c3e03905a138a5a64a331e3e52526d31fd28a36",
+    "nav-model-v1/hypothesis.private.json": "2f40fdfb49de6bafc14e25e68d5093800e4ff7fe3c7b60aad890852d512017b0",
+    "nav-model-v1/isolation.private.json": "de075d533a99ea6684f814621b82ad4bb0d8887c263a86ef3bf484d993cab58a",
+    "nav-model-v1/nav-manifest.private.json": "5b27b5686dad997cedd75c52f1e5e6e8ff5c2ae991e013109f0702ce13b92e70",
+    "nav-model-v1/response-model.private.json": "0c184332b52d2499b4b60d82d9567995d344fc252f2313121230789bb469276f",
+    "nav-model-v1/result.private.json": "3848843517d723dbd698f8fc6f4c97965110a97e96e00f2c7120c124081e3d7a",
+    "nav-model-v2/hypothesis.private.json": "bea62b716b11154c3fffa307c0adb3b7a126a64784ec385f3934ec8144767c01",
+    "nav-model-v2/isolation.private.json": "82bb90e912306af3747cbedc6e2725639066d6c8edd3fc07671f05ea5d610fb4",
+    "nav-model-v2/nav-manifest.private.json": "7957a6e02ba267ee183c5dd5e00c975c82990f3bd6d610c01b1e6cd043d00262",
+    "nav-model-v2/response-model.private.json": "0c184332b52d2499b4b60d82d9567995d344fc252f2313121230789bb469276f",
+    "nav-model-v2/result.private.json": "5924ff566a1f2d8cc66739cb965197d0440cb0e4f4ec13dd6cc439f5d882ef32",
+    "nav-model-v3/hypothesis.private.json": "2ef5e8da493ef16acf7a7d077b5668f4ab80839ed683ea2665d20377462cbb52",
+    "nav-model-v3/isolation.private.json": "7c16bf5b5ff1338271f266464ebdb4cf20b36411afafe629e6625093e7f56d61",
+    "nav-model-v3/nav-manifest.private.json": "547362c6d99f36ecbf23629b07e6831391b0ffb6a48d24e858aa0a9fa73108ae",
+    "nav-model-v3/response-model.private.json": "0c184332b52d2499b4b60d82d9567995d344fc252f2313121230789bb469276f",
+    "nav-model-v3/result.private.json": "8de2b2227f12cfd09ebee61cf400e31491be95d4cb59ec5c570773ae5943ffc9",
+    "nav-model-v4/hypothesis.private.json": "8d4df190070213fda2c66dc294aa007dc91e2388f23b607e8b39c4a74fb8fbba",
+    "nav-model-v4/isolation.private.json": "9136beb9ee6a2fa2c04e3ca07558259412eb2bc2cfd4a0d77b91650c1dd754d5",
+    "nav-model-v4/nav-manifest.private.json": "7018f8c8963619032840af085e0b78cb3926c75858b3095a987d24c21122e083",
+    "nav-model-v4/response-model.private.json": "0c184332b52d2499b4b60d82d9567995d344fc252f2313121230789bb469276f",
+    "nav-model-v4/result.private.json": "9aedf25aecc3eabd395742915cc3805dfa7846df10cd8dd49931846beb916254",
+    "null-sink-result.private.json": "ebadaa3e350d4bfa07afcacf0ceed309f541f8b86948d1dcac30e6b5cad5a9d7"
+  },
+  "metric_audit": {
+    "nav-model-v4.actual_move_before_obstacle_m": "Historical metric uses the loop variable after completion and is end displacement, not insertion distance. Insertion code required actual displacement >0.20m; scan hits and STOP receipts independently confirmed the obstacle. Original result retained."
+  },
+  "final_profile_regression": {
+    "dynamic": {
+      "validation_passed": true,
+      "status": 4,
+      "final_pose": [
+        2.958099007726493,
+        2.517030927118722,
+        0.06675183547601085
+      ],
+      "goal_error_m": 0.04522991965533111,
+      "yaw_error_rad": 0.06675183547601085,
+      "stopped_velocity": [
+        0.0001933678872135539,
+        -0.0002793280025401343,
+        0.0018332185013525248
+      ],
+      "collision_attempts": 0,
+      "max_nav_forward": 0.15,
+      "max_nav_lateral": 0.0,
+      "max_nav_yaw": 0.08630331414091195,
+      "elapsed_s": 22.98454043804668,
+      "insertion_displacement_m": 0.20734854404412828,
+      "events": [
+        {
+          "name": "obstacle_stop",
+          "actual_control_ack": {
+            "request_id": "4ae0ec000ecc1",
+            "requested": {
+              "obstacle": [
+                3.06574799437079,
+                2.5052475965947676,
+                0.12
+              ]
+            },
+            "confirmed": true
+          },
+          "max_stop_zone_scan_hits": 18,
+          "collision_monitor_STOP_messages": 20,
+          "safe_commands_after400ms": 12,
+          "safe_zero": true,
+          "passed": true
+        }
+      ]
+    },
+    "detour": {
+      "validation_passed": true,
+      "status": 4,
+      "final_pose": [
+        4.1963772991791375,
+        3.3875286985689455,
+        1.5955720799228283
+      ],
+      "goal_error_m": 0.11252962990622786,
+      "yaw_error_rad": 0.024775753127931788,
+      "stopped_velocity": [
+        0.00018073666267102162,
+        -0.0001949998331431649,
+        0.00024952184686806623
+      ],
+      "collision_attempts": 0,
+      "max_nav_lateral": 0.0,
+      "max_nav_yaw": 0.24,
+      "elapsed_s": 97.48222279595211,
+      "events": [
+        {
+          "name": "speed_changed_during_same_goal",
+          "from": 0.1,
+          "to": 0.15,
+          "actual_pose": [
+            2.3843644936663795,
+            2.2396502479277522,
+            -0.9053326063852162
+          ]
+        }
+      ],
+      "obstacle_evidence": {
+        "ack": {
+          "request_id": "4ae175c6c544a",
+          "requested": {
+            "obstacle": [
+              3.35,
+              3.1,
+              0.15
+            ]
+          },
+          "confirmed": true
+        },
+        "max_scan_hits": 12,
+        "occupied_near_obstacle": 121
+      },
+      "speed_change_exercised": true,
+      "max_forward_before_change": 0.1,
+      "max_forward_after_change": 0.15
+    }
+  }
+}
