@@ -1,4 +1,4 @@
-# G12 E authority and two-step navigation session
+# G12 E authority and single-Start navigation
 
 The physical E switch permits a **new explicit start** on the left. Middle pauses
 and zeros navigation intent. Right yields manual ownership. Raw stick activity
@@ -6,7 +6,13 @@ also cancels: returning to neutral/left never resumes the old goal. The current
 middle behavior is a conservative default, not a separately confirmed preference.
 
 The touch console supports pan, pinch/wheel/button zoom, map/pose focus, tap goal,
-preview, explicit confirmation, cancel, speed cap and blocked-route notification.
+single Start, optional preview, cancel, speed cap and blocked-route notification.
+With the D strategy and physical E-left, select a point and click **Start navigation**
+once. That click plans and, on successful planning, starts the same goal generation;
+there is no second human confirmation or dialog. Optional **Preview only** never
+starts movement. E-left alone, refresh, reconnect and joystick release never start.
+Duplicate taps are coalesced. Cancellation or target changes while planning prevent
+the delayed plan from starting.
 A paired Android client can embed the same-origin workbench inside its APP and
 switch to that tab on a newly verified left position. This repository does not
 publish the private full controller APP, factory program or office data.
@@ -20,9 +26,11 @@ sampling timestamps. A >20ms wall/monotonic offset change latches invalid;
 Humble one-argument callbacks use sole-publisher discovery for UI provenance;
 this observer is **not** a substitute for arbitration in the gait control loop.
 
-`NavigationSession` carries goal generations through planning, confirmation,
+`NavigationSession` carries goal generations through planning, start authorization,
 action acceptance and terminal results. Cancellation survives late acceptance,
 source change and stale input. Sending a cancel RPC is not a terminal receipt.
+The internal plan/start RPCs remain separate for generation/lease acknowledgement;
+the single human Start click issues both in order without another prompt.
 `PhysicalSpeedInput` is an unconnected C++ arbitration prototype with persistent
 cancel-generation acknowledgement, not a deployed factory controller hook.
 
@@ -76,9 +84,11 @@ in log but no machine-readable Humble state. Only the final run with all joint
 conditions passed. Physical 1006 E commissioning and native ARM build are separate
 from this synthetic acceptance.
 
-Live web execution remains hard-disabled. Physical D13 transport, policy/mode
-feedback, body/neck extrinsics, near-ground coverage and actual stopping response
-must be commissioned before enabling hardware walking. Current P2 candidate
-forward cap .15m/s, lateral zero, full footprint/stop/ground/localization/stale
-checks are retained. APP installation and map preview must not be called complete
-navigation acceptance.
+Live execution uses an explicitly configured native D13 transport. A valid
+physical E-left sample and current native readiness/lease acknowledgements are
+consumed at execution time. The [explicit LiDAR origin](LIDAR_REFERENCE.md) can be
+used without inventing body/neck feedback. There is no manually accepted-file
+prerequisite. Current P2 candidate forward cap .15m/s, default scale .5, lateral
+zero, configured footprint/stop/ground/localization/stale checks are retained.
+APP installation and map preview are not physical walking acceptance; the
+historical synthetic result above does not establish real balance or stopping.
