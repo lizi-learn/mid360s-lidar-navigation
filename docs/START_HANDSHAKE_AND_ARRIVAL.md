@@ -41,3 +41,21 @@ sensor ages on each evaluation; it does not renew sensor or odometry timestamps.
 An 18 s read-only deployed check obtained 449 native status samples, no lost
 health-derived bits, and a maximum sampled health age of 33.7 ms. This check is
 not a claim of completed physical navigation.
+
+A longer follow-up found a second, independent reference-report coupling:
+reference validity was only published after processing a new cloud, even when
+pose/velocity validation was still valid. The adapter now publishes an
+independent reference decision after checking the original cloud/odometry ages,
+pose, optional body transform and measured-velocity estimator. Repeated decisions
+retain `reference_source_stamp_s` and expose its current age; they do not publish
+another cached pose/TF. Gate and motion buffer consume this separate decision.
+Source expiry and receipt deadlines are unchanged. A regression covers the
+240 ms cached-source case and verifies that 510 ms expired data cannot renew it.
+
+Two bounded real starts then maintained native ownership and delivered nonzero
+commands, but did not produce meaningful body motion. A passive copy of the
+existing control context confirmed AMP_WALK, no velocity interlock, and nonzero
+controller velocity consumed by the policy. This is evidence of a remaining
+policy-response problem, not a successful physical navigation result. The
+second test's recorded UI scale was 1.0, contrary to its intended half-speed
+setup; this discrepancy is retained and scale 0.5 was restored afterward.

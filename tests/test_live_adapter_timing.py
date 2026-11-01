@@ -9,6 +9,7 @@ import numpy as np
 from scipy.spatial.transform import Rotation
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'navigation'))
 from odometry_velocity import PlanarVelocity
+from navigation_reference import reference_status
 
 def vector():return NS(x=0.,y=0.,z=0.)
 def quaternion():return NS(x=0.,y=0.,z=0.,w=1.)
@@ -24,7 +25,7 @@ class String:
     def __init__(self):self.data=''
 p=Path(__file__).resolve().parents[1]/'navigation/live_adapter.py'
 cls=next(n for n in ast.parse(p.read_text()).body if isinstance(n,ast.ClassDef) and n.name=='Adapter')
-scope={'np':np,'math':math,'json':json,'Rotation':Rotation,'Bool':Bool,'String':String,'TransformStamped':transform,'Odometry':odometry}
+scope={'np':np,'math':math,'json':json,'Rotation':Rotation,'Bool':Bool,'String':String,'TransformStamped':transform,'Odometry':odometry,'reference_status':reference_status}
 exec(compile(ast.Module(body=[cls],type_ignores=[]),str(p),'exec'),scope)
 
 class AdapterTimingTests(unittest.TestCase):
@@ -32,6 +33,7 @@ class AdapterTimingTests(unittest.TestCase):
         n=scope['Adapter'].__new__(scope['Adapter']);n.lock=threading.Lock();n.body_reference=None;n.reference_fault='';n.previous=None
         n.rotation=np.eye(3);n.initial_height=0.;n.velocity=PlanarVelocity();n.published_odom_stamp=None
         n.alignment_mtime=1;n.alignment_path=NS(stat=lambda:NS(st_mtime_ns=1));n.now=1.01
+        n.navigation_reference='lidar_projection';n.references=[];n.reference_pub=NS(publish=n.references.append)
         n.sink=NS(get_clock=lambda:NS(now=lambda:NS(nanoseconds=round(n.now*1e9))))
         n.transforms=[];n.odometry=[];n.ground=[];n.status=[]
         n.tf=NS(sendTransform=n.transforms.append);n.odom_pub=NS(publish=n.odometry.append);n.ground_pub=NS(publish=n.ground.append);n.status_pub=NS(publish=n.status.append)
@@ -49,6 +51,17 @@ class AdapterTimingTests(unittest.TestCase):
         n=self.fixture();self.sample(n,1.2,.02);n.tick()
         for i in range(1,10):n.now=1.21+i*.02;n.tick()
         self.assertEqual(len(n.transforms),1);self.assertEqual(len(n.odometry),1)
+    def test_reference_decision_is_not_coupled_to_next_cloud_or_retimestamped(self):
+        n=self.fixture();self.sample(n,1.2,.02);n.tick()
+        previous_poses=len(n.odometry);previous_references=len(n.references)
+        n.now=1.44;n.tick() # Cloud/pose are 240 ms old but within the existing 500 ms source expiry.
+        self.assertEqual(len(n.odometry),previous_poses)
+        self.assertEqual(len(n.references),previous_references+1)
+        report=json.loads(n.references[-1].data)
+        self.assertEqual(report['reference_source_stamp_s'],1.2)
+        self.assertAlmostEqual(report['reference_source_age_s'],.24)
+        n.now=1.71;n.tick()
+        self.assertEqual(len(n.references),previous_references+1) # Real source expiry cannot be renewed.
     def test_expired_or_invalid_pose_stops_output(self):
         n=self.fixture();self.sample(n,1.2,.02);n.tick();n.now=1.8;n.tick()
         self.assertEqual(len(n.transforms),1);self.assertFalse(n.ground[-1].data)

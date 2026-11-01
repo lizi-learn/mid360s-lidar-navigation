@@ -67,6 +67,7 @@ class Adapter:
         self.scan_pub=self.sink.create_publisher(LaserScan,'/scan',qos_profile_sensor_data)
         self.ground_pub=self.sink.create_publisher(Bool,getattr(args,'ground_topic','/p2_nav/ground_ok'),10)
         self.status_pub=self.sink.create_publisher(String,'/p2_nav/terrain_status',10)
+        self.reference_pub=self.sink.create_publisher(String,'/p2_nav/reference_status',10)
         self.tf=TransformBroadcaster(self.sink);self.static=StaticTransformBroadcaster(self.sink)
         t=TransformStamped();t.header.frame_id='base_link';t.child_frame_id='laser';t.transform.rotation.w=1.;self.static.sendTransform(t)
         # Forward each new source-stamped pose promptly. Do not add another
@@ -132,6 +133,15 @@ class Adapter:
             out=Odometry();out.header=t.header;out.child_frame_id='base_link';out.pose.pose.position.x=float(origin[0]);out.pose.pose.position.y=float(origin[1]);out.pose.pose.orientation=t.transform.rotation
             out.twist.twist.linear.x,out.twist.twist.linear.y,out.twist.twist.angular.z=velocity
             self.odom_pub.publish(out);self.published_odom_stamp=stamp(odom)
+        # Validate the current pose/velocity independently of cloud processing.
+        # This is a fresh decision about the ORIGINAL source stamps checked
+        # above; it does not publish another pose or refresh a sensor timestamp.
+        reference=reference_status(self.navigation_reference,
+            body_verified=bool(self.body_reference and self.body_reference.verified),
+            body_feedback=bool(self.body_reference))
+        reference.update(velocity_ready=True,reference_source_stamp_s=stamp(odom),
+            reference_source_age_s=now-stamp(odom),hardware_execution_enabled=False)
+        message=String();message.data=json.dumps(reference);self.reference_pub.publish(message)
         if self.processed_stamp==stamp(cloud):return
         self.processed_stamp=stamp(cloud)
         try:

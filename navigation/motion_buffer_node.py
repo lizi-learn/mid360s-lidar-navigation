@@ -20,6 +20,7 @@ class MotionBufferNode(Node):
         self.create_subscription(Odometry,'/odom',self.odom,10)
         self.create_subscription(String,'/p2_nav/operator',self.operator,10)
         self.create_subscription(String,'/p2_nav/terrain_status',self.terrain,10)
+        self.create_subscription(String,'/p2_nav/reference_status',self.terrain,10)
         self.create_subscription(CollisionMonitorState,'/p2_nav/collision_state',self.collision_state,10)
         self.create_timer(.02,self.tick)
     def command(self,m):self.target=(m.linear.x,m.linear.y,m.angular.z);self.command_time=time.monotonic()

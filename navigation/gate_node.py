@@ -49,6 +49,7 @@ class GateNode(Node):
         self.create_subscription(Odometry, '/odom', self.on_odom, 10)
         self.create_subscription(Bool, '/p2_nav/ground_ok', self.on_ground, 10)
         self.create_subscription(String,'/p2_nav/terrain_status',self.on_terrain,10)
+        self.create_subscription(String,'/p2_nav/reference_status',self.on_reference,10)
         self.create_subscription(Bool,'/p2_nav/collision_source_valid',self.on_collision_source,10)
         self.create_subscription(String, '/p2_nav/operator', self.on_operator, 10)
         localization_qos=QoSProfile(depth=1,durability=DurabilityPolicy.TRANSIENT_LOCAL,reliability=ReliabilityPolicy.RELIABLE)
@@ -83,6 +84,12 @@ class GateNode(Node):
         source_age=(self.get_clock().now().nanoseconds*1e-9)-self.odom_stamp
         self.velocity_source_ns=time.monotonic_ns()-round(source_age*1e9) if self.measured else 0
     def on_ground(self, msg):self.ground = msg.data;self.ground_time = time.monotonic()
+    def on_reference(self,msg):
+        try:
+            d=json.loads(msg.data);self.calibration_ready=reference_ready(d)
+            self.reference_mode=d.get('navigation_reference','unknown')
+            self.calibration_time=time.monotonic()
+        except (ValueError,TypeError):self.calibration_ready=False
     def on_terrain(self,msg):
         try:
             d=json.loads(msg.data);self.calibration_ready=reference_ready(d)
