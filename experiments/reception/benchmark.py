@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Measure content summary cost independently of ROS and actuators."""
-import argparse,json,resource,statistics,sys,tempfile,time
+import argparse,json,resource,statistics,sys,tempfile,time,platform
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[2];sys.path.insert(0,str(ROOT/'navigation'))
 from reception_catalog import Catalog,blank
@@ -20,6 +20,6 @@ def main():
         memory={}
         if Path('/proc/self/status').is_file():
             memory={l.split(':',1)[0]:int(l.split()[1])for l in Path('/proc/self/status').read_text().splitlines()if l.startswith(('VmRSS:','VmHWM:'))}
-        report={'points':1000,'routes':20,'bytes':catalog.path(doc['map_id']).stat().st_size,'summary_median_ms':statistics.median(samples),'summary_p95_ms':sorted(samples)[949],'full_snapshot_average_ms':full_ms,'process_peak_rss_KiB':memory.get('VmHWM'),'process_current_rss_KiB':memory.get('VmRSS'),'rusage_maxrss_KiB':resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,'memory_measurement':'Linux /proc/self/status VmHWM for current executable; rusage may inherit an earlier executable high-water mark' ,'hardware_commands':0,'scope':'Local x86 Python content store microbenchmark only; not production ARM/ROS load validation'}
+        report={'points':1000,'routes':20,'bytes':catalog.path(doc['map_id']).stat().st_size,'summary_median_ms':statistics.median(samples),'summary_p95_ms':sorted(samples)[949],'full_snapshot_average_ms':full_ms,'process_peak_rss_KiB':memory.get('VmHWM'),'process_current_rss_KiB':memory.get('VmRSS'),'rusage_maxrss_KiB':resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,'memory_measurement':'Linux /proc/self/status VmHWM for current executable; rusage may inherit an earlier executable high-water mark' ,'hardware_commands':0,'architecture':platform.machine(),'scope':'Local Python content store microbenchmark only; not whole-system ROS or physical walking validation'}
     Path(args.output).parent.mkdir(parents=True,exist_ok=True);Path(args.output).write_text(json.dumps(report,indent=2));print(json.dumps(report))
 if __name__=='__main__':main()
