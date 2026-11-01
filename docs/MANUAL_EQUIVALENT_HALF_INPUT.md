@@ -54,3 +54,13 @@ A localization seed no longer inherits the navigation-goal free-cell condition;
 finite/in-map checks and all actual goal/footprint checks remain. This permits a
 real pose estimate in a map cell that still needs localization, without changing
 map occupancy or pretending the location is collision-free.
+
+The subsequent 0.75 request produced real forward steps, confirmed by the onsite
+operator and measured joint motion. A short supervised test triggered stop at
+an estimated 0.358 m forward displacement; the final estimated displacement was
+0.532 m. This is successful initiation, not a claim of stopping at the requested
+0.30 m or a completed office traversal. A later long-route start revoked its
+lease after about 0.6 seconds with `navigation_health_not_ready`; a second
+attempt was not armed because the actual controller/hardware readiness changed.
+Those failures remain recorded. [Scheduling and diagnostic receipts](SCHEDULING_AND_RECEIPTS.md)
+describe the subsequent component fix and its validation limits.

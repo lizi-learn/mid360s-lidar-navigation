@@ -224,9 +224,8 @@ class Console(Node):
             from configure import config
             import yaml
             params=self.runtime/'nav2.yaml';params.write_text(yaml.safe_dump(config(controller,minimum_speed=self.minimum_speed,footprint_vertices=self.footprint,odometry_model=self.odometry_model,gait_profile=self.gait_profile,stop_side_margin=float(os.environ.get('P2_NAV_STOP_SIDE_MARGIN','.20')),planning_side_padding=float(os.environ.get('P2_NAV_PLANNING_SIDE_PADDING','.05')),planning_envelope=os.environ.get('P2_NAV_PLANNING_ENVELOPE','stop_clearance'),footprint_padding=float(os.environ.get('P2_NAV_FOOTPRINT_PADDING','.05'))),sort_keys=False))
-            args=['bash',str(ROOT/'run.sh'),'mode:='+mode,'simulation:='+str(self.simulation).lower(),'params:='+str(params)]
-            if mode=='navigation':args+=['map:='+str(map_file)]
-            if self.gait:args=['nice','-n','10']+args
+            from process_scheduling import workflow_command
+            args=workflow_command(ROOT,mode,self.simulation,params,map_file,bool(self.gait))
             self.process=subprocess.Popen(args,cwd=ROOT,stdout=open(self.runtime/'workflow.log','w'),stderr=subprocess.STDOUT,start_new_session=True)
             self.mode=mode;self.controller=controller;self.path=[];self.goal=None
             self.last_action='正在启动建图' if mode=='mapping' else '正在载入地图和定位'

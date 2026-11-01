@@ -127,6 +127,14 @@ class GaitTransport:
                     self.trace.submit({'phase':self.phase,'error':self.error,'generation':self.generation,
                         'target':self.command,'target_source_ns':self.command_stamp,
                         'velocity_stages':self.stage_commands,'speed_tracking':self.speed_tracking,
+                        'health_source_ns':self.health_stamp,'health_flags':self.health_flags,
+                        'last_authority_sample':self.last_authority_sample,
+                        'measured_source_ns':self.measured_source_ns,
+                        'readiness':self.feedback.readiness if self.feedback else None,
+                        'policy_generation':self.feedback.generation if self.feedback else None,
+                        'controller_instance':self.feedback.controller if self.feedback else None,
+                        'armed':bool(self.feedback and self.feedback.armed),
+                        'navigation_owned':bool(self.feedback and self.feedback.navigation_owned),
                         'controller_tick':self.feedback.tick if self.feedback else None,
                         'native_reason':self.feedback.reason if self.feedback else None})
             time.sleep(max(.001,.02-(time.monotonic()-start)))

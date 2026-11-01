@@ -13,6 +13,8 @@ def setup(context):
     root=Path(__file__).resolve().parent
     get=lambda k:LaunchConfiguration(k).perform(context)
     mode=get('mode');simulation=get('simulation')=='true';params=get('params');map_file=get('map')
+    from process_scheduling import background_prefix
+    background=background_prefix(get('physical_gait')=='true')
     from configure import apply_runtime_geometry
     apply_runtime_geometry(params)
     assert mode in ('mapping','navigation')
@@ -53,19 +55,19 @@ def setup(context):
             'distance_variance_penalty':.5,'angle_variance_penalty':1.,'fine_search_angle_offset':.00349,
             'coarse_search_angle_offset':.349,'coarse_angle_resolution':.0349,'minimum_angle_penalty':.9,
             'minimum_distance_penalty':.5,'use_response_expansion':True}
-        nodes.append(Node(package='slam_toolbox',executable='async_slam_toolbox_node',name='slam_toolbox',parameters=[slam],output='screen'))
+        nodes.append(Node(package='slam_toolbox',executable='async_slam_toolbox_node',name='slam_toolbox',parameters=[slam],prefix=background,output='screen'))
         nodes.append(Node(package='nav2_map_server',executable='map_saver_server',name='map_saver',parameters=[dict(use_sim_time=False,save_map_timeout=5.,map_subscribe_transient_local=True,free_thresh_default=FREE_THRESH,occupied_thresh_default=OCCUPIED_THRESH)],output='screen'))
         navigation=['map_saver','velocity_smoother','collision_monitor']
     else:
         assert map_file and Path(map_file).is_file(),'Navigation needs a saved map'
         validate_map_metadata(map_file)
         nodes += [Node(package='nav2_map_server',executable='map_server',name='map_server',parameters=[params,{'yaml_filename':map_file}],output='screen'),
-                  Node(package='nav2_amcl',executable='amcl',name='amcl',parameters=[params,{'set_initial_pose':simulation}],output='screen'),
+                  Node(package='nav2_amcl',executable='amcl',name='amcl',parameters=[params,{'set_initial_pose':simulation}],prefix=background,output='screen'),
                   TimerAction(period=3.,actions=[Node(package='nav2_lifecycle_manager',executable='lifecycle_manager',name='lifecycle_manager_localization',
                        parameters=[{'use_sim_time':False,'autostart':True,'node_names':['map_server','amcl'],'bond_timeout':4.}],output='screen')])]
         for package,executable in [('nav2_planner','planner_server'),('nav2_controller','controller_server'),
                                    ('nav2_behaviors','behavior_server'),('nav2_bt_navigator','bt_navigator')]:
-            nodes.append(Node(package=package,executable=executable,name=executable,parameters=[params],
+            nodes.append(Node(package=package,executable=executable,name=executable,parameters=[params],prefix=background if executable=='planner_server' else [],
                 remappings=[('cmd_vel','/p2_nav/cmd_raw')],output='screen'))
         navigation=['planner_server','controller_server','behavior_server','bt_navigator','velocity_smoother','collision_monitor']
     nodes += [Node(package='nav2_velocity_smoother',executable='velocity_smoother',name='velocity_smoother',parameters=[params],
@@ -78,6 +80,7 @@ def setup(context):
 def generate_launch_description():
     return LaunchDescription([DeclareLaunchArgument('mode',default_value='navigation'),
         DeclareLaunchArgument('simulation_sensor_fixture',default_value='false'),
+        DeclareLaunchArgument('physical_gait',default_value='false'),
         DeclareLaunchArgument('gait_handoff',default_value=os.getenv('P2_NAV_GAIT_HANDOFF','false')),
         DeclareLaunchArgument('simulation',default_value='false'),DeclareLaunchArgument('params'),
         DeclareLaunchArgument('robot_profile',default_value=os.getenv('P2_NAV_ROBOT_PROFILE','')),
