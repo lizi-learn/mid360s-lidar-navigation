@@ -2,11 +2,15 @@
 
 倒装 MID-360S 的 ROS 2 雷达惯性建图、浏览器可视化、已知地面路径预览与人工推架录包。适用于没有深度相机、先验证地图与定位的实验平台。
 
-**当前是实验版本。新增 SLAM Toolbox / Nav2 前向导航工作台，支持仿真中的完整建图、地图保存载入、定位、目标导航和速度调节。** 实机提供建图与路径预演；真实行走仍需机身外参、整机零位及步态接入验收。公开程序不发布电机、颈部或全身控制命令。
+**当前导航冻结为 [Baseline V1](https://github.com/lizi-learn/mid360s-lidar-navigation/releases/tag/baseline-v1)。** P2-1006已有现场监护下的办公室往返与真人障碍绕行记录。最新终点/途中规划修订完成实际路径预览和零输出核验，仍有保留的回放失败，尚未完成这个修订的新一轮真机运动复测。公开项目包含导航与通用步态速度协议；厂商私有驱动、全身策略和模型不随仓库分发。
+
+- [基线功能、证据与已知边界](docs/BASELINE_V1.md)
+- [下一步产品功能建议](docs/NAVIGATION_ROADMAP.md)
+- [机身平和语音与音量设置](docs/NAVIGATION_AUDIO.md)
 
 - [交互演示与说明](https://lizi-learn.github.io/mid360s-lidar-navigation/)：全部使用合成几何，不连接实机。
 - [前向导航工作台与完整流程](docs/NAVIGATION.md)
-- [实验性步态速度接管与实际验收边界](docs/GAIT_HANDOFF.md)：原手柄不变；本地协议、零速度待机已验证，完整导航未验收。
+- [实验性步态速度接管与实际验收边界](docs/GAIT_HANDOFF.md)：E档、摇杆接管及通用速度协议；各修订的实际验证见基线记录。
 - [双足平地适配、头身变换与三维扫描验证](docs/BIPED.md)
 - [显式雷达中心坐标与短时地面观测](docs/LIDAR_REFERENCE.md)：雷达投影坐标和关节机身坐标分别报告，不伪造关节数据。
 - [换机与实机操作](docs/MIGRATION.md)
@@ -110,7 +114,7 @@ python3 -m venv .venv
 
 可选的[步态约束规划实验](experiments/gait_space/README.md)保留完整包络检查，增加通道中心代价与连续转身预算；冻结失败起点的规划已恢复。此项只验证规划，整段窄门行走跟踪仍未验收。默认导航配置未变。
 
-- [G12 E 开关、APP 地图与两步确认流程](docs/G12_NAVIGATION_SESSION.md)：取消、人工接管和障碍回执；实机步态尚未接通。
+- [G12 E 开关、APP 地图与导航任务流程](docs/G12_NAVIGATION_SESSION.md)：历史协议说明；当前P2流程为选点后点击一次开始，状态以基线记录为准。
 
 The console supports an explicit per-installation `P2_NAV_STOP_SIDE_MARGIN`
 override in metres (0.05–0.20; default 0.20). This changes only the extra lateral

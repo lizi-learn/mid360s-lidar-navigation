@@ -33,6 +33,8 @@ class Console(Node):
             from gait_transport import GaitTransport
             self.gait=GaitTransport(gait_socket,trace_path=runtime/'gait-velocity.private.jsonl')
         self.robot_name=None;self.runtime=runtime;self.simulation=simulation;self.mode='idle';self.controller='rpp';self.process=None
+        from audio_feedback import AudioSettings
+        self.audio=AudioSettings(runtime/'audio-settings.json')
         self.minimum_speed=minimum_speed;self.footprint=footprint;self.odometry_model=odometry_model;self.gait_profile=gait_profile
         self.maximum_speed=.8 if gait_profile=='p2-flat-model' else .30
         self.route_process=None;self.route_directory=None
@@ -441,6 +443,7 @@ class Console(Node):
             **({'truth':self.truth} if self.simulation else {}),
             'maps':sorted(p.parent.name for p in (self.runtime/'maps').glob('*/mapped.yaml')),
             'hardware_execution_enabled':bool(getattr(self,'gait',None) and self.gait.status()['navigation_owned']),
+            'audio_feedback':self.audio.status(),
             'scope':'平面导航仿真' if self.simulation else ('雷达中心坐标导航；定位、传感器和步态状态见实时数据' if self.gate.get('navigation_reference')=='lidar_projection' else ('实机步态接口已连接；坐标与控制状态见实时数据' if self.gait else '实机导航预演'))}
 
 def main():
@@ -507,7 +510,7 @@ def main():
                 length=int(self.headers.get('Content-Length','0'))
                 if not 0<length<=8192:raise ValueError('请求大小无效')
                 d=json.loads(self.rfile.read(length))
-                routes={'/api/start':lambda:node.start(d['mode'],d.get('name','office'),d.get('controller','rpp')),
+                routes={'/api/audio':lambda:node.audio.update(d),'/api/start':lambda:node.start(d['mode'],d.get('name','office'),d.get('controller','rpp')),
                     '/api/sim_mapping_route':lambda:node.simulated_mapping_route(d['name']),
                     '/api/save':lambda:node.save_map(d['name']),'/api/goal':lambda:node.set_goal(d),
                     '/api/confirm':lambda:node.confirm_goal(d),'/api/sim_operator':lambda:node.simulation_operator(d),
