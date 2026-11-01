@@ -23,7 +23,13 @@ class MotionBufferNode(Node):
         self.create_subscription(String,'/p2_nav/reference_status',self.terrain,10)
         self.create_subscription(CollisionMonitorState,'/p2_nav/collision_state',self.collision_state,10)
         self.create_timer(.02,self.tick)
-    def command(self,m):self.target=(m.linear.x,m.linear.y,m.angular.z);self.command_time=time.monotonic()
+    def command(self,m):
+        # RPP curvature corrections can exceed the configured gait turn range.
+        # Bound finite yaw requests before the buffer contract; rejecting the
+        # whole vector would repeatedly erase an otherwise valid forward input.
+        w=m.angular.z
+        self.target=(m.linear.x,m.linear.y,max(-.24,min(.24,w)) if math.isfinite(w) else w)
+        self.command_time=time.monotonic()
     def odom(self,m):
         self.odom_stamp=m.header.stamp.sec+m.header.stamp.nanosec/1e9
         self.measured=(m.twist.twist.linear.x,m.twist.twist.linear.y,m.twist.twist.angular.z)

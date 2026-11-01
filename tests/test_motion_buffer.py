@@ -5,6 +5,16 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'navigation'))
 from motion_buffer import MotionBuffer
 
 class BufferTest(unittest.TestCase):
+    def test_forward_steering_correction_does_not_enter_pivot_settling(self):
+        b=MotionBuffer(accel=.4,decel=.8);values=[]
+        for i in range(250):
+            yaw=.24 if i%30<15 else -.24
+            measured_yaw=-.12 if yaw>0 else .12
+            values.append(b.step((.75,0.,yaw),(.1,0.,measured_yaw),i*.02,.1,frame_verified=True))
+            self.assertEqual(b.phase,'forward')
+        self.assertAlmostEqual(values[-1][0],.75)
+        self.assertTrue(all(y[0]>=x[0] for x,y in zip(values,values[1:])))
+        self.assertTrue(all(abs(y[2]-x[2])<=.0060001 for x,y in zip(values,values[1:])))
     def run_steps(self,b,target,velocity,steps=100,start=0.,**options):
         out=[]
         for i in range(steps):

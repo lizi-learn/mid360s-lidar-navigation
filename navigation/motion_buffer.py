@@ -55,8 +55,10 @@ class MotionBuffer:
                 if not self._settled(now,angular<=.06 and abs(self.w)<1e-6):v=w=0.
                 else:self.phase='forward';self.stable_since=None
             else:self.phase='forward';self.stable_since=None
-        # Opposite turns pass through zero and wait for measured yaw to settle.
-        if self.w*w<0 or w*measured[2]<0 and angular>.06:
+        # An in-place reversal waits for yaw to settle. Ordinary forward path
+        # corrections slew through zero without treating biped yaw ripple as
+        # another request to stop translation and begin an in-place pivot.
+        if target[0]==0. and (self.w*w<0 or w*measured[2]<0 and angular>.06):
             w=0.;self.phase='settling_yaw';self.stable_since=None
         def slew(current,target,rate):
             delta=target-current;return current+math.copysign(min(abs(delta),rate*dt),delta)

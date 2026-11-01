@@ -259,7 +259,7 @@ class Console(Node):
         validate_map_metadata(target/'mapped.yaml')
         self.last_action='地图与位姿图已保存：'+name
         return {'saved':name,'files':[p.name for p in target.iterdir()]}
-    def checked_pose(self,data):
+    def checked_pose(self,data,*,require_free=True):
         x,y,yaw=(float(data[k]) for k in ('x','y','yaw'))
         if not all(math.isfinite(v) for v in (x,y,yaw)):raise ValueError('坐标必须是有限数值')
         grid=self.grid
@@ -268,12 +268,12 @@ class Console(Node):
         iy=int(math.floor((y-grid.info.origin.position.y)/grid.info.resolution))
         if not 0<=ix<grid.info.width or not 0<=iy<grid.info.height:raise ValueError('目标在地图外')
         cell=grid.data[iy*grid.info.width+ix]
-        if not 0<=cell<20:raise ValueError('该点为未知区域或障碍，请选择已观察地面')
+        if require_free and not 0<=cell<20:raise ValueError('该点为未知区域或障碍，请选择已观察地面')
         pose=PoseStamped();pose.header.frame_id='map';pose.header.stamp=self.get_clock().now().to_msg()
         pose.pose.position.x=x;pose.pose.position.y=y;pose.pose.orientation.z=math.sin(yaw/2);pose.pose.orientation.w=math.cos(yaw/2)
         return pose
     def set_pose(self,data):
-        self.stop();pose=self.checked_pose(data);msg=PoseWithCovarianceStamped();msg.header=pose.header;msg.pose.pose=pose.pose
+        self.stop();pose=self.checked_pose(data,require_free=False);msg=PoseWithCovarianceStamped();msg.header=pose.header;msg.pose.pose=pose.pose
         msg.pose.covariance[0]=.04;msg.pose.covariance[7]=.04;msg.pose.covariance[35]=.04
         self.initial.publish(msg);self.last_action='已提交初始位置，等待定位稳定'
         return {'initial_pose_set':True}

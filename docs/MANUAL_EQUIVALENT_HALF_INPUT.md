@@ -42,3 +42,15 @@ profile, cost-based RPP speed scaling and the separate SlowZone multiplier are
 therefore removed. Curvature and endpoint approach scaling, real collision STOP,
 source expiry, operator takeover and input ramps remain. Generic profiles keep
 their prior configuration. This change is not a claim of physical movement.
+
+The operator subsequently requested a0.75 input, explicitly replacing half-mode
+for the real short test. The first request estimated0.153m forward but repeated
+zeros limited the applied input to0.566. Raw RPP yaw reached0.548, exceeding the
+0.24 buffer contract and resetting the complete forward vector. Finite raw yaw
+is now bounded at the buffer entry, retaining invalid/nonfinite rejection.
+Forward steering reversals now slew through zero without entering an in-place
+pivot settling phase; true in-place transitions retain measured settling.
+A localization seed no longer inherits the navigation-goal free-cell condition;
+finite/in-map checks and all actual goal/footprint checks remain. This permits a
+real pose estimate in a map cell that still needs localization, without changing
+map occupancy or pretending the location is collision-free.
