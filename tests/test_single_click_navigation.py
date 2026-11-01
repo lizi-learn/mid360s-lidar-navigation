@@ -12,7 +12,7 @@ class SingleClickNavigationTests(unittest.TestCase):
     def test_start_preview_cancellation_and_double_tap_use_actual_script(self):
         html=(Path(__file__).resolve().parents[1]/'navigation/console.html').read_text()
         script=re.findall(r'<script>(.*?)</script>',html,re.S)[-1]
-        script=script.replace('refresh();setInterval(refresh,250);','')
+        script=re.sub(r'refresh\(\);(?:const consoleRefreshTimer=)?setInterval\(refresh,250\);','',script,count=1)
         harness=r'''
 const vm=require('node:vm'),assert=require('node:assert/strict');
 function fixture(){

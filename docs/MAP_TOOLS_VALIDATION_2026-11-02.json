@@ -1,5 +1,5 @@
 {
-  "version": "v0.5.1-map-tools.3",
+  "version": "v0.5.1-map-tools.4",
   "hardware_commands": 0,
   "scope": "Synthetic planar Nav2/SLAM plus pure/subprocess/UI tests; no new physical walking",
   "pure_tests": 316,
@@ -55,6 +55,12 @@
       "still_failed": 6,
       "total": 12,
       "new_fix_claimed": false
+    },
+    {
+      "case": "legacy_ui_harness_startup_after_entry_fix",
+      "failed_tests": 2,
+      "reason": "fixtures still removed the old unnamed auto-refresh startup; updated stripping for the named/disposable timer while preserving all original readiness, one-click, cancellation and takeover assertions",
+      "after_repair": "316 tests pass"
     }
   ],
   "ui_validation": {

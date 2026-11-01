@@ -7,7 +7,7 @@ class ConsoleExecutionUITests(unittest.TestCase):
     def test_actual_refresh_requires_ready_physical_transport_and_live_health(self):
         html=(Path(__file__).resolve().parents[1]/'navigation/console.html').read_text()
         script=re.findall(r'<script>(.*?)</script>',html,re.S)[-1]
-        script=script.replace('refresh();setInterval(refresh,250);','')
+        script=re.sub(r'refresh\(\);(?:const consoleRefreshTimer=)?setInterval\(refresh,250\);','',script,count=1)
         harness=r'''
 const vm=require('node:vm'),assert=require('node:assert/strict');
 const elements=new Map(),calls=[];
