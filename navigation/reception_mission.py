@@ -51,6 +51,7 @@ class Mission:
         with self.lock: return epoch == self.epoch and self.phase in BUSY
     def cancel(self, reason='cancelled'):
         with self.lock:
+            if self.phase==reason:return self.epoch
             if reason=='paused' and self.phase in BUSY:
                 self.paused_from=self.phase;self.pause_remaining=max(0.,(self.deadline or time.monotonic())-time.monotonic())
             self.epoch += 1; self.phase = reason; self.speech_key = ''
@@ -304,5 +305,7 @@ class MissionService:
                 self.update_live_route()
             except Exception as error: self.engine.failed(self.engine.epoch, error)
     def close(self):
-        self.closed.set(); self.engine.cancel(); self.thread.join(timeout=1)
+        self.closed.set()
+        if self.engine.phase in BUSY:self.engine.cancel('interrupted')
+        self.thread.join(timeout=1)
         self.executor.shutdown(wait=False, cancel_futures=True);self.history.close()

@@ -157,7 +157,7 @@
   },
   "compiled_planner_sha256": "2f110dde619b79c529a5b1ee6b728dd2f9fd09ecf518ce893f24a8bfdabd6c0d",
   "planner_source_sha256": "77bee3e1a283b6ec166786bc94fb08755e481453b125ad4260e2b7d114fab906",
-  "python_tests": 306,
+  "python_tests": 307,
   "remaining": [
     "Production ARM parallel load and actual body speaker custom introductions",
     "Actual G12 screen after this software rollout",

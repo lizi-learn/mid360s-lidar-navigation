@@ -44,6 +44,9 @@ class HistoryTests(unittest.TestCase):
         self.assertEqual(m.tick(permitted(),3)['point']['id'],'b')
         m.cancel('manual')
         with self.assertRaises(ValueError):m.resume(4)
+    def test_repeated_cancel_is_idempotent_not_extra_user_events(self):
+        rows=[];m=Mission(rows.append);m.start(fixture(),'tour',0);m.cancel();epoch=m.epoch;m.cancel()
+        self.assertEqual(m.epoch,epoch);self.assertEqual([r['kind']for r in rows],['started','cancelled'])
     def test_guest_pause_does_not_advance_or_duplicate_arrival(self):
         d=fixture();d['points'][1]['guest_wait']=True;m=Mission();e=m.start(d,'tour',0)
         m.dispatched(e,1);m.tick(permitted('arrived'),1);m.cancel('paused');m.resume(2)

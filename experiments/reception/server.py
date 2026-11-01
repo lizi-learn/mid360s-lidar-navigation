@@ -90,7 +90,7 @@ class Sandbox:
     def stop(self):
         with self.lock:
 
-            if self.reception.engine.phase not in ('paused','manual'):self.reception.engine.cancel()
+            if self.reception.engine.phase in ('dispatching','navigating','rerouting','waiting_route','presenting','guest_wait','dwell'):self.reception.engine.cancel()
             self.session.cancel();self.session.acknowledge_cancel(self.session.cancel_generation);self.active=False;self.velocity=[0.,0.,0.]
     def reception_speech_result(self):return self.speech
     def save(self,data):
