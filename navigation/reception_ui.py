@@ -22,4 +22,7 @@ def console_html(root):
     root=Path(root)
     literal=json.dumps(embedded_reception_html(root),ensure_ascii=False).replace('</','<\\/')
     entry='function openReception(){consoleDisposed=true;clearInterval(consoleRefreshTimer);document.open();document.write('+literal+');document.close()}'
+    # The factory gateway preserves the browser query but serves the root
+    # document upstream. Enter the operator view without changing that gateway.
+    entry += ";window.addEventListener('load',()=>{if(new URLSearchParams(location.search).get('view')==='operator')openReception()});"
     return (root/'console.html').read_text().replace('/*RECEPTION_APP*/',entry)

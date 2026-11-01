@@ -200,6 +200,13 @@ class MissionService:
                 if self.node.session.phase in ('starting', 'executing', 'replanning'): raise ValueError('已有导航正在执行')
                 if self.future is not None and not self.future.done(): raise ValueError('上一任务正在退出，请稍候')
                 route_id=data.get('route_id')
+                if data.get('target') is not None:
+                    target=data['target']
+                    if not isinstance(target,dict) or any(type(target.get(k)) not in (int,float) or not math.isfinite(target[k]) or abs(target[k])>1e5 for k in ('x','y')):
+                        raise ValueError('地图目标坐标无效')
+                    point=dict(id='temporary_visit',name='地图临时目的地',x=float(target['x']),y=float(target['y']),yaw=None,kind='visit',product_id='',script='',dwell=0.,guest_wait=False)
+                    doc['points']=[p for p in doc['points'] if p['id']!=point['id']]+[point]
+                    data=dict(data,point_id=point['id'])
                 if data.get('point_id'):
                     point=next((p for p in doc['points']if p['id']==data['point_id']),None)
                     if point is None:raise ValueError('点位不存在')
