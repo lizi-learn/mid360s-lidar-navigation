@@ -49,13 +49,13 @@ class DoorRays:
 
 class DoorOverlay:
     """Only authored door stripes can differ; the original map is never edited."""
-    def __init__(self):self.cached_key=None;self.masks={}
-    def apply(self,grid,document,states):
+    def __init__(self):self.cached_key=None;self.masks={};self.observed_open={}
+    def apply(self,grid,document,states,evidence=None):
         # grid contains width,height,resolution,origin,cells (Nav2 convention).
-        key=(grid['width'],grid['height'],grid['resolution'],tuple(grid['origin']),
+        key=(document['map_id'],grid.get('revision'),grid['width'],grid['height'],grid['resolution'],tuple(grid['origin']),
              tuple((d['id'],d['x'],d['y'],d['width'],d['yaw'])for d in document['doors']))
         if key!=self.cached_key:
-            self.cached_key=key;self.masks={};res=grid['resolution'];ox,oy=grid['origin']
+            self.cached_key=key;self.masks={};self.observed_open={};res=grid['resolution'];ox,oy=grid['origin']
             for d in document['doors']:
                 radius=d['width']/2+.15;indices=[];c,s=math.cos(d['yaw']),math.sin(d['yaw'])
                 for row in range(max(0,math.floor((d['y']-radius-oy)/res)),min(grid['height'],math.ceil((d['y']+radius-oy)/res))):
@@ -69,10 +69,16 @@ class DoorOverlay:
         output=list(grid['cells']);base=grid['cells'];changes=[]
         for d in document['doors']:
             state=states.get(d['id'],'unknown')
+            # A mapped opening is a previous observation, not a fresh door
+            # status. Partial view/expiry must not redraw an old closed leaf
+            # under a robot already traversing it. Closing returns revoke it;
+            # map reload/geometry change clears this private observation memory.
+            if state=='open':self.observed_open[d['id']]=dict((evidence or{}).get(d['id'],{}))
+            elif state=='closed':self.observed_open.pop(d['id'],None)
             for i in self.masks[d['id']]:
                 if state=='closed':output[i]=100
-                elif state=='open'and base[i]>=65:output[i]=0
+                elif d['id']in self.observed_open and base[i]>=65:output[i]=0
         for i,(a,b)in enumerate(zip(base,output)):
             if a!=b:changes.append(i)
-        return output,{'changed_cells':len(changes),'door_states':dict(states),'original_map_modified':False,
+        return output,{'changed_cells':len(changes),'door_states':dict(states),'original_map_modified':False,'last_full_open_observation':copy.deepcopy(self.observed_open),
                        'unknown_cells_promoted':sum(base[i]<0 and output[i]==0 for i in changes)}

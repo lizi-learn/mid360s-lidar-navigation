@@ -24,7 +24,7 @@ class LiveRouter:
         blocked=False
         for a,b in zip(old_nodes,old_nodes[1:]):
             edges=[e for e in document['edges']if e['a']==a and e['b']==b or e['bidirectional']and e['b']==a and e['a']==b]
-            if edges and all(e['door_id']and states.get(e['door_id'])!='open'for e in edges):blocked=True
+            if edges and all(e['door_id']and states.get(e['door_id'])=='closed'for e in edges):blocked=True
         candidate=route(document,start,goal,states)
         if candidate is None:
             return {'wait':True,'reason':'通道受阻，暂时没有可用绕行连接'}if blocked or waiting else None

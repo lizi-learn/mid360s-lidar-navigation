@@ -1,8 +1,8 @@
 {
-  "version": "v0.5.1-map-tools.5",
+  "version": "v0.5.1-map-tools.6",
   "hardware_commands": 0,
   "scope": "Synthetic planar Nav2/SLAM plus pure/subprocess/UI tests; no new physical walking",
-  "pure_tests": 316,
+  "pure_tests": 318,
   "ui_hash_vectors": 8,
   "joint_native": {
     "passed": true,
@@ -81,6 +81,11 @@
       "maximum_error_rad": 2.09027901,
       "production_integrated": false,
       "note": "Previously48smallpurecasespassed. Wider delays/angles/gains fail; excluded from release."
+    },
+    {
+      "case": "main11ec8a1-CI41350501265",
+      "passed": false,
+      "reason": "Observed door opens, then partial view expires status; old leaf overlay restored and active semantic route repeatedly reverses. Full body collisions0 but goalfailed."
     }
   ],
   "ui_validation": {
@@ -169,5 +174,19 @@
       "elapsed_s": 59.4195720939897,
       "note": "Before final 1cm swept recheck; not substituted for final candidate regression"
     }
-  ]
+  ],
+  "door_partial_view_repair_native": {
+    "passed": true,
+    "elapsed_s": 75.38416702509858,
+    "cases": [
+      "continuous_native_transit",
+      "observed_closed_door_reopens_and_live_shortcut",
+      "actual_dynamic_obstacle_and_complete",
+      "middle_pause_then_explicit_resume_native",
+      "manual_cancel_no_auto_resume_and_durable_receipts"
+    ],
+    "body_intrusions": 0,
+    "source_time_expiry_unchanged": true,
+    "remembered_occupancy_is_not_live_open_state": true
+  }
 }

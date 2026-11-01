@@ -157,12 +157,12 @@ class Console(Node):
         with self._overlay_lock:
             if key==self._overlay_key:return
             q=base.info.origin.orientation
-            grid={'width':base.info.width,'height':base.info.height,'resolution':base.info.resolution,
+            grid={'revision':self.map_revision,'width':base.info.width,'height':base.info.height,'resolution':base.info.resolution,
                   'origin':[base.info.origin.position.x,base.info.origin.position.y],'cells':base.data}
             if abs(q.z)>1e-8 or abs(q.x)>1e-8 or abs(q.y)>1e-8:
                 cells=list(base.data);report={'changed_cells':0,'reason':'rotated_map_overlay_unsupported','original_map_modified':False}
             else:
-                cells,report=self.door_overlay.apply(grid,document,states)
+                cells,report=self.door_overlay.apply(grid,document,states,self.reception.decisions.observations(document,time.monotonic()))
                 cells,authored=self.annotation_layer.apply(dict(grid,cells=cells),annotations);report.update(authored)
             msg=copy.deepcopy(base);msg.data=cells
             self.navigation_grid=msg;self.overlay_revision+=1;self.overlay_report=report;self._overlay_key=key

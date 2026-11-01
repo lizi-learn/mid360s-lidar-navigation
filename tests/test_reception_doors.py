@@ -41,15 +41,26 @@ class DoorEvidenceTests(unittest.TestCase):
         self.assertEqual(decisions.doors['d'].stamp,11.5)
         accept_rows(decisions,d,[dict(door_id='d',state='closed',source_monotonic=14.7,source_sequence=9)],14.7)
         self.assertEqual(decisions.states(d,14.7)['d'],'closed')
-    def test_overlay_changes_only_authored_stripe_and_reverts_on_unknown(self):
+    def test_overlay_retains_measured_opening_on_partial_view_not_fresh_state(self):
         grid={'width':40,'height':40,'resolution':.1,'origin':[-2.,0.],'cells':[0]*1600}
         overlay=DoorOverlay();closed,meta=overlay.apply(grid,D,{'d':'closed'});self.assertGreater(meta['changed_cells'],0)
         grid['cells']=closed;grid['cells'][0]=100;grid['cells'][1]=-1;before=grid['cells'][:]
         opened,report=overlay.apply(grid,D,{'d':'open'});self.assertEqual(opened[0],100);self.assertEqual(opened[1],-1)
         self.assertEqual(report['unknown_cells_promoted'],0);self.assertEqual(grid['cells'],before)
-        original,_=overlay.apply(grid,D,{'d':'unknown'});self.assertEqual(original,before)
+        remembered,meta=overlay.apply(grid,D,{'d':'unknown'});self.assertEqual(remembered,opened)
+        self.assertEqual(meta['door_states']['d'],'unknown');self.assertIn('d',meta['last_full_open_observation'])
+        restored,_=overlay.apply(grid,D,{'d':'closed'});self.assertEqual(restored,before)
+        unknown,_=overlay.apply(grid,D,{'d':'unknown'});self.assertEqual(unknown,before)
     def test_clear_outside_stripe_does_not_erase_nearby_wall(self):
         grid={'width':40,'height':40,'resolution':.1,'origin':[-2.,0.],'cells':[100]*1600}
         overlay=DoorOverlay();opened,_=overlay.apply(grid,D,{'d':'open'})
         self.assertGreater(opened.count(100),1550);self.assertGreater(opened.count(0),0)
+    def test_memory_keeps_original_source_and_resets_on_map_reload(self):
+        grid={'width':40,'height':40,'resolution':.1,'origin':[-2.,0.],'cells':[100]*1600,'revision':1}
+        overlay=DoorOverlay();e={'d':{'state':'open','source_monotonic':11.5,'source_sequence':7}}
+        opened,_=overlay.apply(grid,D,{'d':'open'},e)
+        remembered,meta=overlay.apply(grid,D,{'d':'unknown'},{'d':{'state':'unknown','source_monotonic':11.5,'source_sequence':7}})
+        self.assertEqual(opened,remembered);self.assertEqual(meta['last_full_open_observation']['d']['source_monotonic'],11.5)
+        grid['revision']=2;reset,meta=overlay.apply(grid,D,{'d':'unknown'})
+        self.assertEqual(reset,grid['cells']);self.assertFalse(meta['last_full_open_observation'])
 if __name__=='__main__':unittest.main()

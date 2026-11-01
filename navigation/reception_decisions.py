@@ -25,6 +25,10 @@ class RouteDecisions:
     def states(self,document,now):
         self.bind(document)
         with self.lock:return {d['id']:self.doors[d['id']].current(now)if d['id']in self.doors else 'unknown'for d in document['doors']}
+    def observations(self,document,now):
+        self.bind(document)
+        with self.lock:
+            return {i:{'state':e.current(now),'source_monotonic':e.stamp,'source_sequence':e.source_sequence}for i,e in self.doors.items()}
     def plan(self,document,start,goal,now):return route(document,start,goal,self.states(document,now))
     def expand(self,document,route_id,now):
         """Adaptive routes keep visit order, replace optional transit waypoints.

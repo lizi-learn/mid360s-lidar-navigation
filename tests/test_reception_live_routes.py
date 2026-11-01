@@ -28,4 +28,9 @@ class LiveRoutingTests(unittest.TestCase):
         d=fixture();r=LiveRouter();c=self.command(d,['b','c'])
         self.assertIsNotNone(r.choose(d,{'door':'open'},[0,0,0],c,'a',now=10))
         self.assertIsNone(r.choose(d,{'door':'open'},[0,0,0],c,'a',now=11))
+    def test_partial_view_does_not_reverse_current_opening_route(self):
+        d=fixture();r=LiveRouter();c=self.command(d,['c'])
+        self.assertIsNone(r.choose(d,{'door':'open'},[0,0,0],c,'a',now=10))
+        self.assertIsNone(r.choose(d,{'door':'unknown'},[.2,0,0],c,'a',now=14))
+        self.assertIsNotNone(r.choose(d,{'door':'closed'},[.2,0,0],c,'a',now=15))
 if __name__=='__main__':unittest.main()
