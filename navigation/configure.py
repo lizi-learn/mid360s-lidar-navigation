@@ -182,7 +182,7 @@ def apply_runtime_geometry(params_file):
     if not override.is_file():return False
     value=json.loads(override.read_text());vertices=checked(value['footprint'])
     padding=value.get('footprint_padding',.05)
-    if not isinstance(padding,(int,float)) or not math.isfinite(padding) or not 0<=padding<=.05:
+    if type(padding) not in (int,float) or not math.isfinite(padding) or not 0<=padding<=.05:
         raise ValueError('Invalid configured footprint padding')
     params=yaml.safe_load(path.read_text())
     # The same configured body must be used by costmaps AND collision polygons.
@@ -205,7 +205,7 @@ def apply_runtime_geometry(params_file):
                         float(lower[0]),float(lower[1]),float(lower[0]),float(upper[1])]
     for name in ('local_costmap','global_costmap'):
         grid=params[name][name]['ros__parameters']
-        grid['footprint']=json.dumps(vertices);grid['footprint_padding']=padding
+        grid['footprint']=json.dumps(vertices);grid['footprint_padding']=float(padding)
     if 'global_obstacle_combination' in value:
         method=value['global_obstacle_combination']
         if type(method) is not int or method not in (0,1):raise ValueError('Invalid obstacle layer combination')
