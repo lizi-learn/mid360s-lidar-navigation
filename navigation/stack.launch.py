@@ -13,6 +13,8 @@ def setup(context):
     root=Path(__file__).resolve().parent
     get=lambda k:LaunchConfiguration(k).perform(context)
     mode=get('mode');simulation=get('simulation')=='true';params=get('params');map_file=get('map')
+    from configure import apply_runtime_geometry
+    apply_runtime_geometry(params)
     assert mode in ('mapping','navigation')
     common={'use_sim_time':False}
     nodes=[]

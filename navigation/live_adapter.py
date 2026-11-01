@@ -19,6 +19,7 @@ from nav_msgs.msg import Odometry
 from sensor_msgs.msg import PointCloud2,LaserScan,JointState
 from biped_reference import BodyReference,rigid
 from odometry_velocity import PlanarVelocity
+from scan_ranges import encode_ranges
 from std_msgs.msg import Bool,String
 from tf2_ros import TransformBroadcaster,StaticTransformBroadcaster
 from terrain import local_floor,classify,observed_front_support,forward_lower_surface,ground_decision
@@ -142,8 +143,7 @@ class Adapter:
             bearing=(np.arctan2(delta[:,1],delta[:,0])-yaw+math.pi)%(2*math.pi)-math.pi
             ranges=np.linalg.norm(delta,axis=1);indices=np.clip(((bearing+math.pi)/(2*math.pi)*360).astype(int),0,359)
             output=np.full(360,np.inf);np.minimum.at(output,indices,ranges)
-            # Empty height-slice bins are unknown, not evidence of a clear ray.
-            output[~np.isfinite(output)]=np.nan
+            output=encode_ranges(output,.12,14.)
             scan=LaserScan();scan.header.stamp=cloud.header.stamp;scan.header.frame_id='laser'
             scan.angle_min=-math.pi;scan.angle_increment=2*math.pi/360;scan.angle_max=-math.pi+359*scan.angle_increment
             scan.range_min=.12;scan.range_max=14.;scan.scan_time=.1;scan.ranges=output.tolist();self.scan_pub.publish(scan)

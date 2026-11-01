@@ -5,11 +5,15 @@ import argparse, yaml, json, math
 import numpy as np
 from footprint import checked,DEFAULT,load as load_footprint
 
-def config(controller='rpp', tree=None, minimum_speed=.03, footprint_vertices=None, odometry_model='differential',gait_profile='generic',stop_side_margin=.20,planning_side_padding=.05):
+def config(controller='rpp', tree=None, minimum_speed=.03, footprint_vertices=None, odometry_model='differential',gait_profile='generic',stop_side_margin=.20,planning_side_padding=.05,planning_envelope='stop_clearance',footprint_padding=.05):
     if not math.isfinite(stop_side_margin) or not .05<=stop_side_margin<=.20:
         raise ValueError('Stop side margin must be between 0.05 and 0.20 m; body envelope is independent')
     if not math.isfinite(planning_side_padding) or not 0.<=planning_side_padding<=.05:
         raise ValueError('Additional planning side padding must be between 0 and 0.05 m')
+    if planning_envelope not in ('body','stop_clearance'):
+        raise ValueError('Unknown planning envelope')
+    if not math.isfinite(footprint_padding) or not 0.<=footprint_padding<=.05:
+        raise ValueError('Footprint padding must be between 0 and 0.05 m')
     if gait_profile not in ('generic','p2-flat-model'):raise ValueError('Unknown gait profile')
     if gait_profile=='p2-flat-model':
         if controller!='rpp':raise ValueError('The experimental P2 model profile requires RPP')
@@ -72,7 +76,7 @@ def config(controller='rpp', tree=None, minimum_speed=.03, footprint_vertices=No
     for name,frame,rolling in [('local_costmap','odom',True),('global_costmap','map',False)]:
         common=dict(use_sim_time=False,update_frequency=5. if rolling else 1.,publish_frequency=2. if rolling else 1.,
             global_frame=frame,robot_base_frame='base_link',resolution=.05,footprint=footprint,
-            footprint_padding=.05,transform_tolerance=.25,track_unknown_space=True,
+            footprint_padding=footprint_padding,transform_tolerance=.25,track_unknown_space=True,
             plugins=(['obstacle_layer','inflation_layer'] if rolling else ['static_layer','obstacle_layer','inflation_layer']),
             static_layer=dict(plugin='nav2_costmap_2d::StaticLayer',map_subscribe_transient_local=True),
             obstacle_layer=dict(plugin='nav2_costmap_2d::ObstacleLayer',enabled=True,observation_sources='scan',
@@ -139,9 +143,35 @@ def config(controller='rpp', tree=None, minimum_speed=.03, footprint_vertices=No
         # padding and reserve at least the monitor/body-padded lateral bounds,
         # without requiring duplicate lateral padding in an explicit override.
         for point in clearance:
-            point[1]-=math.copysign(.05-planning_side_padding,point[1])
-        result['global_costmap']['global_costmap']['ros__parameters']['footprint']=json.dumps(checked(clearance))
+            point[1]-=math.copysign(1.,point[1])*(footprint_padding-planning_side_padding)
+        if planning_envelope=='stop_clearance':
+            result['global_costmap']['global_costmap']['ros__parameters']['footprint']=json.dumps(checked(clearance))
     return result
+
+def apply_runtime_geometry(params_file):
+    """Apply a runtime's explicit footprint on every workflow launch.
+
+    Older long-running consoles can regenerate parameters using their cached
+    module. Loading this ordinary configuration in the new launch process keeps
+    the requested geometry across map/mode changes without restarting the gait.
+    An absent override retains the supplied parameters; it is not an access gate.
+    """
+    path=Path(params_file);override=path.with_name('planning_geometry.json')
+    if not override.is_file():return False
+    value=json.loads(override.read_text());vertices=checked(value['footprint'])
+    padding=value.get('footprint_padding',.05)
+    if not isinstance(padding,(int,float)) or not math.isfinite(padding) or not 0<=padding<=.05:
+        raise ValueError('Invalid configured footprint padding')
+    params=yaml.safe_load(path.read_text())
+    for name in ('local_costmap','global_costmap'):
+        grid=params[name][name]['ros__parameters']
+        grid['footprint']=json.dumps(vertices);grid['footprint_padding']=padding
+    if 'global_obstacle_combination' in value:
+        method=value['global_obstacle_combination']
+        if type(method) is not int or method not in (0,1):raise ValueError('Invalid obstacle layer combination')
+        params['global_costmap']['global_costmap']['ros__parameters']['obstacle_layer']['combination_method']=method
+    path.write_text(yaml.safe_dump(params,sort_keys=False))
+    return True
 
 def main():
     p=argparse.ArgumentParser();p.add_argument('--controller',choices=['rpp','mppi'],default='rpp');p.add_argument('--output',required=True)
