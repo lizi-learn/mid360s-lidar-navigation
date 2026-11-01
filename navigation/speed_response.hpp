@@ -35,7 +35,7 @@ class SpeedResponse {
     if(!owned || (vx==0. && wz==0.)){reset();return state_;}
     if(!std::isfinite(vx)||!std::isfinite(wz)||!std::isfinite(measured_x)||
        !std::isfinite(measured_yaw)||!std::isfinite(dt)||dt<=0.||dt>.1||
-       vx<0.||vx>.800001||std::abs(wz)>.240001||
+       vx<0.||vx>.800001||std::abs(wz)>.600001||
        std::abs(measured_x)>2.||std::abs(measured_yaw)>4.){
       reset();state_.reason=speed_invalid_input;return state_;
     }

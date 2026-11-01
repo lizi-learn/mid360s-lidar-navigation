@@ -70,55 +70,71 @@ class GaitTransport:
             self.start_request=None;self.generation=None;self.started.set()
         if self.client:self.client.close()
         self.client=None
+    def _authority(self,r):
+        with self.lock:
+            return Authority(r.receiver_instance if r else 0,r.receiver_generation if r else 0,
+                r.native_instance if r else 0,r.native_stamp if r else 0,self.health_stamp,0,self.health_flags)
+    def _exchange_authority(self,r):
+        authority=self._authority(r)
+        reply=self.client.exchange(Operation.AUTHORITY,authority)
+        with self.lock:
+            self.feedback=reply
+            self.last_authority_sample={'health_source_ns':authority.health_stamp_ns,'health_flags':authority.flags,
+                'operator_source_ns':authority.operator_stamp_ns,'reply_source_ns':reply.monotonic_ns,
+                'health_age_at_reply_ms':(reply.monotonic_ns-authority.health_stamp_ns)/1e6 if authority.health_stamp_ns else None}
+        return reply
     def _run(self):
         while self.running:
             start=time.monotonic()
             try:
                 if self.client is None:self.client=GaitClient(self.path,secrets.randbits(63)+1)
+                with self.lock:r=self.feedback
+                r=self._exchange_authority(r)
                 with self.lock:
-                    r=self.feedback;flags=self.health_flags;stamp=self.health_stamp
-                    authority=Authority(r.receiver_instance if r else 0,r.receiver_generation if r else 0,
-                        r.native_instance if r else 0,r.native_stamp if r else 0,stamp,0,flags)
-                r=self.client.exchange(Operation.AUTHORITY,authority)
-                with self.lock:
-                    self.feedback=r
-                    self.last_authority_sample={'health_source_ns':stamp,'health_flags':flags,
-                        'operator_source_ns':authority.operator_stamp_ns,'reply_source_ns':r.monotonic_ns,
-                        'health_age_at_reply_ms':(r.monotonic_ns-stamp)/1e6 if stamp else None}
                     if self.phase=='disconnected':self.phase='idle'
                     if self.phase in ('idle','stopped'):self.error=readiness_error(r)
-                    authority=Authority(r.receiver_instance,r.receiver_generation,r.native_instance,r.native_stamp,
-                        self.health_stamp,0,self.health_flags)
-                    if self.measured is not None and self.measured_source_ns:
-                        self.client.exchange(Operation.MEASURED_VELOCITY,authority,self.measured,self.measured_source_ns)
-                        self.speed_tracking=self.client.tracking
+                    measured=self.measured;measured_stamp=self.measured_source_ns
+                    pending_stop=self.stop_serial!=self.sent_stop
+                # A socket reply can wait up to its actual timeout. Never hold
+                # the gate/update/state lock across that wait: doing so stalls
+                # fresh health callbacks behind optional measured telemetry.
+                if measured is not None and measured_stamp and not pending_stop:
+                    authority=self._authority(r)
+                    self.client.exchange(Operation.MEASURED_VELOCITY,authority,measured,measured_stamp)
+                    with self.lock:self.speed_tracking=self.client.tracking
+                    if time.monotonic()-start>=.02:
+                        # Forward a newly RECEIVED decision after a slow reply.
+                        # Its source time remains the original gate evaluation.
+                        r=self._exchange_authority(r)
+                operation=None;velocity=(0.,0.,0.);command_stamp=None;stop_serial=None;ack=None
+                with self.lock:
                     if self.stop_serial!=self.sent_stop:
-                        self.client.exchange(Operation.STOP,authority);self.sent_stop=self.stop_serial
+                        operation=Operation.STOP;stop_serial=self.stop_serial
                     elif self.ack_requested:
                         expected=(r.controller,r.generation,r.transport_epoch,r.cancel_generation)
-                        if r.cancel_pending and self.ack_requested==expected:
-                            self.client.exchange(Operation.CANCEL_ACK,authority)
-                        self.ack_requested=None
+                        ack=self.ack_requested
+                        if r.cancel_pending and ack==expected:operation=Operation.CANCEL_ACK
+                        else:self.ack_requested=None
                     elif self.phase=='requested':
-                        self.client.exchange(Operation.ARM,authority);self.phase='arming';self.attempt_started=time.monotonic()
+                        operation=Operation.ARM;self.phase='arming';self.attempt_started=time.monotonic()
                     elif self.phase=='arming' and r.armed:
-                        # The zero handshake and following commands share the
-                        # original gate-evaluation clock. Wait for a real gate
-                        # sample after the actual arm acknowledgement: transport
-                        # send time would make the next cached sample roll back;
-                        # a pre-arm sample would fail the native arm fence.
                         if not self.arm_fence_ns:self.arm_fence_ns=r.monotonic_ns
                         if self.command_stamp>=self.arm_fence_ns:
-                            self.client.exchange(Operation.VELOCITY,authority,(0.,0.,0.),self.command_stamp)
-                            self.phase='handshake'
+                            operation=Operation.VELOCITY;command_stamp=self.command_stamp;self.phase='handshake'
                     elif self.phase=='handshake' and r.navigation_owned:
                         self.phase='active';self.generation=self.start_request;self.start_request=None;self.started.set()
                     elif self.phase=='active':
                         if not r.navigation_owned or r.cancel_pending:
                             self.phase='failed';self.error='真实步态已撤销导航接管';self.generation=None
-                        else:self.client.exchange(Operation.VELOCITY,authority,self.command,self.command_stamp)
+                        else:operation=Operation.VELOCITY;velocity=self.command;command_stamp=self.command_stamp
                     if self.phase in ('arming','handshake') and time.monotonic()-self.attempt_started>.3:
                         self.phase='failed';self.error='真实步态未确认接管';self.started.set();self.stop_serial+=1
+                        operation=Operation.STOP;stop_serial=self.stop_serial
+                if operation is not None:
+                    self.client.exchange(operation,self._authority(r),velocity,command_stamp)
+                    with self.lock:
+                        if stop_serial is not None:self.sent_stop=stop_serial
+                        if ack is not None and self.ack_requested==ack:self.ack_requested=None
             except (OSError,ValueError,KeyError,TypeError,OverflowError) as exc:self._fault(str(exc))
             observer=self.operator_observer
             if observer:observer()

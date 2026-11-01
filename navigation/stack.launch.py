@@ -21,6 +21,7 @@ def setup(context):
     common={'use_sim_time':False}
     nodes=[]
     buffered=os.getenv('P2_NAV_MOTION_BUFFER')=='true'
+    if get('physical_gait')=='true':nodes.append(ExecuteProcess(cmd=['/usr/bin/python3','-S',str(root/'path_view_node.py')],output='screen'))
     if buffered:nodes.append(ExecuteProcess(cmd=['/usr/bin/python3','-S',str(root/'motion_buffer_node.py')],output='screen'))
     if get('simulation_sensor_fixture')=='true' and not simulation:raise ValueError('External simulation sensors require simulation mode')
     if simulation and get('simulation_sensor_fixture')!='true':

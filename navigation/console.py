@@ -5,7 +5,7 @@ from pathlib import Path
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 import rclpy
 from rclpy.node import Node
-from rclpy.executors import MultiThreadedExecutor
+from rclpy.executors import SingleThreadedExecutor
 from rclpy.action import ActionClient
 from rclpy.qos import QoSProfile,DurabilityPolicy,ReliabilityPolicy
 from geometry_msgs.msg import PoseStamped,PoseWithCovarianceStamped,Twist
@@ -48,7 +48,8 @@ class Console(Node):
         self.velocity_scale=.5 if gait_profile=='p2-flat-model' else 1.
         qos=QoSProfile(depth=1,durability=DurabilityPolicy.TRANSIENT_LOCAL,reliability=ReliabilityPolicy.RELIABLE)
         self.create_subscription(OccupancyGrid,'/map',self.on_map,qos)
-        self.create_subscription(RosPath,'/plan',self.on_path,10)
+        if self.gait:self.create_subscription(String,'/p2_nav/path_view',self.on_path_view,10)
+        else:self.create_subscription(RosPath,'/plan',self.on_path,10)
         self.create_subscription(CollisionMonitorState,'/p2_nav/collision_state',self.on_collision,10)
         self.create_subscription(String,'/p2_nav/operator_authority',self.on_authority,10)
         self.create_subscription(String,'/p2_nav/gate_status',self.on_gate,10)
@@ -80,11 +81,19 @@ class Console(Node):
         self.virtual_operator={'mode':mode,'connected':data.get('connected',True) is True,'activity':data.get('manual_activity',False) is True}
         return {'simulation_only':True,'mode':mode}
     def on_path(self,msg):
+        points=[[p.pose.position.x,p.pose.position.y] for p in msg.poses]
+        self.accept_path_view(points,msg.header.stamp.sec*10**9+msg.header.stamp.nanosec)
+    def on_path_view(self,msg):
+        from path_view import decode_view
+        try:points,stamp=decode_view(msg.data)
+        except (ValueError,TypeError,KeyError):return
+        self.accept_path_view(points,stamp)
+    def accept_path_view(self,points,source_ns):
         with self.lock:
             self.path_revision+=1
             if self.session.phase in ('executing','replanning'):
-                self.path=[[p.pose.position.x,p.pose.position.y] for p in msg.poses]
-                age=(self.get_clock().now().nanoseconds/1e9)-(msg.header.stamp.sec+msg.header.stamp.nanosec/1e9)
+                self.path=points
+                age=(self.get_clock().now().nanoseconds-source_ns)/1e9
                 fresh=-.05<=age<=.5 and self.path_revision>self.obstacle_path_revision and len(self.path)>1
                 self.session.reroute(time.monotonic(),fresh,not self.collision_stop and self.health_ready())
     def on_collision(self,msg):
@@ -471,7 +480,7 @@ def main():
         if data.get('hardware_verified') is True:
             from robot_profile import check_calibration
             check_calibration(profile,data)
-    rclpy.init();node=Console(runtime,args.simulation,args.minimum_speed,vertices,args.odometry_model,args.gait_profile,args.gait_socket);node.robot_name=profile['name'] if selected else None;node.robot_identity=identity(profile) if selected else None;executor=MultiThreadedExecutor(num_threads=3);executor.add_node(node)
+    rclpy.init();node=Console(runtime,args.simulation,args.minimum_speed,vertices,args.odometry_model,args.gait_profile,args.gait_socket);node.robot_name=profile['name'] if selected else None;node.robot_identity=identity(profile) if selected else None;executor=SingleThreadedExecutor();executor.add_node(node)
     thread=threading.Thread(target=executor.spin,daemon=True);thread.start()
     class Handler(BaseHTTPRequestHandler):
         def log_message(self,*a):pass

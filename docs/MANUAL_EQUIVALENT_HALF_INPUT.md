@@ -64,3 +64,21 @@ lease after about 0.6 seconds with `navigation_health_not_ready`; a second
 attempt was not armed because the actual controller/hardware readiness changed.
 Those failures remain recorded. [Scheduling and diagnostic receipts](SCHEDULING_AND_RECEIPTS.md)
 describe the subsequent component fix and its validation limits.
+
+The next field request moved an estimated 6.1 m but cancelled after about30s on
+a heartbeat gap. Lock scoping, the ROS executor and the long-path view were
+subsequently separated as described in [path-view receipts](PATH_VIEW.md).
+A later134s request remained navigation_active until an explicit Stop, but
+stalled with a sustained pure-yaw input of0.24 and negligible body rotation.
+
+The next **candidate** raises the pure-turn request/contract to0.6, half the
+observed existing manual yaw maximum1.2. The raw forward-steering entry remains
+bounded at0.24. The selected test forward input remains0.75 with scale1.0;
+the UI multiplier still scales all requested axes, so selecting0.5 additionally
+halves the configured request. The native output retains the0.30/s yaw slew,
+original measured-source expiry and immediate zero on stop/takeover/obstacle.
+Python, ROS buffer/gate/smoother and native lease must be installed as a matched
+set. Do not send a0.6 request to an older0.24 native lease. The IMU application
+source is unchanged in this candidate. Successful encoding/ARM builds and
+socket receipts do not establish physical turn response; it still needs the
+subsequent supported cutover and real test.

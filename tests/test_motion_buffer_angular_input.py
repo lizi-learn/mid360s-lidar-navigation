@@ -16,4 +16,16 @@ class RawAngularInputTests(unittest.TestCase):
   obj=types.SimpleNamespace();m.angular.z=math.nan;env['command'](obj,m)
   self.assertTrue(math.isnan(obj.target[2]))
   self.assertEqual(MotionBuffer().step(obj.target,(0.,0.,0.),1.,.1,frame_verified=True),(0.,0.,0.))
+ def test_in_place_half_manual_turn_is_distinct_from_forward_steering(self):
+  tree=ast.parse((ROOT/'navigation/motion_buffer_node.py').read_text())
+  cls=next(n for n in tree.body if isinstance(n,ast.ClassDef)and n.name=='MotionBufferNode')
+  method=next(n for n in cls.body if isinstance(n,ast.FunctionDef)and n.name=='command')
+  env={'math':math,'time':time};exec(compile(ast.Module(body=[method],type_ignores=[]),'actual_command','exec'),env)
+  for value,expected in [(1.2,.6),(-1.2,-.6),(.4,.4)]:
+   obj=types.SimpleNamespace();m=types.SimpleNamespace(linear=types.SimpleNamespace(x=0.,y=0.),angular=types.SimpleNamespace(z=value))
+   env['command'](obj,m);self.assertEqual(obj.target,(0.,0.,expected))
+  buffer=MotionBuffer()
+  for i in range(200):out=buffer.step((0.,0.,.6),(0.,0.,0.),1.+i*.02,.05,frame_verified=True)
+  self.assertAlmostEqual(out[2],.6)
+  self.assertEqual(buffer.step((0.,0.,.6),(0.,0.,0.),5.,.05,frame_verified=True,hard_stop=True),(0.,0.,0.))
 if __name__=='__main__':unittest.main()

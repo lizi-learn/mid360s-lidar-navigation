@@ -21,7 +21,7 @@ def scenario(binary,commissioned):
                 try:source.connect(path+'.operator');return True
                 except (FileNotFoundError,ConnectionRefusedError):return False
             wait(connected)
-            state={'mode':1,'activity':False,'pause':False,'instance':40,'stale_command':False}
+            state={'mode':1,'activity':False,'pause':False,'instance':40,'stale_command':False,'target':(.4,0.,0.)}
             def publish():
                 seq=0
                 while not stopping.is_set():
@@ -32,7 +32,7 @@ def scenario(binary,commissioned):
                         source.send(packet)
                     if transport:
                         stamp=time.monotonic_ns()
-                        transport.update({'evaluated_monotonic_ns':stamp,'data_fresh':True,'calibration_ready':True,'ground_ok':True,'localized':True,'command':(.4,0.,0.),'body_velocity_feedback':(0.,0.,0.),'velocity_source_monotonic_ns':stamp},True)
+                        transport.update({'evaluated_monotonic_ns':stamp,'data_fresh':True,'calibration_ready':True,'ground_ok':True,'localized':True,'command':state['target'],'body_velocity_feedback':(0.,0.,0.),'velocity_source_monotonic_ns':stamp},True)
                         if state['stale_command']:
                             with transport.lock:transport.command_stamp=stamp-400_000_000
                     stopping.wait(.01)
@@ -52,6 +52,12 @@ def scenario(binary,commissioned):
             wait(lambda:transport.speed_tracking and abs(transport.speed_tracking['policy_input_x']-.4)<1e-6,timeout=2.5)
             result['manual_equivalent_half_reaches_native_point_four']=True
             result['target_measurement_and_policy_input_are_distinct']=True
+            state['target']=(0.,0.,.6)
+            wait(lambda:transport.speed_tracking and transport.speed_tracking['policy_input_yaw']>.599,timeout=3.)
+            assert transport.speed_tracking['policy_input_x']==0.
+            result['pure_turn_reaches_native_manual_half_yaw_point_six']=True
+            state['target']=(.4,0.,0.)
+            wait(lambda:transport.speed_tracking and transport.speed_tracking['policy_input_x']>.399,timeout=2.)
             state['mode']=2
             wait(lambda:transport.feedback and transport.feedback.operator_mode==2 and transport.feedback.cancel_pending and not transport.feedback.navigation_owned)
             assert transport.feedback.force_zero;result['physical_middle_wins']=True

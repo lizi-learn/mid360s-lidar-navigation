@@ -51,6 +51,21 @@ jobs:
           name: collision-source-component-evidence
           path: /tmp/collision-source-guard*
           if-no-files-found: ignore
+      - name: Preserve every long-path point and original source time across relay
+        shell: bash
+        env:
+          ROS_LOCALHOST_ONLY: '1'
+          ROS_DOMAIN_ID: '226'
+          ROS_LOG_DIR: /tmp/path-view-ros-logs
+        run: |
+          source /opt/ros/humble/setup.bash
+          python3 experiments/check_path_view.py --output /tmp/path-view-component.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: path-view-component-evidence
+          path: /tmp/path-view-component*
+          if-no-files-found: ignore
       - run: bash experiments/continuous_forward/build.sh
       - run: bash experiments/continuous_forward/check_collision.sh
 
