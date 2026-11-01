@@ -8,11 +8,13 @@ namespace p2_nav_controller {
 // A short forward connection avoids lattice start/goal discretizing to the same
 // node. The caller must collision-check every sample using the planning footprint.
 inline std::vector<std::array<double,3>> terminal_path(
-    const std::array<double,3> &start,const std::array<double,3> &goal) {
+    const std::array<double,3> &start,const std::array<double,3> &goal,
+    double max_distance=.30) {
   for (double v:start)if(!std::isfinite(v))throw std::invalid_argument("Invalid terminal start");
   for (double v:goal)if(!std::isfinite(v))throw std::invalid_argument("Invalid terminal goal");
   const double distance=std::hypot(goal[0]-start[0],goal[1]-start[1]);
-  if(distance>.30)return {};
+  if(!std::isfinite(distance))throw std::invalid_argument("Invalid terminal distance");
+  if(distance>max_distance)return {};
   std::vector<std::array<double,3>> samples{start};
   auto rotate=[&](double yaw) {
     const auto from=samples.back();

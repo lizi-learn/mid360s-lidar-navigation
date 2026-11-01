@@ -23,7 +23,8 @@ class ExactHeadingLattice : public nav2_smac_planner::SmacPlannerLattice {
       if (!std::isfinite(an)||!std::isfinite(bn)||an<.8||an>1.2||bn<.8||bn>1.2)
         throw nav2_core::PlannerException("Invalid short-path quaternion");
       auto samples=terminal_path({start.pose.position.x,start.pose.position.y,tf2::getYaw(a)},
-                                 {goal.pose.position.x,goal.pose.position.y,tf2::getYaw(b)});
+                                 {goal.pose.position.x,goal.pose.position.y,tf2::getYaw(b)},
+                                 std::hypot(_costmap->getSizeInMetersX(),_costmap->getSizeInMetersY()));
       if (!samples.empty()) {
         std::unique_lock<nav2_costmap_2d::Costmap2D::mutex_t> lock(*(_costmap->getMutex()));
         nav2_costmap_2d::FootprintCollisionChecker<nav2_costmap_2d::Costmap2D*> checker(_costmap);

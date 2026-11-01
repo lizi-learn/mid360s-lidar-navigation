@@ -21,6 +21,18 @@ int main() {
   }
   assert(p2_nav_controller::terminal_path({0,0,0},{.31,0,0}).empty());
   assert(!p2_nav_controller::terminal_path({0,0,0},{0,0,1}).empty());
+  // A walking robot can pivot, translate to the point, then pivot there.
+  // Opposite arrival yaw must not force a car-like loop beyond the destination.
+  auto direct=p2_nav_controller::terminal_path({0.,0.,-1.22},{1.42,-3.21,2.65},
+      std::numeric_limits<double>::infinity());
+  double length=0.;
+  for(size_t i=1;i<direct.size();++i) {
+    length+=std::hypot(direct[i][0]-direct[i-1][0],direct[i][1]-direct[i-1][1]);
+    assert(direct[i][0]>=-1e-10 && direct[i][0]<=1.42000001);
+    assert(direct[i][1]<=1e-10 && direct[i][1]>=-3.21000001);
+  }
+  assert(std::abs(length-std::hypot(1.42,3.21))<1e-10);
+  assert(std::abs(std::remainder(direct.back()[2]-2.65,2*std::acos(-1.)))<1e-10);
   p2_nav_controller::TerminalHeading p;
   p.set_goal(1,2,0,"map"); assert(!p.step(.2,.15,0)); assert(p.step(.14,.15,.05));
   p.set_goal(1,2,0,"map"); assert(p.step(.18,.15,.10)); // Same-goal replan.

@@ -27,7 +27,7 @@ class GaitTransport:
             self.trace=VelocityTrace(trace_path)
         self.operator_observer=None
         self.phase='idle';self.generation=None;self.stop_serial=0;self.sent_stop=0
-        self.ack_requested=None;self.started=threading.Event();self.attempt_started=0.
+        self.ack_requested=None;self.started=threading.Event();self.attempt_started=0.;self.arm_fence_ns=0
         self.thread=threading.Thread(target=self._run,name='gait_velocity_rpc',daemon=True);self.thread.start()
     def ready(self):
         with self.lock:
@@ -51,7 +51,7 @@ class GaitTransport:
     def arm(self,generation,timeout=2.):
         with self.lock:
             if not self.ready():raise ValueError(self.error or '当前步态或物理开关未就绪')
-            self.started.clear();self.start_request=generation;self.phase='requested';self.error=''
+            self.started.clear();self.start_request=generation;self.phase='requested';self.error='';self.arm_fence_ns=0
         if not self.started.wait(timeout):self.stop();raise ValueError('未收到真实步态零速度接管回执')
         with self.lock:
             if self.phase!='active':raise ValueError(self.error or '步态接管被撤销')
@@ -99,7 +99,15 @@ class GaitTransport:
                     elif self.phase=='requested':
                         self.client.exchange(Operation.ARM,authority);self.phase='arming';self.attempt_started=time.monotonic()
                     elif self.phase=='arming' and r.armed:
-                        self.client.exchange(Operation.VELOCITY,authority);self.phase='handshake'
+                        # The zero handshake and following commands share the
+                        # original gate-evaluation clock. Wait for a real gate
+                        # sample after the actual arm acknowledgement: transport
+                        # send time would make the next cached sample roll back;
+                        # a pre-arm sample would fail the native arm fence.
+                        if not self.arm_fence_ns:self.arm_fence_ns=r.monotonic_ns
+                        if self.command_stamp>=self.arm_fence_ns:
+                            self.client.exchange(Operation.VELOCITY,authority,(0.,0.,0.),self.command_stamp)
+                            self.phase='handshake'
                     elif self.phase=='handshake' and r.navigation_owned:
                         self.phase='active';self.generation=self.start_request;self.start_request=None;self.started.set()
                     elif self.phase=='active':
