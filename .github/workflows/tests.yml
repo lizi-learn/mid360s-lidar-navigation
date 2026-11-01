@@ -68,6 +68,24 @@ jobs:
           name: forward-arc-component-evidence
           path: /tmp/forward-arc-component*
           if-no-files-found: ignore
+      - name: Compare delayed heading tracking with the actual RPP plugin
+        shell: bash
+        env:
+          ROS_LOCALHOST_ONLY: '1'
+          ROS_DOMAIN_ID: '231'
+          ROS_LOG_DIR: /tmp/heading-preview-ros-logs
+        run: |
+          source /opt/ros/humble/setup.bash
+          source nav_controller_ws/install/setup.bash
+          cmake -S experiments/heading_preview -B /tmp/heading-preview-build
+          cmake --build /tmp/heading-preview-build -j2
+          python3 experiments/heading_preview/check.py --binary /tmp/heading-preview-build/heading_preview --output /tmp/heading-preview/comparison.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: heading-preview-component-evidence
+          path: /tmp/heading-preview/*
+          if-no-files-found: ignore
       - name: Reject missing, stale, unknown and untransformable obstacle observations
         shell: bash
         env:

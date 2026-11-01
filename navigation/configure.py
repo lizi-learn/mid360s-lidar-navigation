@@ -46,7 +46,10 @@ def config(controller='rpp', tree=None, minimum_speed=.03, footprint_vertices=No
         regulated_linear_scaling_min_speed=max(.08,minimum_speed),use_rotate_to_heading=True,allow_reversing=False,
         rotate_to_heading_min_angle=.5,max_angular_accel=.5,max_robot_pose_search_dist=3.)
     if gait_profile=='p2-flat-model':
-        rpp.update(plugin='p2_nav_controller::SettledGoalRPP',desired_linear_vel=.8,min_lookahead_dist=.4,max_lookahead_dist=.8,
+        # Keep useful anticipation while starting/restarting as well as at speed.
+        # A larger maximum alone still chases nearby errors at the old floor.
+        # Native curvature and collision checks remain.
+        rpp.update(plugin='p2_nav_controller::SettledGoalRPP',desired_linear_vel=.8,min_lookahead_dist=1.2,max_lookahead_dist=1.6,
             lookahead_time=2.0,rotate_to_heading_angular_vel=1.0,rotate_to_heading_min_angle=1.2,cost_scaling_dist=1.0,
             max_angular_accel=20.,regulated_linear_scaling_min_radius=1.25,
             regulated_linear_scaling_min_speed=max(.6,minimum_speed),
