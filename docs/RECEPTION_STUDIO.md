@@ -116,3 +116,5 @@ python3 experiments/reception/benchmark.py --output /tmp/reception-performance.j
 技术参考：[SLAM Toolbox](https://github.com/SteveMacenski/slam_toolbox) 的真实序列化续扫，以及 [Nav2 Humble KeepoutFilter源码](https://api.nav2.org/nav2-humble/html/keepout__filter_8cpp_source.html) 的双代价图过滤。
 
 切换编辑地图时清空上一张地图的未提交绘图、局部更新区、定位校正、停靠候选与回放状态。异步轨迹响应按地图和请求代次校验，晚到的旧地图数据直接丢弃；回放列表保留当前选择。已通过实际网页的23帧记录载入及切图清空检查，合成模型的缺失ROS源时间仍显示缺失。
+
+旧工作台入口已做真实浏览器运行验证：原`document.write`在同一窗口重复声明`API_BASE`等变量，会导致新页一直未载入。新渲染器隔离脚本作用域、显式导出内联按钮动作，并退出旧页面轮询；保持原URL和G12代理，不修改共享网关。普通入口和等效G12代理路径（embedded=1默认执行模式）、返回旧导航、地图工具均已实际点击通过。Node回归先复现旧全局冲突，再检查新作用域和所有内联动作；不是把语法检查冒充实际G12屏幕验收。

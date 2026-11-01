@@ -805,11 +805,8 @@ def main():
         def do_GET(self):
             if urlsplit(self.path).path in ('/','/reception'):
                 guided=urlsplit(self.path).path=='/reception' or parse_qs(urlsplit(self.path).query).get('view') in (['reception'],['operator'])
-                from reception_ui import reception_html
-                html=reception_html(ROOT)if guided else (ROOT/'console.html').read_text()
-                if not guided:
-                    app=json.dumps(reception_html(ROOT),ensure_ascii=False).replace('</','<\\/')
-                    html=html.replace('/*RECEPTION_APP*/', 'function openReception(){document.open();document.write('+app+');document.close()}')
+                from reception_ui import reception_html,console_html
+                html=reception_html(ROOT)if guided else console_html(ROOT)
                 self.send(html.encode(),content_type='text/html; charset=utf-8')
             elif urlsplit(self.path).path=='/api/status':self.send(node.status(include_cells=parse_qs(urlsplit(self.path).query).get('summary')!=['1']))
             elif urlsplit(self.path).path=='/api/reception':self.send(node.reception_status(full=True))

@@ -1,5 +1,5 @@
 {
-  "version": "v0.5.1-map-tools.2",
+  "version": "v0.5.1-map-tools.3",
   "hardware_commands": 0,
   "scope": "Synthetic planar Nav2/SLAM plus pure/subprocess/UI tests; no new physical walking",
   "pure_tests": 316,
@@ -73,6 +73,18 @@
       "button_bottom": 817.796875
     },
     "hardware_interfaces": 0,
-    "source_clock_missing_in_sandbox": "kept missing; actual native clocks verified separately"
+    "source_clock_missing_in_sandbox": "kept missing; actual native clocks verified separately",
+    "legacy_entry": {
+      "old_failure": "Actual browser: document.write raised SyntaxError API_BASE already declared; new app remained unloaded, old poll touched removed DOM",
+      "fixed": "Isolated app script scope, exported inline button actions, disposed old polling; original URL/proxy preserved",
+      "actual_browser_checked": [
+        "legacy entry loads catalog and map",
+        "map tools button usable",
+        "back to original navigation",
+        "G12-equivalent proxy path embedded=1 defaults operator"
+      ],
+      "new_browser_errors": 0,
+      "actual_G12_device_screen_checked": false
+    }
   }
 }
