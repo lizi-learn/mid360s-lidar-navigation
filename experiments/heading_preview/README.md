@@ -53,3 +53,11 @@ ROS_LOCALHOST_ONLY=1 ROS_DOMAIN_ID=231 python3 experiments/heading_preview/check
 CI keeps the full requested/actual parameters, every case, traces and failures.
 This parameter change does not fix the previously observed low-input terminal
 pivot stall. Physical heading smoothness still needs a new supervised run.
+
+The first fixture version filled transforms directly but did not run a listener
+thread required by the timed TF lookup contract. It produced repeated TF error
+logs despite returning the stored transforms. The fixture now runs a real
+`TransformListener` thread, asserts those errors are absent and bounds unexpected
+error output. All16 numeric results and CSV traces were identical after this
+repair; the original errors and artifact were preserved. No production controller
+or deployed preview parameter changed in this fixture-only follow-up.

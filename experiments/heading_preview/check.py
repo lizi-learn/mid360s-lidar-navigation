@@ -23,6 +23,8 @@ def main():
     cmd=[a.binary,str(prefix),kind,str(gain),str(delay),'--ros-args','--params-file',str(paramfile),'--log-level','error']
     result=subprocess.run(cmd,capture_output=True,text=True,timeout=45)
     prefix.with_suffix('.log').write_text(result.stdout+result.stderr)
+    assert 'Do not call canTransform or lookupTransform with a timeout' not in result.stderr, 'Fixture timed TF API has no actual listener thread'
+    assert len(result.stderr)<2_000_000,'Unexpected unbounded fixture error output'
     if result.returncode:
      row={'cohort':cohort,'kind':kind,'profile':name,'returncode':result.returncode,'error':result.stderr[-2000:]};rows.append(row)
      out.write_text(json.dumps({'complete':False,'cases':rows},indent=2));raise RuntimeError(row)

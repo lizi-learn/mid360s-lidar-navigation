@@ -19,6 +19,7 @@
 #include "nav2_core/goal_checker.hpp"
 #include "nav2_costmap_2d/costmap_2d_ros.hpp"
 #include "tf2_ros/buffer.h"
+#include "tf2_ros/transform_listener.h"
 #include "tf2/utils.h"
 #include "nav2_util/geometry_utils.hpp"
 #include "speed_response.hpp"
@@ -61,6 +62,9 @@ int main(int argc,char **argv){
  };
  paint(false,0,0);
  auto tf=std::make_shared<tf2_ros::Buffer>(parent->get_clock());
+ // A real listener thread satisfies the timed-transform API contract. Direct
+ // fixture transforms are still inserted synchronously before every call.
+ auto listener=std::make_shared<tf2_ros::TransformListener>(*tf);
  pluginlib::ClassLoader<nav2_core::Controller> loader("nav2_core","nav2_core::Controller");
  auto control=loader.createSharedInstance("p2_nav_controller::SettledGoalRPP");control->configure(parent,"FollowPath",tf,cm);control->activate();
  std::ofstream actual(prefix+".actual-parameters.json");actual<<"{";
