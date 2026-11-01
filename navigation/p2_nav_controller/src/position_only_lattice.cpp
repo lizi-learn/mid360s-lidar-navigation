@@ -14,6 +14,12 @@
 namespace p2_nav_controller {
 class PositionOnlyLattice : public nav2_smac_planner::SmacPlannerLattice {
   std::vector<unsigned> occupied_;
+  std::mutex stable_mutex_;
+  nav_msgs::msg::Path stable_path_;
+  geometry_msgs::msg::PoseStamped stable_goal_;
+  nav_msgs::msg::Path remember(nav_msgs::msg::Path path,const geometry_msgs::msg::PoseStamped &goal) {
+    stable_path_=path;stable_goal_=goal;return path;
+  }
   void prepare_map() {
     const unsigned w=_costmap->getSizeInCellsX(),h=_costmap->getSizeInCellsY(),stride=w+1;
     occupied_.assign((w+1)*(h+1),0);
@@ -58,6 +64,15 @@ class PositionOnlyLattice : public nav2_smac_planner::SmacPlannerLattice {
   }
   bool clear(const std::vector<std::array<double,3>> &samples,double margin=0.) {
     for(const auto &p:samples)if(!clear(p[0],p[1],p[2],margin))return false;return true;
+  }
+  bool swept_clear(const std::vector<std::array<double,3>> &path,double margin) {
+    for(size_t i=0;i<path.size();++i) {
+      const auto &a=path[i?i-1:i],&b=path[i];
+      const double da=std::remainder(b[2]-a[2],2*std::acos(-1.));
+      const int n=std::max({1,static_cast<int>(std::ceil(std::hypot(b[0]-a[0],b[1]-a[1])/.01)),static_cast<int>(std::ceil(std::abs(da)/.01))});
+      for(int k=0;k<=n;++k){double f=static_cast<double>(k)/n;if(!clear(a[0]+f*(b[0]-a[0]),a[1]+f*(b[1]-a[1]),a[2]+f*da,margin))return false;}
+    }
+    return !path.empty();
   }
   bool pivot_room(double x,double y,double margin=0.) {
     double radius=0.;for(const auto &p:_costmap_ros->getRobotFootprint())radius=std::max(radius,std::hypot(p.x,p.y)+std::sqrt(2.)*margin);
@@ -114,6 +129,7 @@ class PositionOnlyLattice : public nav2_smac_planner::SmacPlannerLattice {
  public:
   nav_msgs::msg::Path createPlan(const geometry_msgs::msg::PoseStamped &start,
                                 const geometry_msgs::msg::PoseStamped &goal) override {
+    std::lock_guard<std::mutex> stable_lock(stable_mutex_);
     if(start.header.frame_id!=goal.header.frame_id)throw nav2_core::PlannerException("Position goal frame mismatch");
     const double yaw=tf2::getYaw(start.pose.orientation),x=start.pose.position.x,y=start.pose.position.y;
     const double gx=goal.pose.position.x,gy=goal.pose.position.y;
@@ -125,21 +141,49 @@ class PositionOnlyLattice : public nav2_smac_planner::SmacPlannerLattice {
     {
       std::unique_lock<nav2_costmap_2d::Costmap2D::mutex_t> lock(*_costmap->getMutex());
       prepare_map();
-      if(clear(direct,.08))return message(direct,goal.header);
+      if(clear(direct,.08))return remember(message(direct,goal.header),goal);
+      // Keep a valid detour on the same side of an obstacle. Re-solving a
+      // symmetric corridor every second can flip left/right under small AMCL
+      // updates. Recheck the complete remaining body path on this LIVE map;
+      // never reuse occupied/unknown cells or a stale source timestamp.
+      if(!stable_path_.poses.empty()&&stable_goal_.header.frame_id==goal.header.frame_id&&
+          std::hypot(stable_goal_.pose.position.x-gx,stable_goal_.pose.position.y-gy)<1e-6) {
+        size_t nearest=0;double best=1e30;
+        for(size_t i=0;i<stable_path_.poses.size();++i){const auto &p=stable_path_.poses[i].pose;
+          double d=std::hypot(p.position.x-x,p.position.y-y);
+          if(d<best){best=d;nearest=i;}}
+        if(best<.5) {
+          // A bounded forward rejoin permits small tracking errors without
+          // sending the robot back to a passed waypoint.
+          size_t end=nearest;
+          while(end+1<stable_path_.poses.size()&&std::hypot(stable_path_.poses[end+1].pose.position.x-x,stable_path_.poses[end+1].pose.position.y-y)<.65)++end;
+          const auto rejoin_deadline=std::chrono::steady_clock::now()+std::chrono::milliseconds(100);
+          for(size_t n=end+1;n>nearest;--n) {
+            if(std::chrono::steady_clock::now()>rejoin_deadline)break;
+            const size_t i=n-1;const auto &p=stable_path_.poses[i].pose;
+            auto joined=terminal_path({x,y,yaw},{p.position.x,p.position.y,tf2::getYaw(p.orientation)},1.);
+            if(joined.empty())continue;
+            for(size_t j=i+1;j<stable_path_.poses.size();++j){const auto &q=stable_path_.poses[j].pose;joined.push_back({q.position.x,q.position.y,tf2::getYaw(q.orientation)});}
+            if(swept_clear(joined,.04))return remember(message(joined,goal.header),goal);
+          }
+        }
+      }
       // Point targets need no terminal heading. Checked pivot/straight
       // visibility connections also avoid a car-like turnaround search. Joints
       // are places where the unchanged body can pivot; narrow straight gaps
       // are crossed as an edge without requiring a turn inside them.
       // Prefer tracking room when available. These are route-search costs,
       // not a larger accepted body: narrow valid routes still fall back to the
-      // original full footprint. One shared bound covers all preferences.
+      // original full footprint. One shared bound covers all preferences. A visibility shortcut must
+      // also prefer tracking room, otherwise it can undo the wider point guide
+      // and graze the end of a virtual line after ordinary localization error.
       const auto visibility_deadline=std::chrono::steady_clock::now()+std::chrono::milliseconds(900);
-      for(double centre_clearance:{.48,.40,.28,0.}) {
+      for(double centre_clearance:{.64,.48,.40,.28,0.}) {
         auto candidate=position_guide(_costmap->getCharMap(),_costmap->getSizeInCellsX(),_costmap->getSizeInCellsY(),_costmap->getResolution(),_costmap->getOriginX(),_costmap->getOriginY(),{x,y},{gx,gy},centre_clearance);
         if(centre_clearance==0.)guide=candidate;
-        for(double margin:{.08,.04,0.}) {
+        for(double margin:{.16,.08,.04,0.}) {
           auto connected=visibility(candidate,yaw,margin,visibility_deadline);
-          if(!connected.empty())return message(connected,goal.header);
+          if(!connected.empty())return remember(message(connected,goal.header),goal);
         }
       }
       if(guide.size()>1) {
@@ -179,7 +223,7 @@ class PositionOnlyLattice : public nav2_smac_planner::SmacPlannerLattice {
         const int n=std::max({1,static_cast<int>(std::ceil(std::hypot(b.position.x-a.position.x,b.position.y-a.position.y)/.01)),static_cast<int>(std::ceil(std::abs(da)/.01))});
         for(int k=0;k<=n;++k){double f=static_cast<double>(k)/n;std::array<double,3> p{a.position.x+f*(b.position.x-a.position.x),a.position.y+f*(b.position.y-a.position.y),tf2::getYaw(a.orientation)+f*da};if(!clear(p[0],p[1],p[2]))bad.push_back(p);}
       }
-      if(bad.empty())return completed(std::move(path));
+      if(bad.empty())return remember(completed(std::move(path)),goal);
       unsigned added=0;
       for(const auto &p:bad){unsigned x,y;if(search.worldToMap(p[0],p[1],x,y))for(int dy=-1;dy<=1;++dy)for(int dx=-1;dx<=1;++dx){int nx=static_cast<int>(x)+dx,ny=static_cast<int>(y)+dy;if(nx>=0&&ny>=0&&nx<static_cast<int>(search.getSizeInCellsX())&&ny<static_cast<int>(search.getSizeInCellsY())&&search.getCost(nx,ny)<253){search.setCost(nx,ny,253);++added;}}}
       RCLCPP_INFO(_logger,"Repair %d: %zu actual full-body intersections, %u search-only centre exclusions",attempt,bad.size(),added);

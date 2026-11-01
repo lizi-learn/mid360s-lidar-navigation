@@ -1,3 +1,4 @@
+#include <cstdlib>
 #include <fstream>
 #include <iostream>
 #include <chrono>
@@ -36,6 +37,23 @@ int main(int argc,char **argv){
    for(const auto &p:path.poses)out<<std::setprecision(12)<<p.pose.position.x<<','<<p.pose.position.y<<','<<tf2::getYaw(p.pose.orientation)<<'\n';
    std::ofstream(std::string(argv[2])+".json")<<std::setprecision(17)<<"{\"planned\":"<<(!path.poses.empty()?"true":"false")<<",\"points\":"<<path.poses.size()<<",\"input_goal_stamp_s\":"<<rclcpp::Time(goal.header.stamp).seconds()<<",\"path_stamp_s\":"<<rclcpp::Time(path.header.stamp).seconds()<<",\"path_age_at_result_s\":"<<(parent->now()-rclcpp::Time(path.header.stamp)).seconds()<<",\"seconds\":"<<std::chrono::duration<double>(std::chrono::steady_clock::now()-began).count()<<"}";
   }catch(const std::exception &e){std::string err=e.what();for(auto &c:err)if(c=='\"'||c=='\\'||c=='\n')c=' ';std::ofstream(std::string(argv[2])+".json")<<std::setprecision(17)<<"{\"planned\":false,\"error\":\""<<err<<"\",\"seconds\":"<<std::chrono::duration<double>(std::chrono::steady_clock::now()-began).count()<<"}";}
+  if(std::getenv("P2_ARRIVAL_REPLAN_SEQUENCE")) {
+    auto save_path=[&](const std::string &label,const geometry_msgs::msg::PoseStamped &from,const geometry_msgs::msg::PoseStamped &to){
+      auto path=planner->createPlan(from,to);if(path.poses.empty())throw std::runtime_error("Replan empty: "+label);
+      std::ofstream out(std::string(argv[2])+"-"+label+".csv");out<<"x,y,yaw\n";
+      for(const auto &p:path.poses)out<<std::setprecision(12)<<p.pose.position.x<<','<<p.pose.position.y<<','<<tf2::getYaw(p.pose.orientation)<<'\n';
+      if((parent->now()-rclcpp::Time(path.header.stamp)).seconds()>.5)throw std::runtime_error("Replan timestamp stale");return path;};
+    auto initial=save_path("initial",start,goal);
+    start.pose.position.x=2.2;start.pose.position.y=2.48;start.pose.orientation=nav2_util::geometry_utils::orientationAroundZAxis(-.1);
+    save_path("perturbed",start,goal);
+    bool lower=false;for(const auto &p:initial.poses)if(std::abs(p.pose.position.x-3.5)<.1&&p.pose.position.y<2.)lower=true;
+    for(unsigned y=0;y<height;++y)for(unsigned x=0;x<width;++x){double wx,wy;map->mapToWorld(x,y,wx,wy);if(wx>=3.1&&wx<=4.3&&(lower?wy<2.:wy>3.))map->setCost(x,y,254);}
+    save_path("blocked",start,goal);
+    std::fill(map->getCharMap(),map->getCharMap()+width*height,0);
+    save_path("opened",start,goal);
+    goal.pose.position.x=2.2;goal.pose.position.y=5.5;
+    save_path("newgoal",start,goal);
+  }
   planner->deactivate();planner->cleanup();planner.reset();cm->on_cleanup(rclcpp_lifecycle::State());cm.reset();parent.reset();
  }catch(const std::exception &e){std::cerr<<e.what();rc=1;}
  rclcpp::shutdown();return rc;

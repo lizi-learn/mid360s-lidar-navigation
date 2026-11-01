@@ -1,12 +1,12 @@
 {
-  "version": "v0.5.1-map-tools.4",
+  "version": "v0.5.1-map-tools.5",
   "hardware_commands": 0,
   "scope": "Synthetic planar Nav2/SLAM plus pure/subprocess/UI tests; no new physical walking",
   "pure_tests": 316,
   "ui_hash_vectors": 8,
   "joint_native": {
     "passed": true,
-    "elapsed_s": 67.78248044615611,
+    "elapsed_s": 73.51150974491611,
     "cases": [
       "continuous_native_transit",
       "observed_closed_door_reopens_and_live_shortcut",
@@ -16,18 +16,20 @@
     ],
     "seed": 0,
     "amcl_seed": "Nav2 default; stochastic localization is not forced to match one successful run",
-    "zero_body_intrusion": true
+    "zero_body_intrusion": true,
+    "source": "final stable detour candidate with full live-map swept recheck"
   },
   "map_tools_native": {
     "passed": true,
-    "elapsed_s": 57.40937836817466,
+    "elapsed_s": 57.54425105708651,
     "cases": [
       "keepout_both_costmaps_speed_entry_exit_and_aligned_records",
       "actual_slam_save_resume_local_patch_versions"
     ],
     "seed": 0,
     "amcl_seed": "Nav2 default; stochastic localization is not forced to match one successful run",
-    "zero_body_intrusion": true
+    "zero_body_intrusion": true,
+    "source": "final stable detour candidate with full live-map swept recheck"
   },
   "tracking_cases": 8,
   "planner_position_controls": 4,
@@ -61,6 +63,24 @@
       "failed_tests": 2,
       "reason": "fixtures still removed the old unnamed auto-refresh startup; updated stripping for the named/disposable timer while preserving all original readiness, one-click, cancellation and takeover assertions",
       "after_repair": "316 tests pass"
+    },
+    {
+      "case": "main46e43a3-CI41348328291",
+      "passed": false,
+      "reason": "Tag CI passed same source, but main tools mission cut virtual-line end and then start full-body footprint fell in lethal cost. Failure retained, no waiver."
+    },
+    {
+      "case": "room-tools-1",
+      "passed": false,
+      "reason": "Wider guide room alone did not fix; small pose replan switched side mid-detour."
+    },
+    {
+      "case": "pure_pulse_yaw_heldout",
+      "total": 108,
+      "failed": 48,
+      "maximum_error_rad": 2.09027901,
+      "production_integrated": false,
+      "note": "Previously48smallpurecasespassed. Wider delays/angles/gains fail; excluded from release."
     }
   ],
   "ui_validation": {
@@ -92,5 +112,62 @@
       "new_browser_errors": 0,
       "actual_G12_device_screen_checked": false
     }
-  }
+  },
+  "stable_detour_replanning": {
+    "passed": true,
+    "cases": [
+      {
+        "case": "initial",
+        "points": 302,
+        "body_intrusions": 0
+      },
+      {
+        "case": "perturbed",
+        "points": 322,
+        "body_intrusions": 0
+      },
+      {
+        "case": "blocked",
+        "points": 294,
+        "body_intrusions": 0
+      },
+      {
+        "case": "opened",
+        "points": 159,
+        "body_intrusions": 0
+      },
+      {
+        "case": "newgoal",
+        "points": 237,
+        "body_intrusions": 0
+      }
+    ],
+    "small_pose_update_keeps_side": true,
+    "new_obstacle_changes_side": true,
+    "new_opening_uses_direct": true,
+    "new_goal_invalidates_route": true,
+    "hardware_commands": 0,
+    "fixture_seed": 0,
+    "scope": "Actual own Nav2 planner, same-goal synthetic replans; no perception, control tracking or physical walking acceptance"
+  },
+  "previous_candidate_native_repeats": [
+    {
+      "case": "stable-room-tools-1",
+      "passed": true,
+      "elapsed_s": 59.22526201303117,
+      "note": "Before final 1cm swept recheck; not substituted for final candidate regression"
+    },
+    {
+      "case": "stable-room-tools-2",
+      "passed": true,
+      "elapsed_s": 54.26107788993977,
+      "note": "Before final 1cm swept recheck; not substituted for final candidate regression"
+    },
+    {
+      "case": "stable-room-tools-3",
+      "passed": true,
+      "elapsed_s": 59.4195720939897,
+      "note": "Before final 1cm swept recheck; not substituted for final candidate regression"
+    }
+  ]
 }
