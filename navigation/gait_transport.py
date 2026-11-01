@@ -18,7 +18,7 @@ def readiness_error(r):
 class GaitTransport:
     def __init__(self,path,trace_path=None):
         self.path=path;self.lock=threading.RLock();self.running=True;self.client=None
-        self.feedback=None;self.error='步态接口尚未连接';self.health_stamp=0;self.health_flags=0
+        self.last_authority_sample=None;self.feedback=None;self.error='步态接口尚未连接';self.health_stamp=0;self.health_flags=0
         self.command=(0.,0.,0.);self.command_stamp=0;self.start_request=None
         self.measured=None;self.measured_source_ns=0;self.speed_tracking=None
         self.stage_commands={};self.trace=None
@@ -82,6 +82,9 @@ class GaitTransport:
                 r=self.client.exchange(Operation.AUTHORITY,authority)
                 with self.lock:
                     self.feedback=r
+                    self.last_authority_sample={'health_source_ns':stamp,'health_flags':flags,
+                        'operator_source_ns':authority.operator_stamp_ns,'reply_source_ns':r.monotonic_ns,
+                        'health_age_at_reply_ms':(r.monotonic_ns-stamp)/1e6 if stamp else None}
                     if self.phase=='disconnected':self.phase='idle'
                     if self.phase in ('idle','stopped'):self.error=readiness_error(r)
                     authority=Authority(r.receiver_instance,r.receiver_generation,r.native_instance,r.native_stamp,
@@ -141,6 +144,7 @@ class GaitTransport:
             r=self.feedback
             return {'phase':self.phase,'execution_ready':self.ready(),'error':self.error,
                 'cancel_pending':bool(r and r.cancel_pending),'cancel_generation':r.cancel_generation if r else 0,
+                'last_authority_sample':self.last_authority_sample,
                 'controller_instance':r.controller if r else None,'policy_generation':r.generation if r else None,
                 'navigation_owned':bool(r and r.navigation_owned),'manual_owned':bool(r and r.manual_owned),
                 'tick':r.tick if r else 0,'velocity':[r.vx,r.vy,r.wz] if r else None,

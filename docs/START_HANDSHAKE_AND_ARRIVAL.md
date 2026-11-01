@@ -30,3 +30,14 @@ heading remains a rotation at the endpoint. The APP defaults to a forward
 arrival heading unless the operator chooses a fixed heading. Reload an already
 open map page after updating its served UI. A path preview or zero handshake is
 not recorded as successful physical walking.
+
+A subsequent real start confirmed that the clock rollback was gone, but a
+separate health-forwarding issue still revoked the lease. Native readiness
+intermittently lost its health-derived bits while incoming sensor, localization,
+and ground reports remained valid. The native 100 ms health decision lifetime
+is unchanged. Console now forwards each gate callback immediately, and the gate
+performs actual decisions at 50 Hz rather than 20 Hz. It still checks original
+sensor ages on each evaluation; it does not renew sensor or odometry timestamps.
+An 18 s read-only deployed check obtained 449 native status samples, no lost
+health-derived bits, and a maximum sampled health age of 33.7 ms. This check is
+not a claim of completed physical navigation.

@@ -53,7 +53,7 @@ class GateNode(Node):
         self.create_subscription(String, '/p2_nav/operator', self.on_operator, 10)
         localization_qos=QoSProfile(depth=1,durability=DurabilityPolicy.TRANSIENT_LOCAL,reliability=ReliabilityPolicy.RELIABLE)
         self.create_subscription(PoseWithCovarianceStamped, '/amcl_pose', self.on_amcl, localization_qos)
-        self.create_timer(.05, self.tick)
+        self.create_timer(.02, self.tick)
         self.counter = 0
 
     @staticmethod
@@ -140,7 +140,7 @@ class GateNode(Node):
             ground_ok=self.ground and now - self.ground_time < .5, localized=localized, paused=self.paused)
         out = Twist();out.linear.x, out.linear.y, out.angular.z = result;self.output.publish(out)
         self.counter += 1
-        if True: #20Hz original evaluations; transport does not restamp cached health
+        if True: #50Hz actual evaluations; original sensor/source stamps are unchanged
             status = String();status.data = json.dumps({**getattr(self,'terrain_details',{}),'armed':self.gate.armed,'simulation':self.simulation,
                 'evaluated_monotonic_ns':time.monotonic_ns(),'data_fresh':collision_source_ok and -.05<=min(scan_age,odom_age) and max(scan_age,odom_age)<=self.gate.limits.sensor_timeout,'collision_source_valid':collision_source_ok,'calibration_ready':self.calibration_ready and now-self.calibration_time<.2,
                 'navigation_reference':getattr(self,'reference_mode','unknown'),'navigation_reference_ready':self.calibration_ready and now-self.calibration_time<.2,

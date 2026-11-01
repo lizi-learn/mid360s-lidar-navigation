@@ -102,6 +102,12 @@ class Console(Node):
             if self.gate.get('collision_source_valid') is not True and self.session.phase in ('starting','executing','replanning'):
                 self.session.cancel();self.stop_actions()
                 self.session._notice('避障观测失效，导航已停止；恢复后请重新确认目标')
+            # Forward this original health evaluation as soon as it arrives,
+            # instead of waiting for a separate session timer and RPC cycle.
+            gait=getattr(self,'gait',None)
+            if gait:
+                status=self.session.status(time.monotonic())
+                gait.update(self.gate,self.session.phase=='executing' and not status['force_navigation_zero'])
     def health_ready(self):
         g=self.gate
         return bool(g.get('collision_source_valid') is True and g.get('data_fresh') is True and g.get('localized') and g.get('ground_ok') and
