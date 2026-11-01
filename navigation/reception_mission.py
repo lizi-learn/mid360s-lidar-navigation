@@ -187,8 +187,7 @@ class MissionService:
         with self.engine.lock:
             doc=self.engine.document if self.engine.phase in BUSY else None
             if doc:return {'map_id':doc['map_id'],'revision':doc['revision'],'doors':copy.deepcopy(doc['doors']),'policy':dict(doc['policy'])}
-        doc=self.catalog.read(self.map_id())
-        return {'map_id':doc['map_id'],'revision':doc['revision'],'doors':doc['doors'],'policy':doc['policy']}
+        return self.catalog.summary(self.map_id())
     def command(self, data):
         command = data.get('command')
         if command == 'start':

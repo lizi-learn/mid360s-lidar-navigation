@@ -131,7 +131,7 @@ class Catalog:
     def summary(self,map_id):
         with self.lock:
             document=self._load(map_id)
-            return {'map_id':map_id,'revision':document['revision'],'doors':copy.deepcopy(document['doors'])}
+            return {'map_id':map_id,'revision':document['revision'],'doors':copy.deepcopy(document['doors']),'policy':dict(document['policy'])}
     def versions(self,map_id):
         with self.lock:
             current=self.read(map_id);rows=[]

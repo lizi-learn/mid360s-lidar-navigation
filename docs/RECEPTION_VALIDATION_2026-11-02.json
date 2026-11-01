@@ -6,11 +6,11 @@
       "passed": true,
       "windows": {
         "2.8": {
-          "samples": 7,
+          "samples": 6,
           "minimum_forward": 0.375
         },
         "3.6": {
-          "samples": 7,
+          "samples": 6,
           "minimum_forward": 0.375
         }
       }
@@ -21,20 +21,20 @@
       "evidence": {
         "source": "projected_scan",
         "state": "observing",
-        "frames": 13,
-        "source_ns": 1793555863091402927,
-        "processing_ms": 0.49851112999022007,
+        "frames": 12,
+        "source_ns": 1793556883698726957,
+        "processing_ms": 0.29544695280492306,
         "doors": [
           {
             "door_id": "front_door",
             "state": "open",
-            "source_monotonic": 1438138.5241791732,
+            "source_monotonic": 1439159.131511783,
             "coverage_bins": 24,
             "total_bins": 24,
             "blocking_returns": 0,
             "scope": "finite projected scan rays, not full 3D clearance",
-            "source_sequence": 13,
-            "source_ros_ns": 1793555863091402927
+            "source_sequence": 12,
+            "source_ros_ns": 1793556883698726957
           }
         ]
       },
@@ -59,23 +59,23 @@
             "1",
             "2"
           ],
-          "cost": 13.71006354650654
+          "cost": 13.704666061885131
         },
         {
           "kind": "live_update",
           "reason": "发现更短的开放通道",
-          "old_cost": 13.712742619761801,
-          "new_cost": 4.149439988541216
+          "old_cost": 13.706883616187518,
+          "new_cost": 4.152973991827651
         }
       ]
     },
     {
       "case": "actual_dynamic_obstacle_and_complete",
       "passed": true,
-      "ray_returns": 21,
+      "ray_returns": 22,
       "circle": [
-        9.752412542464436,
-        2.5129082826531848,
+        9.755366457269073,
+        2.5082284826818455,
         0.28
       ]
     },
@@ -90,18 +90,36 @@
     }
   ],
   "final_pose": [
-    10.634082246115222,
-    4.180464647941304,
-    2.5993766013378266
+    10.41485090158998,
+    4.128824369383091,
+    1.051735196340074
   ],
-  "elapsed_s": 69.97284217784181,
+  "elapsed_s": 65.96401746990159,
   "stop_profile": "baseline-directional",
+  "fixture_seed": 0,
+  "amcl_seed": "Nav2 default; stochastic localization is not forced to match one successful run",
   "hardware_commands": 0,
   "interfaces": [
     "lo"
   ],
   "scope": "Actual Console, ROS2/Nav2 actions and projected-ray plant, unchanged55cm full-body model. No RL or physical robot acceptance.",
-  "seed": 0,
+  "python_tests": 307,
+  "remaining": [
+    "Production ARM parallel load and actual body speaker custom introductions",
+    "Actual G12 screen after this software rollout",
+    "2D projected opening evidence is not full-height3D clearance",
+    "Legacy baseline replay/delayed-turn failures remain recorded"
+  ],
+  "failures_retained": [
+    "Exact-timeTF callback arrival race: fixed one latest original scan slot",
+    "Incorrect synthetic door annotation included jamb: fixture corrected; jamb wall retained",
+    "Partial aperture view wrongly revoked fresh complete evidence: partial cannot refresh existing3s expiry",
+    "Legacy rectangle profile blocked detour: tests now explicitly use already deployed baseline directional profile",
+    "Combined obstacle recovered path inherited old goal timestamp: fixed actual producer; relay/sensor stamps unchanged",
+    "Clear-hold consumed before plan callback: asynchronous plan receipt latched until renewed blockage",
+    "Default colcon Make jobs ignored CMAKE_BUILD_PARALLEL_LEVEL: explicit MAKEFLAGS bounded build; first180s timeout retained",
+    "Catalog equal-sized atomic revision cache invalidation fixed; audio waiting-route debounce failure retained"
+  ],
   "actual_parameters": {
     "local_footprint": [
       [
@@ -155,23 +173,12 @@
       "polygon_pub_topic": "swept_zone"
     }
   },
-  "compiled_planner_sha256": "2f110dde619b79c529a5b1ee6b728dd2f9fd09ecf518ce893f24a8bfdabd6c0d",
-  "planner_source_sha256": "77bee3e1a283b6ec166786bc94fb08755e481453b125ad4260e2b7d114fab906",
-  "python_tests": 307,
-  "remaining": [
-    "Production ARM parallel load and actual body speaker custom introductions",
-    "Actual G12 screen after this software rollout",
-    "2D projected opening evidence is not full-height3D clearance",
-    "Legacy baseline replay/delayed-turn failures remain recorded"
+  "planner_source_sha256": "f179423832563c2297782019aa664ec8de3eef627a23f9a04e85c1331b4829b8",
+  "compiled_planner_sha256": "36b406263d574fe887d977918727750f907312812db071d338ec93731d9b49e5",
+  "soft_clearance_preference_m": [
+    0.08,
+    0.04,
+    0.0
   ],
-  "failures_retained": [
-    "Exact-timeTF callback arrival race: fixed one latest original scan slot",
-    "Incorrect synthetic door annotation included jamb: fixture corrected; jamb wall retained",
-    "Partial aperture view wrongly revoked fresh complete evidence: partial cannot refresh existing3s expiry",
-    "Legacy rectangle profile blocked detour: tests now explicitly use already deployed baseline directional profile",
-    "Combined obstacle recovered path inherited old goal timestamp: fixed actual producer; relay/sensor stamps unchanged",
-    "Clear-hold consumed before plan callback: asynchronous plan receipt latched until renewed blockage",
-    "Default colcon Make jobs ignored CMAKE_BUILD_PARALLEL_LEVEL: explicit MAKEFLAGS bounded build; first180s timeout retained",
-    "Catalog equal-sized atomic revision cache invalidation fixed; audio waiting-route debounce failure retained"
-  ]
+  "independent_ci_previous_failure_retained": "61eaaba: close obstacle route + stochastic localization/tracking tolerance caused planning start in lethal space; previous650521f independentCI all4passed. New preference is being checked independently."
 }

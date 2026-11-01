@@ -162,7 +162,7 @@ def main():
             assert any(e['kind']=='resumed'for e in history['events'])and any(e['kind']=='manual'for e in history['events'])
             events.append({'case':'manual_cancel_no_auto_resume_and_durable_receipts','passed':True,'history_events':len(history['events'])})
         report={'passed':True,'cases':events,'final_pose':d['pose'],'truth':d['truth'],'elapsed_s':time.monotonic()-started,
-                'stop_profile':args.stop_profile,'hardware_commands':0,'interfaces':os.listdir('/sys/class/net'),'source_sha':{str(p.relative_to(ROOT)):hashlib.sha256(p.read_bytes()).hexdigest()for p in [NAV/'console.py',NAV/'reception_mission.py',NAV/'reception_doors.py',NAV/'sim_world.py']},
+                'stop_profile':args.stop_profile,'fixture_seed':0,'amcl_seed':'Nav2 default; stochastic localization is not forced to match one successful run','hardware_commands':0,'interfaces':os.listdir('/sys/class/net'),'source_sha':{str(p.relative_to(ROOT)):hashlib.sha256(p.read_bytes()).hexdigest()for p in [NAV/'console.py',NAV/'reception_mission.py',NAV/'reception_doors.py',NAV/'sim_world.py']},
                 'scope':'Actual Console, ROS2/Nav2 actions and projected-ray plant, unchanged55cm full-body model. No RL or physical robot acceptance.'}
     except Exception as error:
         latest=copy.deepcopy(latest);latest.pop('request_token',None)

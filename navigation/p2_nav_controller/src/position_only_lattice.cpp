@@ -5,6 +5,7 @@
 #include <deque>
 #include "nav2_smac_planner/smac_planner_lattice.hpp"
 #include "nav2_costmap_2d/footprint_collision_checker.hpp"
+#include "nav2_costmap_2d/footprint.hpp"
 #include "nav2_core/exceptions.hpp"
 #include "pluginlib/class_list_macros.hpp"
 #include "nav2_util/geometry_utils.hpp"
@@ -12,9 +13,10 @@
 #include "p2_nav_controller/position_guide.hpp"
 namespace p2_nav_controller {
 class PositionOnlyLattice : public nav2_smac_planner::SmacPlannerLattice {
-  bool clear(double x,double y,double yaw) {
+  bool clear(double x,double y,double yaw,double margin=0.) {
     nav2_costmap_2d::FootprintCollisionChecker<nav2_costmap_2d::Costmap2D*> checker(_costmap);
-    const auto body=_costmap_ros->getRobotFootprint();
+    auto body=_costmap_ros->getRobotFootprint();
+    if(margin>0.)nav2_costmap_2d::padFootprint(body,margin);
     if(checker.footprintCostAtPose(x,y,yaw,body)>=254)return false;
     // Outline checking alone can miss an occupied cell inside a large body.
     std::vector<std::array<double,2>> polygon;
@@ -39,31 +41,30 @@ class PositionOnlyLattice : public nav2_smac_planner::SmacPlannerLattice {
     }
     return true;
   }
-  bool clear(const std::vector<std::array<double,3>> &samples) {
-    for(const auto &p:samples)if(!clear(p[0],p[1],p[2]))return false;return true;
+  bool clear(const std::vector<std::array<double,3>> &samples,double margin=0.) {
+    for(const auto &p:samples)if(!clear(p[0],p[1],p[2],margin))return false;return true;
   }
-  bool pivot_room(double x,double y) {
-    double radius=0.;for(const auto &p:_costmap_ros->getRobotFootprint())radius=std::max(radius,std::hypot(p.x,p.y));
+  bool pivot_room(double x,double y,double margin=0.) {
+    double radius=0.;for(const auto &p:_costmap_ros->getRobotFootprint())radius=std::max(radius,std::hypot(p.x,p.y)+std::sqrt(2.)*margin);
     const double r=_costmap->getResolution(),ox=_costmap->getOriginX(),oy=_costmap->getOriginY();
     const int lx=std::floor((x-radius-ox)/r),ux=std::floor((x+radius-ox)/r),ly=std::floor((y-radius-oy)/r),uy=std::floor((y+radius-oy)/r);
     if(lx<0||ly<0||ux>=static_cast<int>(_costmap->getSizeInCellsX())||uy>=static_cast<int>(_costmap->getSizeInCellsY()))return false;
     for(int iy=ly;iy<=uy;++iy)for(int ix=lx;ix<=ux;++ix)if(_costmap->getCost(ix,iy)>=254){double px,py;_costmap->mapToWorld(ix,iy,px,py);if(std::hypot(std::max(0.,std::abs(px-x)-r/2),std::max(0.,std::abs(py-y)-r/2))<=radius)return false;}
     return true;
   }
-  std::vector<std::array<double,3>> visibility(const std::vector<std::array<double,2>> &guide,double yaw) {
+  std::vector<std::array<double,3>> visibility(const std::vector<std::array<double,2>> &guide,double yaw,double margin,std::chrono::steady_clock::time_point deadline) {
     if(guide.empty())return {};
     std::vector<std::array<double,2>> points{guide.front()};
-    for(size_t i=1;i+1<guide.size();++i)if(std::hypot(guide[i][0]-points.back()[0],guide[i][1]-points.back()[1])>=.25&&pivot_room(guide[i][0],guide[i][1]))points.push_back(guide[i]);
+    for(size_t i=1;i+1<guide.size();++i)if(std::hypot(guide[i][0]-points.back()[0],guide[i][1]-points.back()[1])>=.25&&pivot_room(guide[i][0],guide[i][1],margin))points.push_back(guide[i]);
     points.push_back(guide.back());std::vector<bool> failed(points.size(),false);
     std::vector<std::array<double,3>> out{{guide.front()[0],guide.front()[1],yaw}};
-    const auto deadline=std::chrono::steady_clock::now()+std::chrono::milliseconds(750);
     std::function<bool(size_t)> visit=[&](size_t from) {
       if(std::chrono::steady_clock::now()>deadline)return false;
       for(size_t to=points.size()-1;to>from;--to){
         if(failed[to])continue;
         const auto &q=points[to];const auto pose=out.back();const double a=std::atan2(q[1]-pose[1],q[0]-pose[0]);
         auto leg=terminal_path(pose,{q[0],q[1],a},std::numeric_limits<double>::infinity());
-        if(!clear(leg))continue;
+        if(!clear(leg,margin))continue;
         auto size=out.size();out.insert(out.end(),leg.begin()+1,leg.end());
         if(to+1==points.size()||visit(to))return true;
         out.resize(size);
@@ -107,14 +108,20 @@ class PositionOnlyLattice : public nav2_smac_planner::SmacPlannerLattice {
     auto seed=start;
     {
       std::unique_lock<nav2_costmap_2d::Costmap2D::mutex_t> lock(*_costmap->getMutex());
-      if(clear(direct))return message(direct,goal.header);
+      if(clear(direct,.08))return message(direct,goal.header);
       guide=position_guide(_costmap->getCharMap(),_costmap->getSizeInCellsX(),_costmap->getSizeInCellsY(),_costmap->getResolution(),_costmap->getOriginX(),_costmap->getOriginY(),{x,y},{gx,gy});
       // Point targets need no terminal heading. Checked pivot/straight
       // visibility connections also avoid a car-like turnaround search. Joints
       // are places where the unchanged body can pivot; narrow straight gaps
       // are crossed as an edge without requiring a turn inside them.
-      auto connected=visibility(guide,yaw);
-      if(!connected.empty())return message(connected,goal.header);
+      // Prefer tracking room when available. These are route-search costs,
+      // not a larger accepted body: narrow valid routes still fall back to the
+      // original full footprint. One shared bound covers all preferences.
+      const auto visibility_deadline=std::chrono::steady_clock::now()+std::chrono::milliseconds(750);
+      for(double margin:{.08,.04,0.}) {
+        auto connected=visibility(guide,yaw,margin,visibility_deadline);
+        if(!connected.empty())return message(connected,goal.header);
+      }
       if(guide.size()>1) {
         requested.pose.orientation=nav2_util::geometry_utils::orientationAroundZAxis(heading(gx,gy,guide_heading(guide,true)));
         const double initial=heading(x,y,guide_heading(guide,false));
