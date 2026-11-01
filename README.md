@@ -130,3 +130,7 @@ stop reserve aligns the padded global lateral boundary with the unchanged local
 body padding and the monitor's StopZone: nominal padded width 1.14 m. Front/rear
 padding remains unchanged. This avoids counting lateral padding twice; it is
 still a commissioning candidate, not physical clearance acceptance.
+
+### 导览接待扩展（开发中）
+
+点位与朝向、产品介绍、展示路线和操作员执行页见 [导览接待工作台](docs/RECEPTION_STUDIO.md)。[参考调研](docs/RECEPTION_RESEARCH.md)记录采用方向与边界；冻结的 Baseline V1 保持不变。隔离预览使用合成场景，不连接真实机器人。

@@ -110,6 +110,8 @@ def main():
     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     settings = AudioSettings(settings_path)
     player = LocalPlayer(args.voice_dir, settings_path.parent / 'audio-tone-cache', args.sink)
+    from reception_voice import PresentationPlayer
+    presentation = PresentationPlayer(settings_path.parent/'reception-voice-cache',settings_path.parent/'reception-speech-result.json',args.sink)
     policy, pending, test_generation, stopped = CuePolicy(), None, None, False
     last_event, error, last_report = None, '', 0.
     def stop_signal(*_):
@@ -147,10 +149,12 @@ def main():
                         last_event = {'kind': pending.kind, 'text': PHRASES[pending.kind],
                                       'generation': pending.generation, 'at': time.time()}
                         pending = None
+                presentation.observe((data.get('reception')or{}).get('mission')or{},enabled=cfg['enabled'],volume=cfg['volume'],now=now,cue_busy=bool(player.process or pending))
                 error = ''
             except Exception as exc:
                 # Audio/transport failure never writes a navigation setting or
                 # controls motion. Do not flush old speech on reconnection.
+                presentation.stop()
                 policy.disconnected()
                 pending = None
                 player.stop('observer_unavailable')
@@ -165,6 +169,7 @@ def main():
                 last_report = now
             time.sleep(.2)
     finally:
+        presentation.stop()
         player.stop('service_stopped')
 
 

@@ -1,0 +1,192 @@
+{
+  "schema": 1,
+  "map_id": "synthetic_showroom",
+  "revision": 0,
+  "points": [
+    {
+      "id": "welcome",
+      "name": "迎宾起点",
+      "x": 0.0,
+      "y": 0.0,
+      "yaw": null,
+      "product_id": "",
+      "kind": "visit",
+      "script": "",
+      "dwell": 0.0,
+      "guest_wait": false
+    },
+    {
+      "id": "hall",
+      "name": "走廊展示",
+      "x": 4.0,
+      "y": 0.0,
+      "yaw": null,
+      "product_id": "",
+      "kind": "transit",
+      "script": "",
+      "dwell": 0.0,
+      "guest_wait": false
+    },
+    {
+      "id": "robot",
+      "name": "双足机器人展位",
+      "x": 9.0,
+      "y": 0.0,
+      "yaw": 1.57,
+      "product_id": "p2",
+      "kind": "visit",
+      "script": "",
+      "dwell": 0.0,
+      "guest_wait": true
+    },
+    {
+      "id": "lidar",
+      "name": "激光导航展位",
+      "x": 13.0,
+      "y": 0.0,
+      "yaw": 0.0,
+      "product_id": "lidar",
+      "kind": "visit",
+      "script": "",
+      "dwell": 0.0,
+      "guest_wait": false
+    },
+    {
+      "id": "side",
+      "name": "侧厅途经点",
+      "x": 7.0,
+      "y": 3.0,
+      "yaw": null,
+      "product_id": "",
+      "kind": "transit",
+      "script": "",
+      "dwell": 0.0,
+      "guest_wait": false
+    }
+  ],
+  "products": [
+    {
+      "id": "p2",
+      "name": "P2 · 双足服务机器人",
+      "script": "您好，这里是双足服务机器人展示区。它可以沿设定路线接待来宾，也可以在到达展位后介绍产品。您可以在这里停留体验，准备好后，我们再前往下一站。",
+      "tags": "服务机器人 / 重点推荐"
+    },
+    {
+      "id": "lidar",
+      "name": "激光雷达导航方案",
+      "script": "这套导航方案使用激光雷达感知周围环境。操作人员可以在地图中设置目的地，也可以为接待活动编排展示路线。",
+      "tags": "导航方案"
+    }
+  ],
+  "routes": [
+    {
+      "id": "welcome_tour",
+      "name": "标准接待 · 产品体验",
+      "description": "迎宾起点出发，经过走廊展示，到机器人展位介绍，再体验雷达导航方案。",
+      "mode": "showcase",
+      "loops": 1,
+      "steps": [
+        {
+          "point_id": "welcome",
+          "speak": false
+        },
+        {
+          "point_id": "hall",
+          "speak": false
+        },
+        {
+          "point_id": "robot",
+          "speak": true
+        },
+        {
+          "point_id": "lidar",
+          "speak": true
+        }
+      ]
+    },
+    {
+      "id": "hall_demo",
+      "name": "走廊往返 · 步态展示",
+      "description": "沿中间通道前往另一端，再返回迎宾起点。",
+      "mode": "showcase",
+      "loops": 1,
+      "steps": [
+        {
+          "point_id": "hall",
+          "speak": false
+        },
+        {
+          "point_id": "lidar",
+          "speak": false
+        },
+        {
+          "point_id": "hall",
+          "speak": false
+        },
+        {
+          "point_id": "welcome",
+          "speak": false
+        }
+      ]
+    }
+  ],
+  "doors": [
+    {
+      "id": "side_door",
+      "name": "侧厅门",
+      "x": 7.0,
+      "y": 1.5,
+      "width": 1.1,
+      "yaw": 0.0
+    }
+  ],
+  "edges": [
+    {
+      "id": "e0",
+      "a": "welcome",
+      "b": "hall",
+      "bidirectional": true,
+      "door_id": "",
+      "penalty": 0.0
+    },
+    {
+      "id": "e1",
+      "a": "hall",
+      "b": "robot",
+      "bidirectional": true,
+      "door_id": "",
+      "penalty": 0.0
+    },
+    {
+      "id": "e2",
+      "a": "robot",
+      "b": "lidar",
+      "bidirectional": true,
+      "door_id": "",
+      "penalty": 0.0
+    },
+    {
+      "id": "e3",
+      "a": "hall",
+      "b": "side",
+      "bidirectional": true,
+      "door_id": "side_door",
+      "penalty": 0.0
+    },
+    {
+      "id": "e4",
+      "a": "side",
+      "b": "lidar",
+      "bidirectional": true,
+      "door_id": "",
+      "penalty": 0.0
+    }
+  ],
+  "policy": {
+    "brief_wait": 4.0,
+    "max_wait": 25.0,
+    "clear_hold": 1.5,
+    "replan_interval": 3.0,
+    "shortcut_gain": 0.2
+  }
+}

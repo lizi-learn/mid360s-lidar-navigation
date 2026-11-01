@@ -17,6 +17,12 @@ class NavigationSession:
         self.phase='idle';self.goal=None;self.path_points=0;self.cancel_generation=0
         self.cancel_pending=False;self.message='等待保护开关状态';self.notice_sequence=0
         self.blocked_since=None;self.replans=0;self.clear_since=None;self.last_now=None;self.prepared_with_authority=False
+        self.obstruction_policy=None;self.obstruction_decision='continue'
+    def configure_obstruction(self,policy):
+        from reception_routes import ObstructionPolicy
+        with self.lock:
+            self.obstruction_policy=ObstructionPolicy(dict(policy))
+            self.replan_timeout=policy['max_wait']
     def _notice(self,message):
         if message!=self.message:self.notice_sequence+=1;self.message=message
     def _cancel(self,message,phase='cancelled'):
@@ -91,11 +97,22 @@ class NavigationSession:
             if self.phase=='executing':
                 self.phase='replanning';self.blocked_since=now;self.replans=0;self.clear_since=None
                 self._notice('检测到障碍：已停车，正在尝试绕行')
+                if self.obstruction_policy:
+                    self.obstruction_policy.reset();self.obstruction_decision=self.obstruction_policy.decide(now,blocked=True)
     def reroute(self,now,new_path,clear):
         with self.lock:
             if self.phase!='replanning':return
             if now-self.blocked_since>=self.replan_timeout:
                 self._cancel('障碍无法绕行，速度已归零，请手动处理','blocked');return
+            if self.obstruction_policy:
+                decision=self.obstruction_policy.decide(now,blocked=not clear,alternate=new_path)
+                self.obstruction_decision=decision
+                if decision=='stop_notify':self._cancel('前方持续阻挡，已停止本次导航','blocked');return
+                if clear and decision in ('resume','continue') and new_path and self._fresh(now) and self.mode=='navigation_allowed' and not self.manual_activity:
+                    self.phase='executing';self.blocked_since=None;self._notice('通行已恢复，继续导航')
+                # Native BT/costmaps still replan and reject collisions. Service
+                # policy controls only the stopped session's resume/wait period.
+                return
             if new_path:self.replans+=1
             if not clear:self.clear_since=None
             elif self.clear_since is None:self.clear_since=now
@@ -114,4 +131,4 @@ class NavigationSession:
                 'manual_activity':self.manual_activity,'navigation_permitted':fresh and self.mode=='navigation_allowed' and not self.manual_activity,
                 'force_navigation_zero':self.phase!='executing' or not fresh or self.mode!='navigation_allowed' or self.manual_activity,
                 'cancel_pending':self.cancel_pending,'cancel_generation':self.cancel_generation,'notice':self.message,
-                'notice_sequence':self.notice_sequence,'replan_attempts':self.replans}
+                'notice_sequence':self.notice_sequence,'replan_attempts':self.replans,'obstruction_decision':self.obstruction_decision}

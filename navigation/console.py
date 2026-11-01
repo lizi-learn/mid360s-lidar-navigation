@@ -64,6 +64,21 @@ class Console(Node):
         self.buffer=Buffer();self.listener=TransformListener(self.buffer,self)
         self.create_timer(.5,self.publish_speed)
         self.create_timer(.02,self.poll_session)
+        from reception_catalog import Catalog
+        from reception_mission import MissionService
+        from reception_voice import VoiceCache
+        from reception_cloud import CloudStore
+        from reception_transfer import ContentTransfer
+        self.map_name=''
+        self.reception_catalog=Catalog(runtime/'reception')
+        self.reception_cloud=CloudStore(runtime/'reception-cloud')
+        self.reception_transfer=ContentTransfer(self.reception_catalog,self.reception_cloud)
+        tts_command=json.loads(os.environ.get('P2_RECEPTION_TTS_COMMAND','null'))
+        if tts_command is not None and (not isinstance(tts_command,list) or not tts_command or not all(isinstance(x,str) for x in tts_command)):
+            raise ValueError('TTS adapter must be an argv JSON array')
+        self.reception_voice=VoiceCache(runtime/'reception-voice-cache',tts_command)
+        self.reception=MissionService(self,self.reception_catalog)
+        self.create_subscription(String,'/p2_nav/door_observations',self.on_door_observation,10)
     def on_map(self,msg):self.grid=msg;self.map_revision+=1
     def on_authority(self,msg):
         # An attached gait loop has the verified physical sample. Do not race it
@@ -199,7 +214,9 @@ class Console(Node):
     def op(self,**values):
         m=String();m.data=json.dumps(values);self.operator.publish(m)
     def stop(self):
-        with self.lock:self.session.cancel();self.stop_actions()
+        with self.lock:
+            if hasattr(self,'reception') and self.reception.engine.phase in ('dispatching','navigating','presenting','guest_wait','dwell'):self.reception.engine.cancel()
+            self.session.cancel();self.stop_actions()
         self.goal_generation+=1
         self.op(armed=False,paused=True)
         if self.route_process is not None and self.route_process.poll() is None:
@@ -238,7 +255,7 @@ class Console(Node):
             from process_scheduling import workflow_command
             args=workflow_command(ROOT,mode,self.simulation,params,map_file,bool(self.gait))
             self.process=subprocess.Popen(args,cwd=ROOT,stdout=open(self.runtime/'workflow.log','w'),stderr=subprocess.STDOUT,start_new_session=True)
-            self.mode=mode;self.controller=controller;self.path=[];self.goal=None
+            self.mode=mode;self.map_name=name;self.controller=controller;self.path=[];self.goal=None
             self.last_action='正在启动建图' if mode=='mapping' else '正在载入地图和定位'
         return {'mode':mode,'pid':self.process.pid,'simulation':self.simulation}
     def simulated_mapping_route(self,name):
@@ -377,6 +394,8 @@ class Console(Node):
     def confirm_goal(self,data):
         generation=int(data['generation'])
         with self.lock:
+            if '_mission_epoch' in data and not self.reception.engine.valid(data['_mission_epoch']):
+                raise ValueError('导览任务已取消或被人工接管')
             gait=getattr(self,'gait',None);ready=self.execution_ready()
             reason=gait.status().get('blockers','') if gait and not ready else ''
             self.session.start(generation,time.monotonic(),ready,self.health_ready(),execution_reason=reason)
@@ -406,6 +425,54 @@ class Console(Node):
             self.session.cancel();self.acknowledge_if_quiet(generation);raise ValueError('导航请求被拒绝')
         if self.session.phase!='executing':raise ValueError('开始过程中已取消或手动接管')
         return {'accepted':True,'generation':generation,'hardware_execution_enabled':bool(gait and gait.status()['navigation_owned'])}
+    def on_door_observation(self,msg):
+        try:
+            document=self.reception_catalog.read(self.reception.map_id())
+            data=json.loads(msg.data)
+            if data.get('door_id') not in {d['id'] for d in document['doors']}:return
+            self.reception.decisions.observe(data,time.monotonic(),document['policy']['clear_hold'])
+        except (TypeError,ValueError,KeyError):return
+    def reception_speech_result(self):
+        try:
+            result=json.loads((self.runtime/'reception-speech-result.json').read_text())
+            if result.get('epoch')!=self.reception.engine.epoch:return None
+            return result
+        except (OSError,ValueError):return None
+    def reception_status(self,full=False):
+        document=self.reception_catalog.read(self.reception.map_id()) if full else self.reception_catalog.summary(self.reception.map_id())
+        result={'map_id':self.reception.map_id(),'revision':document['revision'],'mission':self.reception.engine.status(),'doors':self.reception.decisions.states(document,time.monotonic()),'route_report':self.reception.route_report}
+        if full:result.update(document=document,voice=self.reception_voice.status(document))
+        return result
+    def reception_save(self,data):
+        if not isinstance(data,dict):raise ValueError('导览配置必须是对象')
+        operation=data.get('operation','save')
+        if operation=='stage':return self.reception_transfer.receive(data)
+        if operation=='read':
+            if set(data)-{'operation','map_id'}:raise ValueError('导览读取字段无效')
+            map_id=data.get('map_id')or self.reception.map_id()
+            document=self.reception_catalog.read(map_id)
+            return {'document':document,'voice':self.reception_voice.status(document)}
+        if operation=='cloud_read':
+            if set(data)!={'operation','map_id'}:raise ValueError('三维读取字段无效')
+            return self.reception_cloud.read(data['map_id'])
+        if operation=='cloud_save':
+            if set(data)!={'operation','cloud'}:raise ValueError('三维保存字段无效')
+            return self.reception_cloud.save(data['cloud'])
+        if operation=='prepare_voice':
+            if set(data)!={'operation'}:raise ValueError('语音准备字段无效')
+            return self.reception_voice.prepare(self.reception_catalog.read(self.reception.map_id()))
+        if operation!='save' or set(data)-{'operation','document','expected_revision'}:raise ValueError('导览保存字段无效')
+        return self.reception_catalog.save(data['document'],data['expected_revision'])
+    def reception_api_goal(self,data):
+        if 'reception_command' in data:raise ValueError('开始任务应通过开始接口提交')
+        if self.reception.engine.phase in ('dispatching','navigating','presenting','guest_wait','dwell'):
+            self.stop()
+        return self.set_goal(data)
+    def reception_api_confirm(self,data):
+        if 'reception_command' in data:
+            if set(data)!={'reception_command'}:raise ValueError('导览命令不能与单点开始混合提交')
+            return self.reception.command(data['reception_command'])
+        return self.confirm_goal(data)
     def on_feedback(self,feedback):
         f=feedback.feedback;self.feedback={'distance_remaining':f.distance_remaining,'recoveries':f.number_of_recoveries}
     def speed(self,value,velocity_scale=None):
@@ -444,6 +511,7 @@ class Console(Node):
             'maps':sorted(p.parent.name for p in (self.runtime/'maps').glob('*/mapped.yaml')),
             'hardware_execution_enabled':bool(getattr(self,'gait',None) and self.gait.status()['navigation_owned']),
             'audio_feedback':self.audio.status(),
+            'reception':self.reception_status(),
             'scope':'平面导航仿真' if self.simulation else ('雷达中心坐标导航；定位、传感器和步态状态见实时数据' if self.gate.get('navigation_reference')=='lidar_projection' else ('实机步态接口已连接；坐标与控制状态见实时数据' if self.gait else '实机导航预演'))}
 
 def main():
@@ -500,8 +568,15 @@ def main():
                 raw=gzip.compress(raw);self.send_header('Content-Encoding','gzip')
             self.send_header('Content-Length',str(len(raw)));self.end_headers();self.wfile.write(raw)
         def do_GET(self):
-            if self.path=='/':self.send((ROOT/'console.html').read_bytes(),content_type='text/html; charset=utf-8')
+            if urlsplit(self.path).path in ('/','/reception'):
+                guided=urlsplit(self.path).path=='/reception' or parse_qs(urlsplit(self.path).query).get('view') in (['reception'],['operator'])
+                html=(ROOT/('reception.html' if guided else 'console.html')).read_text()
+                if not guided:
+                    app=json.dumps((ROOT/'reception.html').read_text(),ensure_ascii=False).replace('</','<\\/')
+                    html=html.replace('/*RECEPTION_APP*/', 'function openReception(){document.open();document.write('+app+');document.close()}')
+                self.send(html.encode(),content_type='text/html; charset=utf-8')
             elif urlsplit(self.path).path=='/api/status':self.send(node.status(include_cells=parse_qs(urlsplit(self.path).query).get('summary')!=['1']))
+            elif urlsplit(self.path).path=='/api/reception':self.send(node.reception_status(full=True))
             elif self.path=='/api/map':self.send({'revision':node.map_revision,'map':node.status()['map']})
             else:self.send({'error':'Not found'},404)
         def do_POST(self):
@@ -509,12 +584,13 @@ def main():
                 if not secrets.compare_digest(self.headers.get('X-Nav-Token',''),node.request_token):
                     self.send({'error':'请刷新工作台后重试'},403);return
                 length=int(self.headers.get('Content-Length','0'))
-                if not 0<length<=8192:raise ValueError('请求大小无效')
+                if not 0<length<=600000:raise ValueError('请求大小无效')
                 d=json.loads(self.rfile.read(length))
+                if not isinstance(d,dict):raise ValueError('请求必须是JSON对象')
                 routes={'/api/audio':lambda:node.audio.update(d),'/api/start':lambda:node.start(d['mode'],d.get('name','office'),d.get('controller','rpp')),
                     '/api/sim_mapping_route':lambda:node.simulated_mapping_route(d['name']),
-                    '/api/save':lambda:save_resource(node,d),'/api/goal':lambda:node.set_goal(d),
-                    '/api/confirm':lambda:node.confirm_goal(d),'/api/sim_operator':lambda:node.simulation_operator(d),
+                    '/api/save':lambda:save_resource(node,d),'/api/goal':lambda:node.reception_api_goal(d),
+                    '/api/confirm':lambda:node.reception_api_confirm(d),'/api/sim_operator':lambda:node.simulation_operator(d),
                     '/api/initialpose':lambda:node.set_pose(d),'/api/speed':lambda:node.speed(d['speed'],d.get('velocity_scale')),
                     '/api/stop':lambda:(node.stop() or {'stopped':True})}
                 if self.path not in routes:self.send({'error':'Not found'},404);return
@@ -527,6 +603,7 @@ def main():
     try:
         while not stopping.is_set():server.handle_request()
     finally:
+        node.reception.close()
         node.stop_process()
         if node.gait:node.gait.close()
         server.server_close();executor.shutdown();node.destroy_node();rclpy.shutdown()

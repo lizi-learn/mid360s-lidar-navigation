@@ -104,6 +104,9 @@ def save_resource(node, data):
     saving or a navigation action; mixed audio/map requests are rejected first.
     New gateways may use the dedicated /api/audio endpoint instead.
     """
+    if 'reception' in data:
+        if set(data)!={'reception'}:raise ValueError('导览配置不能与其他资源混合提交')
+        return node.reception_save(data['reception'])
     if 'audio_feedback' in data:
         if set(data) != {'audio_feedback'}:
             raise ValueError('声音设置不能与保存地图混合提交')
