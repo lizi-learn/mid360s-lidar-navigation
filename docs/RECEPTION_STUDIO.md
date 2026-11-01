@@ -114,3 +114,5 @@ python3 experiments/reception/benchmark.py --output /tmp/reception-performance.j
 接口通过已有`/api/save`下的`reception.operation`承载：`map_load/map_versions/map_snapshot/map_restore/map_resume/map_save/pose_correct/nearby/trace_runs/trace_read`与`bundle_export/bundle_chunk/bundle_abort/bundle_begin/bundle_part/bundle_commit`。导览与E开关语义保持原实现。
 
 技术参考：[SLAM Toolbox](https://github.com/SteveMacenski/slam_toolbox) 的真实序列化续扫，以及 [Nav2 Humble KeepoutFilter源码](https://api.nav2.org/nav2-humble/html/keepout__filter_8cpp_source.html) 的双代价图过滤。
+
+切换编辑地图时清空上一张地图的未提交绘图、局部更新区、定位校正、停靠候选与回放状态。异步轨迹响应按地图和请求代次校验，晚到的旧地图数据直接丢弃；回放列表保留当前选择。已通过实际网页的23帧记录载入及切图清空检查，合成模型的缺失ROS源时间仍显示缺失。

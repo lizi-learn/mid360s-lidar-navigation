@@ -1,5 +1,5 @@
 {
-  "version": "v0.5.1-map-tools.1",
+  "version": "v0.5.1-map-tools.2",
   "hardware_commands": 0,
   "scope": "Synthetic planar Nav2/SLAM plus pure/subprocess/UI tests; no new physical walking",
   "pure_tests": 316,
@@ -56,5 +56,23 @@
       "total": 12,
       "new_fix_claimed": false
     }
-  ]
+  ],
+  "ui_validation": {
+    "actual_synthetic_web_actions": [
+      "keepout_line_draw_save",
+      "speed_polygon_draw_after90degree_rotation_save",
+      "site_zip_export_total_sha_verified",
+      "site_zip_import_new_identity",
+      "single_point_model_complete",
+      "23frame_record_load",
+      "switch_map_clears_old_trace"
+    ],
+    "small_screen_cancel_visible": {
+      "viewport_height": 844,
+      "button_top": 775.796875,
+      "button_bottom": 817.796875
+    },
+    "hardware_interfaces": 0,
+    "source_clock_missing_in_sandbox": "kept missing; actual native clocks verified separately"
+  }
 }
