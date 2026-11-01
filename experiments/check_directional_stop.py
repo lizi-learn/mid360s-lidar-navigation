@@ -18,6 +18,7 @@ def main():
     paramfile.write_text(yaml.safe_dump(config(gait_profile='p2-flat-model',footprint_vertices=body,footprint_padding=0.)))
     apply_directional_stop(paramfile);m=yaml.safe_load(paramfile.read_text())['collision_monitor']['ros__parameters']
     prefix='/directional_stop_fixture';m.update(base_frame_id='fixture_base',odom_frame_id='fixture_odom',cmd_vel_in_topic=prefix+'/request',cmd_vel_out_topic=prefix+'/result',state_topic=prefix+'/state')
+    m['stop_pub_timeout']=30. # Fixture holds repeated STOP outputs throughout all consecutive fault cases.
     m['scan']['topic']=prefix+'/scan';m['SweptZone']['footprint_topic']=prefix+'/footprint';m['StopZone']['visualize']=m['SweptZone']['visualize']=False
     paramfile.write_text(yaml.safe_dump({'collision_monitor':{'ros__parameters':m}}))
     rclpy.init();n=rclpy.create_node('isolated_directional_stop_fixture');cmd=n.create_publisher(Twist,prefix+'/request',10)
