@@ -23,7 +23,7 @@ def main():
         original_path=os.environ['PATH'];os.environ['PATH']=str(root)+os.pathsep+original_path;os.environ['RECEPTION_TEST_TRACE']=str(trace)
         try:
             text='合成测试，不代表真实语音。';key=content_key(text)
-            doc={'points':[{'script':text,'product_id':''}],'products':[]}
+            doc={'map_id':'synthetic_voice','points':[{'script':text,'product_id':''}],'products':[]}
             cache=VoiceCache(root/'cache',[sys.executable,str(tts)]);cache.prepare(doc);wait(lambda:not cache.busy)
             assert cache.status(doc)['clips'][key]['available']
             result=root/'result.json';p=PresentationPlayer(cache.root,result)

@@ -9,10 +9,13 @@ def background_prefix(physical_gait):
     return 'nice -n 10' if physical_gait else ''
 
 
-def workflow_command(root, mode, simulation, params, map_file=None, physical_gait=False):
+def workflow_command(root, mode, simulation, params, map_file=None, physical_gait=False,resume_file=None,resume_pose=None):
     command = ['bash', str(root / 'run.sh'), 'mode:=' + mode,
                'simulation:=' + str(simulation).lower(), 'params:=' + str(params)]
     if mode == 'navigation':
         command.append('map:=' + str(map_file))
+    if resume_file is not None:
+        import json
+        command.extend(['resume_file:='+str(resume_file),'resume_pose:='+json.dumps(resume_pose,separators=(',',':'))])
     command.append('physical_gait:=' + str(physical_gait).lower())
     return command

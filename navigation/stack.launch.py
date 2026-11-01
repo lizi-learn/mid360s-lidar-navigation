@@ -57,6 +57,14 @@ def setup(context):
             'distance_variance_penalty':.5,'angle_variance_penalty':1.,'fine_search_angle_offset':.00349,
             'coarse_search_angle_offset':.349,'coarse_angle_resolution':.0349,'minimum_angle_penalty':.9,
             'minimum_distance_penalty':.5,'use_response_expansion':True}
+        if get('resume_file'):
+            import json,math
+            stem=Path(get('resume_file'));pose=json.loads(get('resume_pose'))
+            if not all(Path(str(stem)+suffix).is_file()for suffix in ('.data','.posegraph')):
+                raise ValueError('续扫缺少序列化位姿图和扫描数据')
+            if not isinstance(pose,list)or len(pose)!=3 or not all(type(v)in(int,float)and math.isfinite(v)for v in pose):
+                raise ValueError('续扫起点坐标无效')
+            slam.update(map_file_name=str(stem),map_start_pose=[float(v)for v in pose],map_start_at_dock=False)
         nodes.append(Node(package='slam_toolbox',executable='async_slam_toolbox_node',name='slam_toolbox',parameters=[slam],prefix=background,output='screen'))
         nodes.append(Node(package='nav2_map_server',executable='map_saver_server',name='map_saver',parameters=[dict(use_sim_time=False,save_map_timeout=5.,map_subscribe_transient_local=True,free_thresh_default=FREE_THRESH,occupied_thresh_default=OCCUPIED_THRESH)],output='screen'))
         navigation=['map_saver','velocity_smoother','collision_monitor']
@@ -91,5 +99,6 @@ def generate_launch_description():
         DeclareLaunchArgument('ground_policy',default_value=os.getenv('P2_NAV_GROUND_POLICY','observed_support')),
         DeclareLaunchArgument('support_history',default_value=os.getenv('P2_NAV_SUPPORT_HISTORY','false')),
         DeclareLaunchArgument('map',default_value=''),DeclareLaunchArgument('source_domain',default_value='188'),
+        DeclareLaunchArgument('resume_file',default_value=''),DeclareLaunchArgument('resume_pose',default_value='[]'),
         DeclareLaunchArgument('alignment',default_value=os.getenv('P2_LIDAR_ALIGNMENT',str(Path(__file__).resolve().parents[1]/'runtime/map_alignment.json'))),
         OpaqueFunction(function=setup)])

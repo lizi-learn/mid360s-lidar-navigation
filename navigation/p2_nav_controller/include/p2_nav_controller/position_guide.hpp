@@ -13,7 +13,7 @@ namespace p2_nav_controller {
 inline std::vector<std::array<double,2>> position_guide(
     const unsigned char *cells, unsigned width, unsigned height, double resolution,
     double ox, double oy, const std::array<double,2> &start,
-    const std::array<double,2> &goal) {
+    const std::array<double,2> &goal,double clearance=0.) {
   if (!cells || !width || !height || !std::isfinite(resolution) || resolution<=0 || !std::isfinite(ox) || !std::isfinite(oy) || !std::isfinite(start[0]) || !std::isfinite(start[1]) || !std::isfinite(goal[0]) || !std::isfinite(goal[1]))throw std::invalid_argument("Invalid guide map");
   auto index=[&](const std::array<double,2> &p) {
     const int x=static_cast<int>(std::floor((p[0]-ox)/resolution));
@@ -24,6 +24,24 @@ inline std::vector<std::array<double,2>> position_guide(
   };
   const int from=index(start),to=index(goal),size=width*height,w=static_cast<int>(width);
   if(cells[from]>=254 || cells[to]>=254)return {};
+  std::vector<unsigned char> inflated;
+  if(clearance>0.) {
+    // Search-only centre exclusion. Virtual walls are applied after Nav2's
+    // ordinary inflation layer, so a point guide otherwise hugs their ends and
+    // supplies no place where the unchanged body can turn. Prefer room for a
+    // pivot, then retry the original point guide for genuinely narrow passages.
+    const unsigned stride=width+1;
+    std::vector<unsigned> sums((width+1)*(height+1),0);
+    for(unsigned y=0;y<height;++y)for(unsigned x=0;x<width;++x)
+      sums[(y+1)*stride+x+1]=(cells[y*width+x]>=253)+sums[y*stride+x+1]+sums[(y+1)*stride+x]-sums[y*stride+x];
+    const int radius=static_cast<int>(std::ceil(clearance/resolution));inflated.assign(cells,cells+size);
+    for(int y=0;y<static_cast<int>(height);++y)for(int x=0;x<w;++x) {
+      const int left=std::max(0,x-radius),right=std::min(w,x+radius+1),bottom=std::max(0,y-radius),top=std::min(static_cast<int>(height),y+radius+1);
+      if(sums[top*stride+right]-sums[bottom*stride+right]-sums[top*stride+left]+sums[bottom*stride+left])inflated[y*w+x]=254;
+    }
+    if(inflated[from]>=254||inflated[to]>=254)return {};
+    cells=inflated.data();
+  }
   std::vector<double> cost(size,std::numeric_limits<double>::infinity());
   std::vector<int> parent(size,-1);
   using Item=std::pair<double,int>;

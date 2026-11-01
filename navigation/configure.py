@@ -52,7 +52,7 @@ def config(controller='rpp', tree=None, minimum_speed=.03, footprint_vertices=No
         rpp.update(plugin='p2_nav_controller::SettledGoalRPP',desired_linear_vel=.8,min_lookahead_dist=1.2,max_lookahead_dist=1.6,
             lookahead_time=2.0,rotate_to_heading_angular_vel=1.0,rotate_to_heading_min_angle=1.2,cost_scaling_dist=1.0,
             max_angular_accel=20.,regulated_linear_scaling_min_radius=1.25,
-            regulated_linear_scaling_min_speed=max(.6,minimum_speed),
+            regulated_linear_scaling_min_speed=max(.6,minimum_speed),corner_preview=True,
             use_cost_regulated_linear_velocity_scaling=False,minimum_pivot_input=.5,collision_lookahead_floor=.55)
     mppi=dict(plugin='nav2_mppi_controller::MPPIController',time_steps=48,model_dt=.05,batch_size=1000,
         iteration_count=1,vx_std=.10,vy_std=0.,wz_std=.20,vx_max=.30,vx_min=0.,vy_max=0.,wz_max=.35,

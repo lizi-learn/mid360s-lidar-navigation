@@ -11,8 +11,8 @@ import time
 from reception_catalog import ident
 
 class ContentTransfer:
-    def __init__(self,catalog,cloud):
-        self.catalog=catalog;self.cloud=cloud;self.lock=threading.Lock();self.uploads={}
+    def __init__(self,catalog,cloud,on_saved=None):
+        self.catalog=catalog;self.cloud=cloud;self.on_saved=on_saved;self.lock=threading.Lock();self.uploads={}
     def receive(self,data):
         if not isinstance(data,dict)or set(data)!={'operation','upload_id','map_id','kind','revision','index','total','chunk'}:raise ValueError('内容分片字段无效')
         key=ident(data['upload_id']);map_id=ident(data['map_id']);kind=data['kind'];revision=data['revision'];index=data['index'];total=data['total']
@@ -39,6 +39,7 @@ class ContentTransfer:
                 value=json.loads(b''.join(row['parts'][i]for i in range(total)))
                 if not isinstance(value,dict)or value.get('map_id')!=map_id:raise ValueError('内容包地图标识不一致')
                 result=self.catalog.save(value,revision)if kind=='catalog'else self.cloud.save(value)
+                if kind=='catalog'and self.on_saved:self.on_saved(result)
                 row['result']={'committed':True,'value':result};return row['result']
             except Exception:
                 del self.uploads[key];raise

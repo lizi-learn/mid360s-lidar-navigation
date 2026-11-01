@@ -1,0 +1,60 @@
+{
+  "version": "v0.5.1-map-tools.1",
+  "hardware_commands": 0,
+  "scope": "Synthetic planar Nav2/SLAM plus pure/subprocess/UI tests; no new physical walking",
+  "pure_tests": 316,
+  "ui_hash_vectors": 8,
+  "joint_native": {
+    "passed": true,
+    "elapsed_s": 67.78248044615611,
+    "cases": [
+      "continuous_native_transit",
+      "observed_closed_door_reopens_and_live_shortcut",
+      "actual_dynamic_obstacle_and_complete",
+      "middle_pause_then_explicit_resume_native",
+      "manual_cancel_no_auto_resume_and_durable_receipts"
+    ],
+    "seed": 0,
+    "amcl_seed": "Nav2 default; stochastic localization is not forced to match one successful run",
+    "zero_body_intrusion": true
+  },
+  "map_tools_native": {
+    "passed": true,
+    "elapsed_s": 57.40937836817466,
+    "cases": [
+      "keepout_both_costmaps_speed_entry_exit_and_aligned_records",
+      "actual_slam_save_resume_local_patch_versions"
+    ],
+    "seed": 0,
+    "amcl_seed": "Nav2 default; stochastic localization is not forced to match one successful run",
+    "zero_body_intrusion": true
+  },
+  "tracking_cases": 8,
+  "planner_position_controls": 4,
+  "preserved_failures": [
+    {
+      "case": "tools-attempt1",
+      "passed": false,
+      "reason": "无法完成导航，速度已归零，请手动处理"
+    },
+    {
+      "case": "tools-attempt2",
+      "passed": false,
+      "reason": "无法完成导航，速度已归零，请手动处理"
+    },
+    {
+      "case": "private_frozen_reverse_start_return",
+      "passed": false,
+      "goal_reached": false,
+      "goal_error_m": 33.0733,
+      "body_intrusions": 0,
+      "scope": "Frozen same-map functional lag/gain replay; map and path remain private"
+    },
+    {
+      "case": "legacy_pivot_long_delay",
+      "still_failed": 6,
+      "total": 12,
+      "new_fix_claimed": false
+    }
+  ]
+}

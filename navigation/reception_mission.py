@@ -186,7 +186,8 @@ class MissionService:
     def observation_document(self):
         with self.engine.lock:
             doc=self.engine.document if self.engine.phase in BUSY else None
-            if doc:return {'map_id':doc['map_id'],'revision':doc['revision'],'doors':copy.deepcopy(doc['doors']),'policy':dict(doc['policy'])}
+            if doc:return {'map_id':doc['map_id'],'revision':doc['revision'],'doors':copy.deepcopy(doc['doors']),
+                           'annotations':copy.deepcopy(doc.get('annotations',[])),'policy':dict(doc['policy'])}
         return self.catalog.summary(self.map_id())
     def command(self, data):
         command = data.get('command')
@@ -202,6 +203,13 @@ class MissionService:
                 if data.get('point_id'):
                     point=next((p for p in doc['points']if p['id']==data['point_id']),None)
                     if point is None:raise ValueError('点位不存在')
+                    if data.get('dock_pose')is not None:
+                        dock=data['dock_pose']
+                        if not isinstance(dock,dict)or any(type(dock.get(k))not in(int,float)or not math.isfinite(dock[k])for k in ('x','y','yaw')):
+                            raise ValueError('附近停靠坐标无效')
+                        if math.hypot(dock['x']-point['x'],dock['y']-point['y'])>3.:raise ValueError('附近停靠超出原目标3米')
+                        point.update(x=dock['x'],y=dock['y'])
+                        if point['yaw']is not None:point['yaw']=math.remainder(dock['yaw'],2*math.pi)
                     route_id='single_visit';doc['routes']=[r for r in doc['routes']if r['id']!=route_id]+[dict(id=route_id,name=point['name'],mode='showcase',loops=1,description='',steps=[dict(point_id=point['id'],speak=True)])]
                 doc,self.route_report=self.decisions.expand(doc,route_id,time.monotonic())
                 self.node.session.configure_obstruction(doc['policy'])

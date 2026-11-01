@@ -12,7 +12,7 @@ from geometry_msgs.msg import PoseStamped,PoseWithCovarianceStamped,Twist
 from nav_msgs.msg import OccupancyGrid,Path as RosPath
 from sensor_msgs.msg import LaserScan
 from nav2_msgs.action import NavigateToPose,ComputePathToPose,NavigateThroughPoses,ComputePathThroughPoses
-from nav2_msgs.msg import SpeedLimit,CollisionMonitorState
+from nav2_msgs.msg import SpeedLimit,CollisionMonitorState,CostmapFilterInfo
 from slam_toolbox.srv import SerializePoseGraph
 from nav2_msgs.srv import SaveMap
 from lifecycle_msgs.srv import GetState
@@ -52,6 +52,8 @@ class Console(Node):
         self.velocity_scale=.5 if gait_profile=='p2-flat-model' else 1.
         qos=QoSProfile(depth=1,durability=DurabilityPolicy.TRANSIENT_LOCAL,reliability=ReliabilityPolicy.RELIABLE)
         self.reception_map=self.create_publisher(OccupancyGrid,'/p2_nav/reception_map',qos)
+        self.keepout_mask=self.create_publisher(OccupancyGrid,'/p2_nav/keepout_mask',qos)
+        self.keepout_info=self.create_publisher(CostmapFilterInfo,'/p2_nav/keepout_filter_info',qos)
         self.create_subscription(OccupancyGrid,'/map',self.on_map,qos)
         if self.gait:self.create_subscription(String,'/p2_nav/path_view',self.on_path_view,10)
         else:self.create_subscription(RosPath,'/plan',self.on_path,10)
@@ -78,11 +80,18 @@ class Console(Node):
         self.reception_catalog=Catalog(runtime/'reception')
         self.reception_cloud=CloudStore(runtime/'reception-cloud')
         self.reception_transfer=ContentTransfer(self.reception_catalog,self.reception_cloud)
+        from reception_annotations import AnnotationLayer
+        from reception_maps import MapLibrary,BundleTransfer
+        self.annotation_layer=AnnotationLayer();self.speed_zone_status={'factor':1.,'active':[]}
+        self.map_library=MapLibrary(runtime/'maps',self.reception_catalog);self.bundle_transfer=BundleTransfer(self.map_library)
+        self.map_update_region=None;self.scan_preview=None
         tts_command=json.loads(os.environ.get('P2_RECEPTION_TTS_COMMAND','null'))
         if tts_command is not None and (not isinstance(tts_command,list) or not tts_command or not all(isinstance(x,str) for x in tts_command)):
             raise ValueError('TTS adapter must be an argv JSON array')
         self.reception_voice=VoiceCache(runtime/'reception-voice-cache',tts_command)
+        self.reception_transfer.on_saved=self.reception_voice.auto_prepare
         self.reception=MissionService(self,self.reception_catalog)
+        self.trace_active_until=0.;self.create_timer(.2,self.capture_reception_trace)
         self.create_subscription(String,'/p2_nav/door_observations',self.on_door_observation,10)
         from reception_doors import DoorOverlay
         from reception_door_worker import DoorWorker
@@ -100,7 +109,7 @@ class Console(Node):
         # Scan and odometry callbacks can arrive in either order. Retain only
         # the newest original scan and wait for its exact-time TF; never use
         # a latest transform or relabel a measurement with a newer timestamp.
-        if self.door_source=='scan':self.pending_reception_scan=msg
+        self.pending_reception_scan=msg
     def process_reception_scan(self):
         msg=self.pending_reception_scan
         if msg is None or self.grid is None:return
@@ -115,9 +124,19 @@ class Console(Node):
                 self.pending_reception_scan=None;raise ValueError('scan_not_horizontal')
             if not 0<len(msg.ranges)<=4096:
                 self.pending_reception_scan=None;raise ValueError('scan_size_invalid')
-            self.door_worker.submit(dict(source_ns=source_ns,source_monotonic=time.monotonic()-age,
+            packet=dict(source_ns=source_ns,source_monotonic=time.monotonic()-age,
                 x=t.translation.x,y=t.translation.y,yaw=yaw,ranges=list(msg.ranges),
-                angle_min=msg.angle_min,angle_increment=msg.angle_increment,range_min=msg.range_min,range_max=msg.range_max))
+                angle_min=msg.angle_min,angle_increment=msg.angle_increment,range_min=msg.range_min,range_max=msg.range_max)
+            # Compact actual finite return overlay; the original ROS header is
+            # retained. UI polling never makes stale scans appear fresh.
+            pts=[]
+            for i,distance in enumerate(msg.ranges):
+                if not math.isfinite(distance)or not msg.range_min<=distance<=msg.range_max:continue
+                angle=yaw+msg.angle_min+i*msg.angle_increment
+                pts.append([t.translation.x+distance*math.cos(angle),t.translation.y+distance*math.sin(angle)])
+            self.scan_preview={'source_ns':source_ns,'frame_id':'map','origin':[t.translation.x,t.translation.y,yaw],
+                               'points':pts[::max(1,math.ceil(len(pts)/600))]}
+            if self.door_source=='scan':self.door_worker.submit(packet)
             self.pending_reception_scan=None
         except Exception as error:
             key=str(error)if isinstance(error,ValueError)else type(error).__name__
@@ -133,7 +152,8 @@ class Console(Node):
         base=self.grid
         if base is None or not hasattr(self,'door_overlay') or document['map_id']!=self.reception.map_id():return
         states=self.reception.decisions.states(document,time.monotonic())
-        key=(self.map_revision,tuple(sorted(states.items())),tuple((d['id'],d['x'],d['y'],d['width'],d['yaw'])for d in document['doors']))
+        annotations=document.get('annotations',[])
+        key=(self.map_revision,tuple(sorted(states.items())),tuple((d['id'],d['x'],d['y'],d['width'],d['yaw'])for d in document['doors']),json.dumps(annotations,sort_keys=True))
         with self._overlay_lock:
             if key==self._overlay_key:return
             q=base.info.origin.orientation
@@ -141,10 +161,21 @@ class Console(Node):
                   'origin':[base.info.origin.position.x,base.info.origin.position.y],'cells':base.data}
             if abs(q.z)>1e-8 or abs(q.x)>1e-8 or abs(q.y)>1e-8:
                 cells=list(base.data);report={'changed_cells':0,'reason':'rotated_map_overlay_unsupported','original_map_modified':False}
-            else:cells,report=self.door_overlay.apply(grid,document,states)
+            else:
+                cells,report=self.door_overlay.apply(grid,document,states)
+                cells,authored=self.annotation_layer.apply(dict(grid,cells=cells),annotations);report.update(authored)
             msg=copy.deepcopy(base);msg.data=cells
             self.navigation_grid=msg;self.overlay_revision+=1;self.overlay_report=report;self._overlay_key=key
             self.reception_map.publish(msg)
+            # A filter mask is an authored instruction layer, not a free-space
+            # measurement. Use the standard KeepoutFilter in BOTH costmaps so
+            # local tracking cannot cut across a globally planned virtual wall.
+            mask=copy.deepcopy(base);mask.data=[0]*len(base.data)
+            if abs(q.z)<=1e-8 and abs(q.x)<=1e-8 and abs(q.y)<=1e-8:
+                mask.data=self.annotation_layer.apply(dict(grid,cells=mask.data),annotations)[0]
+            self.keepout_mask.publish(mask)
+            info=CostmapFilterInfo();info.header=base.header;info.type=0
+            info.filter_mask_topic='/p2_nav/keepout_mask';info.base=0.;info.multiplier=1.;self.keepout_info.publish(info)
 
     def on_authority(self,msg):
         # An attached gait loop has the verified physical sample. Do not race it
@@ -308,12 +339,20 @@ class Console(Node):
         self.goal_handle=self.plan_handle=None;self.pending_nav_accept=self.pending_plan_accept=False
         self.cancel_sent_handles=[];self.accepted_actions={};self.action_results={}
         self.acknowledge_if_quiet(self.session.cancel_generation)
-    def start(self,mode,name,controller):
+    def start(self,mode,name,controller,resume=False,region=None):
         if mode not in ('mapping','navigation') or controller not in ('rpp','mppi'):raise ValueError('模式或控制器无效')
         if not SAFE_NAME.fullmatch(name):raise ValueError('地图名仅允许字母、数字、下划线和连字符')
         map_file=self.runtime/'maps'/name/'mapped.yaml'
         if mode=='navigation' and not map_file.is_file():raise ValueError('请先保存该地图')
         if mode=='navigation':validate_map_metadata(map_file)
+        resume_pose=None
+        if resume:
+            if name!=self.map_name:raise ValueError('当前定位属于另一张地图，请先载入所选地图再继续扫描')
+            if mode!='mapping' or not all((map_file.parent/f).is_file()for f in ('mapped.data','mapped.posegraph')):
+                raise ValueError('这张地图缺少续扫所需的位姿图和扫描数据')
+            resume_pose=self.reception_pose()
+            if resume_pose is None:raise ValueError('缺少当前地图坐标，请在地图上设置续扫起点')
+        if region is not None and not resume:raise ValueError('局部更新需要从原地图续扫')
         with self.lock:
             self.stop_process()
             self.grid=None;self.navigation_grid=None;self._overlay_key=None;self.gate={};self.buffer.clear()
@@ -321,11 +360,18 @@ class Console(Node):
             import yaml
             params=self.runtime/'nav2.yaml';configured=config(controller,minimum_speed=self.minimum_speed,footprint_vertices=self.footprint,odometry_model=self.odometry_model,gait_profile=self.gait_profile,stop_side_margin=float(os.environ.get('P2_NAV_STOP_SIDE_MARGIN','.20')),planning_side_padding=float(os.environ.get('P2_NAV_PLANNING_SIDE_PADDING','.05')),planning_envelope=os.environ.get('P2_NAV_PLANNING_ENVELOPE','stop_clearance'),footprint_padding=float(os.environ.get('P2_NAV_FOOTPRINT_PADDING','.05')))
             configured['global_costmap']['global_costmap']['ros__parameters']['static_layer']['map_topic']='/p2_nav/reception_map'
+            for kind in ('global_costmap','local_costmap'):
+                cm=configured[kind][kind]['ros__parameters'];cm['filters']=['authored_keepout']
+                cm['authored_keepout']={'plugin':'nav2_costmap_2d::KeepoutFilter','enabled':True,
+                    'filter_info_topic':'/p2_nav/keepout_filter_info','transform_tolerance':.1}
             params.write_text(yaml.safe_dump(configured,sort_keys=False))
             from process_scheduling import workflow_command
-            args=workflow_command(ROOT,mode,self.simulation,params,map_file,bool(self.gait))
+            args=workflow_command(ROOT,mode,self.simulation,params,map_file,bool(self.gait),
+                                  map_file.with_suffix('')if resume else None,resume_pose)
             self.process=subprocess.Popen(args,cwd=ROOT,stdout=open(self.runtime/'workflow.log','w'),stderr=subprocess.STDOUT,start_new_session=True)
             self.mode=mode;self.map_name=name;self.controller=controller;self.path=[];self.goal=None
+            self.reception_voice.auto_prepare(self.reception_catalog.read(name))
+            self.map_update_region=region
             self.last_action='正在启动建图' if mode=='mapping' else '正在载入地图和定位'
         return {'mode':mode,'pid':self.process.pid,'simulation':self.simulation}
     def simulated_mapping_route(self,name):
@@ -342,8 +388,13 @@ class Console(Node):
     def save_map(self,name):
         if self.mode!='mapping':raise ValueError('当前不是建图模式')
         if not SAFE_NAME.fullmatch(name):raise ValueError('地图名无效')
-        target=self.runtime/'maps'/name;target.mkdir(parents=True,exist_ok=True)
-        stem=str(target/'mapped')
+        import tempfile,shutil
+        target=self.runtime/'maps'/name;target.parent.mkdir(parents=True,exist_ok=True)
+        temporary=Path(tempfile.mkdtemp(prefix='.save-',dir=target.parent));stem=str(temporary/'mapped')
+        try:return self._save_map_version(name,target,temporary,stem)
+        finally:shutil.rmtree(temporary,ignore_errors=True)
+    def _save_map_version(self,name,target,temporary,stem):
+        import shutil
         for service,typ in [('/map_saver/save_map',SaveMap),('/slam_toolbox/serialize_map',SerializePoseGraph)]:
             client=self.create_client(typ,service)
             if not client.wait_for_service(timeout_sec=5):raise ValueError('建图服务尚未就绪')
@@ -353,9 +404,21 @@ class Console(Node):
             response=self.wait_future(client.call_async(req),25)
             if not (response.result if typ is SaveMap else response.result==0):raise ValueError('地图保存失败')
             self.destroy_client(client)
-        validate_map_metadata(target/'mapped.yaml')
+        validate_map_metadata(temporary/'mapped.yaml')
+        patch=None
+        with self.map_library.lock:
+            if (target/'mapped.yaml').is_file():
+                self.map_library.snapshot(name,'before_save')
+                if self.map_update_region is not None:
+                    from reception_maps import local_patch
+                    patch=local_patch(target,temporary,self.map_update_region)
+            target.mkdir(parents=True,exist_ok=True)
+            from reception_maps import FILES
+            for filename in FILES:
+                if (temporary/filename).is_file():os.replace(temporary/filename,target/filename)
+            version=self.map_library.snapshot(name,'local_update'if patch else 'mapping_save')
         self.last_action='地图与位姿图已保存：'+name
-        return {'saved':name,'files':[p.name for p in target.iterdir()]}
+        return {'saved':name,'files':[p.name for p in target.iterdir()],'version':version,'local_update':patch}
     def checked_pose(self,data,*,require_free=True):
         x,y,yaw=(float(data[k]) for k in ('x','y','yaw'))
         if not all(math.isfinite(v) for v in (x,y,yaw)):raise ValueError('坐标必须是有限数值')
@@ -516,6 +579,31 @@ class Console(Node):
             t=self.buffer.lookup_transform('map','base_link',rclpy.time.Time()).transform;q=t.rotation
             return [t.translation.x,t.translation.y,math.atan2(2*q.w*q.z,1-2*q.z*q.z)]
         except Exception:return None
+    def capture_reception_trace(self):
+        from reception_mission import BUSY
+        now=time.monotonic();mission=self.reception.engine.status()
+        if mission['phase']in BUSY:self.trace_active_until=now+2.
+        if now>self.trace_active_until or not mission.get('run_id'):return
+        sample={'kind':'telemetry','run_id':mission['run_id'],'map_id':self.reception.map_id(),
+                'wall_time':time.time(),'capture_monotonic_ns':time.monotonic_ns(),
+                'mission_phase':mission['phase'],'session_phase':self.session.phase,'pose':None,
+                'pose_valid':self.health_ready(),'collision_stop':self.collision_stop,
+                'goal_generation':self.goal_generation,'path_revision':self.path_revision,
+                'path_source':self.path_source_report,'feedback':self.feedback,'speed_zones':self.speed_zone_status,
+                'gate':{k:self.gate.get(k)for k in ('evaluated_monotonic_ns','velocity_source_monotonic_ns','reason',
+                    'command','body_velocity_feedback','velocity_stages','scan_age','odom_age','localized','ground_ok')},
+                'session_notice':self.session.status(now).get('notice')}
+        try:
+            t=self.buffer.lookup_transform('map','base_link',rclpy.time.Time());q=t.transform.rotation
+            sample.update(pose=[t.transform.translation.x,t.transform.translation.y,math.atan2(2*q.w*q.z,1-2*q.z*q.z)],
+                          pose_source_ros_ns=t.header.stamp.sec*10**9+t.header.stamp.nanosec)
+        except Exception:sample['pose_valid']=False
+        if self.scan_preview:
+            sample['scan']={**self.scan_preview,'points':self.scan_preview['points'][::12],
+                            'age_s':(self.get_clock().now().nanoseconds-self.scan_preview['source_ns'])/1e9}
+        if self.gait:
+            g=self.gait.status();sample['native']={k:v for k,v in g.items()if k not in ('request_token','socket')}
+        self.reception.history.append(sample)
     def cancel_reception_leg(self,epoch):
         with self.lock:
             if not self.reception.engine.valid(epoch):return False
@@ -545,18 +633,40 @@ class Console(Node):
         except (OSError,ValueError):return None
     def reception_status(self,full=False):
         document=self.reception_catalog.read(self.reception.map_id()) if full else self.reception_catalog.summary(self.reception.map_id())
-        result={'map_id':self.reception.map_id(),'revision':document['revision'],'mission':self.reception.engine.status(),'doors':self.reception.decisions.states(self.reception.observation_document(),time.monotonic()),'route_report':self.reception.route_report,'door_evidence':self.door_worker.summary,'door_overlay':self.overlay_report,'door_scan_rejections':dict(self.door_scan_rejections)}
+        result={'map_id':self.reception.map_id(),'revision':document['revision'],'mission':self.reception.engine.status(),'voice_progress':self.reception_voice.summary(self.reception.map_id()),'doors':self.reception.decisions.states(self.reception.observation_document(),time.monotonic()),'route_report':self.reception.route_report,'door_evidence':self.door_worker.summary,'door_overlay':self.overlay_report,'door_scan_rejections':dict(self.door_scan_rejections)}
         if full:result.update(document=document,voice=self.reception_voice.status(document))
         return result
     def reception_save(self,data):
         if not isinstance(data,dict):raise ValueError('导览配置必须是对象')
         operation=data.get('operation','save')
+        if operation=='trace_runs':return self.reception.history.runs(data['map_id'])
+        if operation=='trace_read':return self.reception.history.trace(data['map_id'],data['run_id'],data.get('after',0),data.get('limit',200))
+        if operation.startswith('bundle_'):return self.bundle_transfer.request(data)
+        if operation=='map_versions':return {'versions':self.map_library.versions(data['map_id'])}
+        if operation=='map_snapshot':return self.map_library.snapshot(data['map_id'],'operator_snapshot')
+        if operation=='map_restore':
+            if data['map_id']==self.map_name:self.stop_process();self.mode='idle'
+            return self.map_library.restore(data['map_id'],data['version'])
+        if operation=='map_load':return self.start('navigation',data['map_id'],self.controller)
+        if operation=='map_resume':return self.start('mapping',data['map_id'],self.controller,True,data.get('region'))
+        if operation=='map_save':return self.save_map(data['map_id'])
+        if operation=='pose_correct':
+            if data.get('map_id',self.map_name)!=self.map_name:raise ValueError('校正点属于另一张地图，请先载入所选地图')
+            return self.set_pose(data['pose'])
+        if operation=='nearby':
+            from reception_annotations import nearby_candidates
+            grid=getattr(self,'navigation_grid',None)or self.grid
+            if grid is None:raise ValueError('地图尚未收到')
+            m={'width':grid.info.width,'height':grid.info.height,'resolution':grid.info.resolution,
+               'origin':[grid.info.origin.position.x,grid.info.origin.position.y],'cells':grid.data}
+            return {'candidates':nearby_candidates(m,data['target'],self.footprint or [[.275,.275],[.275,-.275],[-.275,-.275],[-.275,.275]],data.get('radius',1.))}
         if operation=='versions':
             if set(data)!={'operation','map_id'}:raise ValueError('内容历史读取字段无效')
             return self.reception_catalog.versions(data['map_id'])
         if operation=='restore':
             if set(data)!={'operation','map_id','source_revision','expected_revision'}:raise ValueError('内容恢复字段无效')
-            return self.reception_catalog.restore(data['map_id'],data['source_revision'],data['expected_revision'])
+            document=self.reception_catalog.restore(data['map_id'],data['source_revision'],data['expected_revision'])
+            self.reception_voice.auto_prepare(document);return document
         if operation=='history':
             if set(data)-{'operation','map_id','before','limit'}:raise ValueError('历史读取字段无效')
             self.reception_catalog.read(data.get('map_id')or self.reception.map_id())
@@ -577,7 +687,8 @@ class Console(Node):
             if set(data)!={'operation'}:raise ValueError('语音准备字段无效')
             return self.reception_voice.prepare(self.reception_catalog.read(self.reception.map_id()))
         if operation!='save' or set(data)-{'operation','document','expected_revision'}:raise ValueError('导览保存字段无效')
-        return self.reception_catalog.save(data['document'],data['expected_revision'])
+        document=self.reception_catalog.save(data['document'],data['expected_revision'])
+        self.reception_voice.auto_prepare(document);return document
     def reception_api_goal(self,data):
         if 'reception_command' in data:raise ValueError('开始任务应通过开始接口提交')
         if self.reception.engine.phase in ('dispatching','navigating','presenting','guest_wait','dwell','rerouting','waiting_route'):
@@ -600,8 +711,14 @@ class Console(Node):
         self.speed_value=v;self.velocity_scale=float(scale);self.publish_speed()
         return {'speed_m_s':v,'velocity_scale':self.velocity_scale,'effective_speed_m_s':v*self.velocity_scale}
     def publish_speed(self):
-        self.op(speed=self.speed_value,velocity_scale=getattr(self,'velocity_scale',1.))
-        limit=SpeedLimit();limit.percentage=False;limit.speed_limit=self.speed_value;self.limiter.publish(limit)
+        factor=1.;active=[]
+        if hasattr(self,'annotation_layer'):
+            from footprint import DEFAULT
+            radius=max(math.hypot(x,y)for x,y in (self.footprint or DEFAULT))
+            factor,active=self.annotation_layer.speed(self.reception.observation_document().get('annotations',[]),self.reception_pose(),radius)
+        self.speed_zone_status={'factor':factor,'active':active}
+        self.op(speed=self.speed_value*factor,velocity_scale=getattr(self,'velocity_scale',1.))
+        limit=SpeedLimit();limit.percentage=False;limit.speed_limit=self.speed_value*factor;self.limiter.publish(limit)
     def status(self,include_cells=True):
         from feedback_status import read_neck_feedback
         head_feedback=read_neck_feedback(os.getenv('P2_NAV_NECK_FEEDBACK',''),getattr(self,'robot_identity',None))
@@ -623,7 +740,8 @@ class Console(Node):
             'session':self.session.status(time.monotonic()),'map_revision':self.display_revision(),'neck':head_feedback,
             'execution_ready':self.execution_ready(),'gait_transport':getattr(self,'gait',None).status() if getattr(self,'gait',None) else None,'map':None if grid is None else {'width':grid.info.width,'height':grid.info.height,'resolution':grid.info.resolution,
                 'origin':[grid.info.origin.position.x,grid.info.origin.position.y],**({'cells':list(grid.data)} if include_cells else {})},
-            'path':self.path,'goal':self.goal,'feedback':self.feedback,
+            'path':self.path,'goal':self.goal,'feedback':self.feedback,'speed_zones':self.speed_zone_status,
+            'scan_overlay':None if not self.scan_preview else dict(self.scan_preview,age_s=(self.get_clock().now().nanoseconds-self.scan_preview['source_ns'])/1e9),
             **({'truth':self.truth} if self.simulation else {}),
             'maps':sorted(p.parent.name for p in (self.runtime/'maps').glob('*/mapped.yaml')),
             'hardware_execution_enabled':bool(getattr(self,'gait',None) and self.gait.status()['navigation_owned']),
@@ -687,9 +805,10 @@ def main():
         def do_GET(self):
             if urlsplit(self.path).path in ('/','/reception'):
                 guided=urlsplit(self.path).path=='/reception' or parse_qs(urlsplit(self.path).query).get('view') in (['reception'],['operator'])
-                html=(ROOT/('reception.html' if guided else 'console.html')).read_text()
+                from reception_ui import reception_html
+                html=reception_html(ROOT)if guided else (ROOT/'console.html').read_text()
                 if not guided:
-                    app=json.dumps((ROOT/'reception.html').read_text(),ensure_ascii=False).replace('</','<\\/')
+                    app=json.dumps(reception_html(ROOT),ensure_ascii=False).replace('</','<\\/')
                     html=html.replace('/*RECEPTION_APP*/', 'function openReception(){document.open();document.write('+app+');document.close()}')
                 self.send(html.encode(),content_type='text/html; charset=utf-8')
             elif urlsplit(self.path).path=='/api/status':self.send(node.status(include_cells=parse_qs(urlsplit(self.path).query).get('summary')!=['1']))

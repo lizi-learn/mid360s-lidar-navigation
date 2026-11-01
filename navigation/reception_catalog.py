@@ -28,7 +28,7 @@ def text(value, limit=120):
 
 def blank(map_id):
     return {'schema': 1, 'map_id': ident(map_id), 'revision': 0, 'points': [],
-            'products': [], 'routes': [], 'doors': [], 'edges': [],
+            'products': [], 'routes': [], 'doors': [], 'edges': [], 'annotations': [],
             'policy': {'brief_wait': 4., 'max_wait': 25., 'clear_hold': 1.5,
                        'replan_interval': 3., 'shortcut_gain': .2}}
 
@@ -36,6 +36,9 @@ def validate(raw):
     if not isinstance(raw, dict) or set(raw) - set(blank('map')):
         raise ValueError('内容类型或字段无效')
     d = copy.deepcopy(raw)
+    # Schema1 predates authored map layers; old private content remains valid.
+    from reception_annotations import validate_annotations
+    d['annotations']=validate_annotations(d.get('annotations',[]))
     if d.get('schema') != 1 or type(d.get('revision')) is not int or d['revision'] < 0:
         raise ValueError('内容版本无效')
     ident(d.get('map_id'))
@@ -131,7 +134,8 @@ class Catalog:
     def summary(self,map_id):
         with self.lock:
             document=self._load(map_id)
-            return {'map_id':map_id,'revision':document['revision'],'doors':copy.deepcopy(document['doors']),'policy':dict(document['policy'])}
+            return {'map_id':map_id,'revision':document['revision'],'doors':copy.deepcopy(document['doors']),
+                    'annotations':copy.deepcopy(document['annotations']),'policy':dict(document['policy'])}
     def versions(self,map_id):
         with self.lock:
             current=self.read(map_id);rows=[]

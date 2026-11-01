@@ -25,35 +25,56 @@ def checked_clip(path):
 class VoiceCache:
     def __init__(self, root, command=None):
         self.root = Path(root); self.command = command; self.lock = threading.Lock()
-        self.jobs = {}; self.busy = False
+        self.jobs = {}; self.busy = False;self.pending={};self.current='';self.map_scripts={};self.worker_generation=0
+    def auto_prepare(self,document):
+        if self.command:return self.prepare(document)
+        return {'configured':False,'queued':0}
     def status(self, document):
         scripts = {content_key(t): t for p in document['points'] if (t := introduction(document, p))}
         with self.lock:
-            return {'configured': bool(self.command), 'busy': self.busy,
+            return {'configured': bool(self.command), 'busy': self.busy,'queued':len(self.pending),'current_key':self.current,
                     'clips': {k: {'available': (self.root/(k+'.wav')).is_file(), **self.jobs.get(k, {})} for k in scripts}}
+    def summary(self,map_id):
+        with self.lock:
+            keys=self.map_scripts.get(map_id,{})
+            return {'configured':bool(self.command),'busy':self.busy,'queued':len(self.pending),
+                    'ready':sum((self.root/(k+'.wav')).is_file()for k in keys),
+                    'total':len(keys),'failed':sum(self.jobs.get(k,{}).get('result')=='failed'for k in keys)}
     def prepare(self, document):
         if not self.command: raise ValueError('尚未配置讲解语音合成适配器；文字与路线可正常编辑')
         scripts = {content_key(t): t for p in document['points'] if (t := introduction(document, p))}
         with self.lock:
-            if self.busy: raise ValueError('上一批讲解音频仍在生成')
-            self.busy = True
+            self.map_scripts[document['map_id']]=scripts
+            while len(self.map_scripts)>20:self.map_scripts.pop(next(iter(self.map_scripts)))
+            wanted={k:t for rows in self.map_scripts.values()for k,t in rows.items()}
+            self.pending={k:t for k,t in wanted.items()if not(self.root/(k+'.wav')).is_file()and k!=self.current}
+            for key in self.pending:self.jobs[key]={'result':'queued'}
+            if self.busy:return {'queued':len(self.pending),'merged':True}
+            self.busy = True;self.worker_generation+=1;generation=self.worker_generation
         def run():
             try:
                 self.root.mkdir(parents=True, exist_ok=True)
-                for key, script in scripts.items():
+                while True:
+                    with self.lock:
+                        if not self.pending:self.busy=False;self.current='';return
+                        key=next(iter(self.pending));script=self.pending.pop(key);self.current=key
+                        self.jobs[key]={'result':'generating'}
                     clip = self.root/(key+'.wav'); temporary = self.root/(key+'.pending.wav')
                     if clip.is_file(): continue
                     try:
                         result = subprocess.run(self.command, input=json.dumps({'text': script, 'output': str(temporary)}).encode(),
                                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=45, check=False)
-                        if result.returncode: raise ValueError('合成适配器返回错误')
+                        if result.returncode:
+                            with self.lock:self.jobs[key]={'result':'failed','error':'adapter_exit','returncode':result.returncode}
+                            temporary.unlink(missing_ok=True);continue
                         duration = checked_clip(temporary); temporary.replace(clip)
                         with self.lock: self.jobs[key] = {'result': 'ready', 'seconds': duration}
                     except Exception as error:
                         with self.lock: self.jobs[key] = {'result': 'failed', 'error': type(error).__name__}
                         temporary.unlink(missing_ok=True)
             finally:
-                with self.lock: self.busy = False
+                with self.lock:
+                    if self.worker_generation==generation:self.busy = False;self.current=''
         threading.Thread(target=run, daemon=True, name='reception-voice-cache').start()
         return {'queued': len(scripts)}
 

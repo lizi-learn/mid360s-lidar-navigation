@@ -33,6 +33,15 @@ class Sandbox:
         self.pose=[0.,0.,0.];self.path=[];self.active=False;self.operator='navigation_allowed';self.sequence=0
         self.speech=None;self.velocity=[0.,0.,0.];self.closed=threading.Event();self.commands=[]
         self.map=self.make_map();self.reception=MissionService(self,self.reception_catalog)
+        from reception_annotations import AnnotationLayer
+        from reception_maps import MapLibrary,BundleTransfer
+        self.annotation_layer=AnnotationLayer();self.map_library=MapLibrary(self.runtime/'maps',self.reception_catalog);self.bundle_transfer=BundleTransfer(self.map_library)
+        self.last_trace=0.
+        import yaml
+        path=self.runtime/'maps'/self.map_name;path.mkdir(parents=True,exist_ok=True);m=self.map
+        pixels=bytes(0 if v>=65 else 205 if v<0 else 254 for y in reversed(range(m['height']))for v in m['cells'][y*m['width']:(y+1)*m['width']])
+        (path/'mapped.pgm').write_bytes(f"P5\n{m['width']} {m['height']}\n255\n".encode()+pixels)
+        (path/'mapped.yaml').write_text(yaml.safe_dump(dict(image='mapped.pgm',mode='trinary',resolution=m['resolution'],origin=[*m['origin'],0.],negate=0,free_thresh=.196,occupied_thresh=.65)))
         self.thread=threading.Thread(target=self.run,daemon=True);self.thread.start()
     def make_map(self):
         w,h,res=180,80,.1;origin=[-2.,-4.];cells=[]
@@ -44,13 +53,13 @@ class Sandbox:
         return {'width':w,'height':h,'resolution':res,'origin':origin,'cells':cells}
     def free(self,x,y):
         # Full cell rectangle of a .55 m square; no nine-sample corner shortcut.
-        m=self.map;r=m['resolution']
+        m=getattr(self,'planning_map',self.map);r=m['resolution']
         left=math.floor((x-.275-m['origin'][0])/r);right=math.floor((x+.275-m['origin'][0])/r)
         bottom=math.floor((y-.275-m['origin'][1])/r);top=math.floor((y+.275-m['origin'][1])/r)
         if left<0 or bottom<0 or right>=m['width']or top>=m['height']:return False
         return all(m['cells'][j*m['width']+i]==0 for j in range(bottom,top+1) for i in range(left,right+1))
     def plan(self,x,y):
-        m=self.map;r=.2
+        self.planning_map=dict(self.map,cells=self.annotation_layer.apply(self.map,self.reception_catalog.read(self.map_name).get('annotations',[]))[0]);m=self.planning_map;r=.2
         start=(round(self.pose[0]/r),round(self.pose[1]/r));goal=(round(x/r),round(y/r))
         heap=[(0,start)];best={start:0.};parent={};found=False
         while heap and len(best)<20000:
@@ -96,6 +105,15 @@ class Sandbox:
     def save(self,data):
         if set(data)!={'reception'}:raise ValueError('沙箱只接收导览内容')
         r=data['reception'];op=r.get('operation')
+        if op.startswith('bundle_'):return self.bundle_transfer.request(r)
+        if op=='map_versions':return {'versions':self.map_library.versions(r['map_id'])}
+        if op=='trace_runs':return self.reception.history.runs(r['map_id'])
+        if op=='trace_read':return self.reception.history.trace(r['map_id'],r['run_id'],r.get('after',0),r.get('limit',200))
+        if op=='pose_correct':self.stop();self.pose=[r['pose'][k]for k in ('x','y','yaw')];return {'simulation_only':True}
+        if op=='nearby':
+            from reception_annotations import nearby_candidates
+            return {'candidates':nearby_candidates(self.map,r['target'],[[.275,.275],[.275,-.275],[-.275,-.275],[-.275,.275]])}
+        if op.startswith('map_'):raise ValueError('合成预览未运行SLAM；该操作需实际建图服务')
         if op=='versions':return self.reception_catalog.versions(r['map_id'])
         if op=='restore':return self.reception_catalog.restore(r['map_id'],r['source_revision'],r['expected_revision'])
         if op=='history':return self.reception.history.read(r.get('map_id')or self.map_name,r.get('before'),r.get('limit',100))
@@ -112,11 +130,14 @@ class Sandbox:
                 'request_token':self.request_token,'robot_name':'P2 · 合成展厅','mode':'navigation','pose':self.pose[:],
                 'map_revision':1,'maps':[self.map_name],'path':self.path,'session':self.session.status(time.monotonic()),
                 'reception':{'map_id':self.map_name,'mission':self.reception.engine.status()},'hardware_control_requests':0,
-                'model_start_requests':len(self.commands),'audio_feedback':{'enabled':True,'volume':55}}
+                'scan_overlay':{'source_ns':time.time_ns(),'frame_id':'map','origin':self.pose[:],'points':[],'age_s':0.,'scope':'synthetic model only'},'model_start_requests':len(self.commands),'audio_feedback':{'enabled':True,'volume':55}}
     def run(self):
         last=time.monotonic()
         while not self.closed.wait(.02):
             now=time.monotonic();dt=min(now-last,.05);last=now;self.sequence+=1
+            m=self.reception.engine.status()
+            if m['run_id']and m['phase']in ('dispatching','navigating','rerouting','waiting_route','dwell','presenting','guest_wait')and now-self.last_trace>=.2:
+                self.last_trace=now;self.reception.history.append(dict(kind='telemetry',run_id=m['run_id'],map_id=self.map_name,wall_time=time.time(),capture_monotonic_ns=time.monotonic_ns(),pose=self.pose[:],pose_valid=True,pose_source_ros_ns=None,mission_phase=m['phase'],session_phase=self.session.phase,gate={'command':self.velocity[:]},collision_stop=False,scope='synthetic planar model feedback, no robot'))
             with self.lock:
                 self.session.operator(self.operator,True,True,False,1,self.sequence,now,now)
                 self.session.poll(now)
@@ -147,7 +168,9 @@ def main():
             self.send_response(status);self.send_header('Content-Type',kind);self.send_header('Cache-Control','no-store');self.send_header('Content-Length',str(len(raw)));self.end_headers();self.wfile.write(raw)
         def do_GET(self):
             path=urlsplit(self.path).path
-            if path in ('/','/reception'):self.send((ROOT/'navigation/reception.html').read_bytes(),kind='text/html; charset=utf-8')
+            if path in ('/','/reception'):
+                from reception_ui import reception_html
+                self.send(reception_html(ROOT/'navigation').encode(),kind='text/html; charset=utf-8')
             elif path=='/api/status':self.send(node.status())
             elif path=='/api/map':self.send({'revision':1,'map':node.map})
             else:self.send({'error':'Not found'},404)

@@ -8,7 +8,7 @@ from pathlib import Path
 ROOT=Path(__file__).resolve().parents[2];NAV=ROOT/'navigation';sys.path.insert(0,str(NAV))
 
 def main():
-    ap=argparse.ArgumentParser();ap.add_argument('--output',required=True);ap.add_argument('--setup',required=True);ap.add_argument('--port',type=int,default=8947);ap.add_argument('--domain',type=int,default=208);ap.add_argument('--stop-profile',choices=['baseline-directional','legacy-rectangle'],default='baseline-directional');ap.add_argument('--scenario',choices=['transit','all','obstacle'],default='all');args=ap.parse_args()
+    ap=argparse.ArgumentParser();ap.add_argument('--output',required=True);ap.add_argument('--setup',required=True);ap.add_argument('--port',type=int,default=8947);ap.add_argument('--domain',type=int,default=208);ap.add_argument('--stop-profile',choices=['baseline-directional','legacy-rectangle'],default='baseline-directional');ap.add_argument('--scenario',choices=['transit','all','obstacle','tools','maps'],default='all');args=ap.parse_args()
     out=Path(args.output).resolve().parent
     if out.exists()and any(out.iterdir()):raise ValueError('Use a new output directory; old failures are retained')
     out.mkdir(parents=True,exist_ok=True);runtime=out/'runtime';runtime.mkdir()
@@ -67,9 +67,12 @@ def main():
             from rclpy.node import Node
             from std_msgs.msg import String
             from sensor_msgs.msg import LaserScan
+            from nav2_msgs.msg import Costmap
             from rclpy.qos import qos_profile_sensor_data
-            rclpy.init();self.rclpy=rclpy;self.String=String;self.node=Node('reception_synthetic_scenario');self.scan=None
+            rclpy.init();self.rclpy=rclpy;self.String=String;self.node=Node('reception_synthetic_scenario');self.scan=None;self.local_map=None;self.global_map=None
             self.pub=self.node.create_publisher(String,'/p2_nav/sim_control',10)
+            self.local_sub=self.node.create_subscription(Costmap,'/local_costmap/costmap_raw',lambda m:setattr(self,'local_map',m),10)
+            self.global_sub=self.node.create_subscription(Costmap,'/global_costmap/costmap_raw',lambda m:setattr(self,'global_map',m),10)
             self.sub=self.node.create_subscription(LaserScan,'/scan',lambda m:setattr(self,'scan',m),qos_profile_sensor_data)
         def spin(self):self.rclpy.spin_once(self.node,timeout_sec=0.)
         def control(self,data):
@@ -91,7 +94,7 @@ def main():
         call('/api/sim_operator',{'mode':'navigation_allowed'});wait(lambda d:d['session']['navigation_permitted'],5)
         call('/api/speed',{'speed':.75,'velocity_scale':.5})
         d=status();doc=blank('native_showroom')
-        if args.scenario!='obstacle':
+        if args.scenario not in ('obstacle','tools','maps'):
             doc=blank('native_showroom');doc['points']=[point('a',2.8,2.5),point('b',3.6,2.5),point('c',4.4,2.5,'visit')]
             doc['routes']=[{'id':'tour','name':'continuous transit','mode':'showcase','loops':1,'description':'synthetic','steps':[{'point_id':i,'speak':False}for i in ['a','b','c']]}]
             doc=save(doc);start(doc);d=complete();mission=d['reception']['mission']
@@ -161,6 +164,42 @@ def main():
             history=call('/api/save',{'reception':{'operation':'history','map_id':doc['map_id']}})
             assert any(e['kind']=='resumed'for e in history['events'])and any(e['kind']=='manual'for e in history['events'])
             events.append({'case':'manual_cancel_no_auto_resume_and_durable_receipts','passed':True,'history_events':len(history['events'])})
+        if args.scenario=='tools':
+            ros=ScenarioROS()
+            doc=blank('native_showroom');doc['points']=[point('end',5.2,2.5,'visit')]
+            doc['routes']=[dict(id='tour',name='annotated detour',mode='showcase',loops=1,description='',steps=[dict(point_id='end',speak=False)])]
+            doc['annotations']=[dict(id='line',name='authored line',kind='keepout',vertices=[[3.5,2.0],[3.5,3.0]],width=.10),dict(id='slow',name='slow zone',kind='speed',vertices=[[1.,1.],[3.,1.],[3.,4.],[1.,4.]],factor=.5)]
+            doc=save(doc)
+            def lethal(grid,x,y):
+                if grid is None:return False
+                m=grid.metadata;ix=math.floor((x-m.origin.position.x)/m.resolution);iy=math.floor((y-m.origin.position.y)/m.resolution)
+                return 0<=ix<m.size_x and 0<=iy<m.size_y and grid.data[iy*m.size_x+ix]>=254
+            d=wait(lambda d:lethal(ros.local_map,3.5,2.5)and lethal(ros.global_map,3.5,2.5)and d.get('speed_zones',{}).get('factor')==.5,15)
+            assert d['reception']['door_overlay']['keepout_cells']>0
+            witness={'local_lethal':True,'global_lethal':True,'actual_speed_factor':d['speed_zones'],'source_scan_ns':d['scan_overlay']['source_ns']}
+            start(doc);d=complete()
+            cross=[t['truth']['pose']for t in trace if abs(t['truth']['pose'][0]-3.5)<.08]
+            assert cross and all(p[1]<1.7 or p[1]>3.3 for p in cross),cross
+            wait(lambda d:d['speed_zones']['factor']==1.,5)
+            run=d['reception']['mission']['run_id'];history=call('/api/save',{'reception':dict(operation='trace_read',map_id=doc['map_id'],run_id=run,limit=200)})
+            assert len(history['samples'])>5 and all(s.get('pose_source_ros_ns')and s['gate'].get('evaluated_monotonic_ns')for s in history['samples'])
+            assert any(s['speed_zones']['factor']==.5 for s in history['samples'])
+            doc['annotations']=[];doc=save(doc);wait(lambda d:d['reception']['door_overlay']['keepout_cells']==0,5)
+            events.append(dict(case='keepout_both_costmaps_speed_entry_exit_and_aligned_records',passed=True,witness=witness,recorded_samples=len(history['samples']),crossings=cross))
+        if args.scenario in ('tools','maps'):
+            call('/api/start',dict(mode='mapping',name='resumable_map',controller='rpp'))
+            wait(lambda d:d['mode']=='mapping'and d.get('pose')and d.get('scan_overlay')and d['gate'].get('data_fresh'),35)
+            time.sleep(2.)
+            saved=call('/api/save',{'reception':dict(operation='map_save',map_id='resumable_map')})
+            assert all((runtime/'maps/resumable_map'/f).is_file()for f in ('mapped.data','mapped.posegraph'))
+            resumed=call('/api/save',{'reception':dict(operation='map_resume',map_id='resumable_map',region=[[0.,0.],[2.,0.],[2.,2.],[0.,2.]])})
+            wait(lambda d:d['mode']=='mapping'and d.get('pose')and d['gate'].get('data_fresh'),35);time.sleep(2.)
+            updated=call('/api/save',{'reception':dict(operation='map_save',map_id='resumable_map')})
+            assert updated['local_update']['outside_region_changed']==0
+            versions=call('/api/save',{'reception':dict(operation='map_versions',map_id='resumable_map')})
+            assert len(versions['versions'])>=3
+            events.append(dict(case='actual_slam_save_resume_local_patch_versions',passed=True,first_save=saved,local_update=updated,versions=versions))
+            d=status()
         report={'passed':True,'cases':events,'final_pose':d['pose'],'truth':d['truth'],'elapsed_s':time.monotonic()-started,
                 'stop_profile':args.stop_profile,'fixture_seed':0,'amcl_seed':'Nav2 default; stochastic localization is not forced to match one successful run','hardware_commands':0,'interfaces':os.listdir('/sys/class/net'),'source_sha':{str(p.relative_to(ROOT)):hashlib.sha256(p.read_bytes()).hexdigest()for p in [NAV/'console.py',NAV/'reception_mission.py',NAV/'reception_doors.py',NAV/'sim_world.py']},
                 'scope':'Actual Console, ROS2/Nav2 actions and projected-ray plant, unchanged55cm full-body model. No RL or physical robot acceptance.'}

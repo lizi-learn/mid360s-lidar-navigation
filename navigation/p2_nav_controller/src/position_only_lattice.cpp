@@ -13,17 +13,32 @@
 #include "p2_nav_controller/position_guide.hpp"
 namespace p2_nav_controller {
 class PositionOnlyLattice : public nav2_smac_planner::SmacPlannerLattice {
+  std::vector<unsigned> occupied_;
+  void prepare_map() {
+    const unsigned w=_costmap->getSizeInCellsX(),h=_costmap->getSizeInCellsY(),stride=w+1;
+    occupied_.assign((w+1)*(h+1),0);
+    for(unsigned y=0;y<h;++y)for(unsigned x=0;x<w;++x)
+      occupied_[(y+1)*stride+x+1]=(_costmap->getCost(x,y)>=254)+occupied_[y*stride+x+1]+occupied_[(y+1)*stride+x]-occupied_[y*stride+x];
+  }
+  bool empty_box(unsigned ax,unsigned ay,unsigned bx,unsigned by) {
+    const unsigned stride=_costmap->getSizeInCellsX()+1;
+    return occupied_[(by+1)*stride+bx+1]-occupied_[ay*stride+bx+1]-occupied_[(by+1)*stride+ax]+occupied_[ay*stride+ax]==0;
+  }
   bool clear(double x,double y,double yaw,double margin=0.) {
     nav2_costmap_2d::FootprintCollisionChecker<nav2_costmap_2d::Costmap2D*> checker(_costmap);
     auto body=_costmap_ros->getRobotFootprint();
     if(margin>0.)nav2_costmap_2d::padFootprint(body,margin);
-    if(checker.footprintCostAtPose(x,y,yaw,body)>=254)return false;
     // Outline checking alone can miss an occupied cell inside a large body.
     std::vector<std::array<double,2>> polygon;
     double lx=x,ux=x,ly=y,uy=y;const double c=std::cos(yaw),s=std::sin(yaw);
     for(const auto &p:body){double px=x+c*p.x-s*p.y,py=y+s*p.x+c*p.y;polygon.push_back({px,py});lx=std::min(lx,px);ux=std::max(ux,px);ly=std::min(ly,py);uy=std::max(uy,py);}
     unsigned ax,ay,bx,by;
     if(!_costmap->worldToMap(lx,ly,ax,ay)||!_costmap->worldToMap(ux,uy,bx,by))return false;
+    // Integral image belongs to this locked planning snapshot only. In empty
+    // boxes every interior/outline cell is known clear; mixed boxes retain the
+    // exact original filled-polygon checks below. Never cache across updates.
+    if(empty_box(ax?ax-1:0,ay?ay-1:0,std::min(bx+1,_costmap->getSizeInCellsX()-1),std::min(by+1,_costmap->getSizeInCellsY()-1)))return true;
+    if(checker.footprintCostAtPose(x,y,yaw,body)>=254)return false;
     const double half=_costmap->getResolution()/2.;
     for(int iy=std::max(0,static_cast<int>(ay)-1);iy<=std::min(static_cast<int>(_costmap->getSizeInCellsY())-1,static_cast<int>(by)+1);++iy)
     for(int ix=std::max(0,static_cast<int>(ax)-1);ix<=std::min(static_cast<int>(_costmap->getSizeInCellsX())-1,static_cast<int>(bx)+1);++ix) {
@@ -49,6 +64,7 @@ class PositionOnlyLattice : public nav2_smac_planner::SmacPlannerLattice {
     const double r=_costmap->getResolution(),ox=_costmap->getOriginX(),oy=_costmap->getOriginY();
     const int lx=std::floor((x-radius-ox)/r),ux=std::floor((x+radius-ox)/r),ly=std::floor((y-radius-oy)/r),uy=std::floor((y+radius-oy)/r);
     if(lx<0||ly<0||ux>=static_cast<int>(_costmap->getSizeInCellsX())||uy>=static_cast<int>(_costmap->getSizeInCellsY()))return false;
+    if(empty_box(lx,ly,ux,uy))return true;
     for(int iy=ly;iy<=uy;++iy)for(int ix=lx;ix<=ux;++ix)if(_costmap->getCost(ix,iy)>=254){double px,py;_costmap->mapToWorld(ix,iy,px,py);if(std::hypot(std::max(0.,std::abs(px-x)-r/2),std::max(0.,std::abs(py-y)-r/2))<=radius)return false;}
     return true;
   }
@@ -108,8 +124,8 @@ class PositionOnlyLattice : public nav2_smac_planner::SmacPlannerLattice {
     auto seed=start;
     {
       std::unique_lock<nav2_costmap_2d::Costmap2D::mutex_t> lock(*_costmap->getMutex());
+      prepare_map();
       if(clear(direct,.08))return message(direct,goal.header);
-      guide=position_guide(_costmap->getCharMap(),_costmap->getSizeInCellsX(),_costmap->getSizeInCellsY(),_costmap->getResolution(),_costmap->getOriginX(),_costmap->getOriginY(),{x,y},{gx,gy});
       // Point targets need no terminal heading. Checked pivot/straight
       // visibility connections also avoid a car-like turnaround search. Joints
       // are places where the unchanged body can pivot; narrow straight gaps
@@ -117,10 +133,14 @@ class PositionOnlyLattice : public nav2_smac_planner::SmacPlannerLattice {
       // Prefer tracking room when available. These are route-search costs,
       // not a larger accepted body: narrow valid routes still fall back to the
       // original full footprint. One shared bound covers all preferences.
-      const auto visibility_deadline=std::chrono::steady_clock::now()+std::chrono::milliseconds(750);
-      for(double margin:{.08,.04,0.}) {
-        auto connected=visibility(guide,yaw,margin,visibility_deadline);
-        if(!connected.empty())return message(connected,goal.header);
+      const auto visibility_deadline=std::chrono::steady_clock::now()+std::chrono::milliseconds(900);
+      for(double centre_clearance:{.48,.40,.28,0.}) {
+        auto candidate=position_guide(_costmap->getCharMap(),_costmap->getSizeInCellsX(),_costmap->getSizeInCellsY(),_costmap->getResolution(),_costmap->getOriginX(),_costmap->getOriginY(),{x,y},{gx,gy},centre_clearance);
+        if(centre_clearance==0.)guide=candidate;
+        for(double margin:{.08,.04,0.}) {
+          auto connected=visibility(candidate,yaw,margin,visibility_deadline);
+          if(!connected.empty())return message(connected,goal.header);
+        }
       }
       if(guide.size()>1) {
         requested.pose.orientation=nav2_util::geometry_utils::orientationAroundZAxis(heading(gx,gy,guide_heading(guide,true)));
@@ -135,6 +155,7 @@ class PositionOnlyLattice : public nav2_smac_planner::SmacPlannerLattice {
     auto *original=_costmap;
     nav2_costmap_2d::Costmap2D frozen;
     {std::unique_lock<nav2_costmap_2d::Costmap2D::mutex_t> lock(*original->getMutex());frozen=*original;}
+    _costmap=&frozen;prepare_map();_costmap=original;
     nav2_costmap_2d::Costmap2D search(frozen);
     const auto saved_checker=_collision_checker;
     struct Restore {

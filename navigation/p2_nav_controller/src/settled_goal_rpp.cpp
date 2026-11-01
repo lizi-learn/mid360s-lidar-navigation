@@ -21,6 +21,8 @@ class SettledGoalRPP : public nav2_regulated_pure_pursuit_controller::RegulatedP
     node->get_parameter(name+".minimum_pivot_input",minimum_pivot_);
     nav2_util::declare_parameter_if_not_declared(node,name+".collision_lookahead_floor",rclcpp::ParameterValue(0.));
     node->get_parameter(name+".collision_lookahead_floor",collision_lookahead_floor_);
+    nav2_util::declare_parameter_if_not_declared(node,name+".corner_preview",rclcpp::ParameterValue(false));
+    node->get_parameter(name+".corner_preview",corner_preview_);
     if(!std::isfinite(collision_lookahead_floor_)||collision_lookahead_floor_<0||collision_lookahead_floor_>min_lookahead_dist_)
       throw nav2_core::PlannerException("Invalid collision lookahead floor");
     if(!std::isfinite(minimum_pivot_)||minimum_pivot_<0||minimum_pivot_>rotate_to_heading_angular_vel_)
@@ -89,7 +91,20 @@ class SettledGoalRPP : public nav2_regulated_pure_pursuit_controller::RegulatedP
       SettledGoalRPP *self;std::unique_lock<std::mutex> &lock;double lo,hi;
       ~Restore(){if(!lock.owns_lock())lock.lock();self->min_lookahead_dist_=lo;self->max_lookahead_dist_=hi;}
     } restore{this,lock,lo,hi};
-    std::vector<double> previews{lo};
+    double preview=lo;
+    if(corner_preview_) {
+      auto local=transformGlobalPlan(pose);
+      std::vector<geometry_msgs::msg::Point> points;
+      for(const auto &p:local.poses)if(points.empty()||std::hypot(p.pose.position.x-points.back().x,p.pose.position.y-points.back().y)>.005)points.push_back(p.pose.position);
+      for(size_t i=1;i+1<points.size();++i) {
+        const auto &a=points[i-1];const auto &b=points[i];const auto &c=points[i+1];
+        const double turn=std::abs(std::remainder(std::atan2(c.y-b.y,c.x-b.x)-std::atan2(b.y-a.y,b.x-a.x),2*std::acos(-1.)));
+        const double distance=std::hypot(b.x,b.y);
+        if(turn>.5&&distance>.10&&distance<preview)preview=std::max(.20,distance);
+      }
+      min_lookahead_dist_=std::min(lo,preview);max_lookahead_dist_=std::min(hi,preview);
+    }
+    std::vector<double> previews{preview};
     if(collision_lookahead_floor_>0.)for(double value:{.9,.7,collision_lookahead_floor_})
       if(value<previews.back()-1e-6&&value>=collision_lookahead_floor_)previews.push_back(value);
     std::string last="No collision-free tracking command";
@@ -135,7 +150,7 @@ class SettledGoalRPP : public nav2_regulated_pure_pursuit_controller::RegulatedP
     throw nav2_core::PlannerException(last);
   }
   std::mutex phase_mutex_; TerminalHeading phase_; geometry_msgs::msg::PoseStamped goal_;
-  PivotBreakaway breakaway_;double minimum_pivot_=0.,collision_lookahead_floor_=0.;bool have_goal_=false;
+  PivotBreakaway breakaway_;double minimum_pivot_=0.,collision_lookahead_floor_=0.;bool have_goal_=false,corner_preview_=false;
 };
 }
 PLUGINLIB_EXPORT_CLASS(p2_nav_controller::SettledGoalRPP,nav2_core::Controller)

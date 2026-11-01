@@ -157,6 +157,23 @@ jobs:
           name: reception-native-evidence
           path: /tmp/reception-native
           if-no-files-found: ignore
+      - name: Authored keepout in both costmaps, speed area, records and actual SLAM resume
+        shell: bash
+        env:
+          ROS_LOCALHOST_ONLY: '1'
+          ROS_DOMAIN_ID: '208'
+          RMW_IMPLEMENTATION: rmw_cyclonedds_cpp
+        run: |
+          source /opt/ros/humble/setup.bash
+          source nav_controller_ws/install/setup.bash
+          export CYCLONEDDS_URI="file://$PWD/config/cyclonedds-local.xml"
+          timeout 240s python3 experiments/reception/check_native.py --setup "$GITHUB_WORKSPACE/nav_controller_ws/install/setup.bash" --output /tmp/reception-map-tools/report.json --scenario tools
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: reception-map-tools-evidence
+          path: /tmp/reception-map-tools
+          if-no-files-found: ignore
       - run: bash experiments/continuous_forward/build.sh
       - run: bash experiments/continuous_forward/check_collision.sh
 
