@@ -3,6 +3,7 @@
 // unknown-source stop before publishing any velocity. Never infer obstacles
 // from a zero command or substitute a duplicate polygon implementation.
 #include <chrono>
+#include <cmath>
 #include <memory>
 #include <vector>
 #include "nav2_collision_monitor/collision_monitor_node.hpp"
@@ -59,6 +60,7 @@ class ObservedCollisionMonitor : public nav2_collision_monitor::CollisionMonitor
   rclcpp_lifecycle::LifecyclePublisher<std_msgs::msg::Bool>::SharedPtr source_health_;
   std::vector<std::shared_ptr<ObservationValidity>> checks_;
   rclcpp::TimerBase::SharedPtr observation_timer_;
+  bool stop_on_predicted_collision_{false};
 public:
   explicit ObservedCollisionMonitor(const rclcpp::NodeOptions &options)
   : CollisionMonitor(options) {}
@@ -66,6 +68,9 @@ protected:
   nav2_util::CallbackReturn on_configure(const rclcpp_lifecycle::State &s) override {
     const auto result=CollisionMonitor::on_configure(s);
     if(result!=nav2_util::CallbackReturn::SUCCESS)return result;
+    nav2_util::declare_parameter_if_not_declared(shared_from_this(),"stop_on_predicted_collision",
+      rclcpp::ParameterValue(false));
+    stop_on_predicted_collision_=get_parameter("stop_on_predicted_collision").as_bool();
     nav2_util::declare_parameter_if_not_declared(shared_from_this(),"state_topic",
       rclcpp::ParameterValue("/p2_nav/collision_state"));
     state_=create_publisher<State>(get_parameter("state_topic").as_string(),1);
@@ -144,10 +149,25 @@ protected:
     for(const auto &polygon:polygons_) {
       if(!polygon->getEnabled() || action.action_type==STOP)continue;
       const auto type=polygon->getActionType();
+      if(type==APPROACH && stop_on_predicted_collision_) {
+        polygon->updatePolygon();std::vector<Point> body;polygon->getPolygon(body);
+        double area=0.;bool valid_body=body.size()>=3;
+        for(std::size_t i=0;i<body.size();++i) {
+          const auto &p=body[i],&q=body[(i+1)%body.size()];
+          valid_body=valid_body && std::isfinite(p.x) && std::isfinite(p.y);
+          area+=p.x*q.y-p.y*q.x;
+        }
+        if(!valid_body || !std::isfinite(area) || std::abs(area)<1.e-6) {
+          action={STOP,{0.,0.,0.}};cause=polygon;continue;
+        }
+      }
       const bool selected=(type==STOP || type==SLOWDOWN)
         ? processStopSlowdown(polygon,points,requested,action)
         : type==APPROACH && processApproach(polygon,points,requested,action);
-      if(selected)cause=polygon;
+      if(selected) {
+        cause=polygon;
+        if(type==APPROACH && stop_on_predicted_collision_)action={STOP,{0.,0.,0.}};
+      }
     }
     if(action.action_type!=robot_action_prev_.action_type)printAction(action,cause);
     publishVelocity(action);publishPolygons();robot_action_prev_=action;

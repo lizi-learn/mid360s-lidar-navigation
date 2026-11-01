@@ -199,6 +199,27 @@ def apply_runtime_geometry(params_file):
     path.write_text(yaml.safe_dump(params,sort_keys=False))
     return True
 
+def apply_directional_stop(params_file):
+    """Use the actual costmap body and native Nav2 trajectory prediction.
+
+    This is an explicit optional P2 runtime profile. A predicted collision
+    produces STOP, rather than a second hidden policy-input slowdown.
+    """
+    path=Path(params_file);params=yaml.safe_load(path.read_text())
+    grid=params['local_costmap']['local_costmap']['ros__parameters']
+    shape=checked(json.loads(grid['footprint']));padding=float(grid.get('footprint_padding',0.))
+    body=[[x+math.copysign(padding,x),y+math.copysign(padding,y)]for x,y in shape]
+    checked(body)
+    monitor=params['collision_monitor']['ros__parameters']
+    threshold=monitor['StopZone']['max_points']
+    monitor['StopZone'].update(points=[v for p in body for v in p],action_type='stop')
+    monitor['SweptZone']=dict(type='polygon',action_type='approach',max_points=threshold,
+        time_before_collision=1.0,simulation_time_step=.02,
+        footprint_topic='/local_costmap/published_footprint',visualize=True,polygon_pub_topic='swept_zone')
+    monitor['polygons']=['StopZone','SweptZone']
+    monitor['stop_on_predicted_collision']=True
+    path.write_text(yaml.safe_dump(params,sort_keys=False))
+
 def main():
     p=argparse.ArgumentParser();p.add_argument('--controller',choices=['rpp','mppi'],default='rpp');p.add_argument('--output',required=True)
     p.add_argument('--minimum-speed',type=float,default=.03)

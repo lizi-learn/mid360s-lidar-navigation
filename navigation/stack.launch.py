@@ -15,8 +15,9 @@ def setup(context):
     mode=get('mode');simulation=get('simulation')=='true';params=get('params');map_file=get('map')
     from process_scheduling import background_prefix
     background=background_prefix(get('physical_gait')=='true')
-    from configure import apply_runtime_geometry
+    from configure import apply_runtime_geometry,apply_directional_stop
     apply_runtime_geometry(params)
+    if os.getenv('P2_NAV_DIRECTIONAL_STOP')=='true':apply_directional_stop(params)
     assert mode in ('mapping','navigation')
     common={'use_sim_time':False}
     nodes=[]
