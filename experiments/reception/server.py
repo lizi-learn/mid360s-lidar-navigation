@@ -67,7 +67,13 @@ class Sandbox:
         path.reverse();return path or [[x,y]]
     def set_goal(self,data):
         with self.lock:
-            g=self.session.prepare(data,time.monotonic());self.path=self.plan(data['x'],data['y']);self.target=data
+            g=self.session.prepare(data,time.monotonic());self.path=[];self.target=data
+            start=self.pose[:]
+            try:
+                for point in data.get('_route_goals',[data]):
+                    part=self.plan(point['x'],point['y']);self.path.extend(part)
+                    self.pose=[point['x'],point['y'],0.]
+            finally:self.pose=start
             self.session.planned(g,len(self.path),time.monotonic());return {'generation':g}
     def confirm_goal(self,data):
         with self.lock:
@@ -75,13 +81,24 @@ class Sandbox:
             g=data['generation'];self.session.start(g,time.monotonic(),True,True)
             self.session.started(g,time.monotonic());self.active=True;self.commands.append({'model_only':True,'generation':g})
             return {'accepted':True,'hardware_execution_enabled':False}
+    def cancel_reception_leg(self,epoch):
+        if not self.reception.engine.valid(epoch):return False
+        with self.lock:
+            self.session.cancel();self.active=False;self.velocity=[0,0,0]
+            self.session.acknowledge_cancel(self.session.cancel_generation)
+        return True
     def stop(self):
         with self.lock:
-            self.reception.engine.cancel();self.session.cancel();self.session.acknowledge_cancel(self.session.cancel_generation);self.active=False;self.velocity=[0.,0.,0.]
+
+            if self.reception.engine.phase not in ('paused','manual'):self.reception.engine.cancel()
+            self.session.cancel();self.session.acknowledge_cancel(self.session.cancel_generation);self.active=False;self.velocity=[0.,0.,0.]
     def reception_speech_result(self):return self.speech
     def save(self,data):
         if set(data)!={'reception'}:raise ValueError('沙箱只接收导览内容')
         r=data['reception'];op=r.get('operation')
+        if op=='versions':return self.reception_catalog.versions(r['map_id'])
+        if op=='restore':return self.reception_catalog.restore(r['map_id'],r['source_revision'],r['expected_revision'])
+        if op=='history':return self.reception.history.read(r.get('map_id')or self.map_name,r.get('before'),r.get('limit',100))
         if op=='stage':return self.reception_transfer.receive(r)
         if op=='read':
             d=self.reception_catalog.read(r.get('map_id')or self.map_name);return {'document':d,'voice':self.reception_voice.status(d)}

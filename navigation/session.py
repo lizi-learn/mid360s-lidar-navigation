@@ -17,7 +17,7 @@ class NavigationSession:
         self.phase='idle';self.goal=None;self.path_points=0;self.cancel_generation=0
         self.cancel_pending=False;self.message='等待保护开关状态';self.notice_sequence=0
         self.blocked_since=None;self.replans=0;self.clear_since=None;self.last_now=None;self.prepared_with_authority=False
-        self.obstruction_policy=None;self.obstruction_decision='continue'
+        self.obstruction_policy=None;self.obstruction_decision='continue';self.obstruction_plan_seen=False
     def configure_obstruction(self,policy):
         from reception_routes import ObstructionPolicy
         with self.lock:
@@ -95,7 +95,7 @@ class NavigationSession:
     def obstacle(self,now):
         with self.lock:
             if self.phase=='executing':
-                self.phase='replanning';self.blocked_since=now;self.replans=0;self.clear_since=None
+                self.phase='replanning';self.blocked_since=now;self.replans=0;self.clear_since=None;self.obstruction_plan_seen=False
                 self._notice('检测到障碍：已停车，正在尝试绕行')
                 if self.obstruction_policy:
                     self.obstruction_policy.reset();self.obstruction_decision=self.obstruction_policy.decide(now,blocked=True)
@@ -105,10 +105,16 @@ class NavigationSession:
             if now-self.blocked_since>=self.replan_timeout:
                 self._cancel('障碍无法绕行，速度已归零，请手动处理','blocked');return
             if self.obstruction_policy:
+                # A freshly received plan and the clear-hold timer are
+                # asynchronous. Do not consume their joint completion only on
+                # the single callback where the hold timer expires. A renewed
+                # stop invalidates the remembered plan receipt.
+                if not clear:self.obstruction_plan_seen=False
+                elif new_path:self.obstruction_plan_seen=True
                 decision=self.obstruction_policy.decide(now,blocked=not clear,alternate=new_path)
                 self.obstruction_decision=decision
                 if decision=='stop_notify':self._cancel('前方持续阻挡，已停止本次导航','blocked');return
-                if clear and decision in ('resume','continue') and new_path and self._fresh(now) and self.mode=='navigation_allowed' and not self.manual_activity:
+                if clear and decision in ('resume','continue') and self.obstruction_plan_seen and self._fresh(now) and self.mode=='navigation_allowed' and not self.manual_activity:
                     self.phase='executing';self.blocked_since=None;self._notice('通行已恢复，继续导航')
                 # Native BT/costmaps still replan and reject collisions. Service
                 # policy controls only the stopped session's resume/wait period.
@@ -131,4 +137,4 @@ class NavigationSession:
                 'manual_activity':self.manual_activity,'navigation_permitted':fresh and self.mode=='navigation_allowed' and not self.manual_activity,
                 'force_navigation_zero':self.phase!='executing' or not fresh or self.mode!='navigation_allowed' or self.manual_activity,
                 'cancel_pending':self.cancel_pending,'cancel_generation':self.cancel_generation,'notice':self.message,
-                'notice_sequence':self.notice_sequence,'replan_attempts':self.replans,'obstruction_decision':self.obstruction_decision}
+                'notice_sequence':self.notice_sequence,'obstruction_plan_seen':self.obstruction_plan_seen,'replan_attempts':self.replans,'obstruction_decision':self.obstruction_decision}

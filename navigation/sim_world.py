@@ -21,9 +21,14 @@ def make_world():
         grid[int(y0/RES):int(y1/RES),int(x0/RES):int(x1/RES)]=100
     return grid
 
-def save_truth(directory):
+def save_truth(directory,doors=None):
     directory=Path(directory);directory.mkdir(parents=True,exist_ok=True)
-    grid=make_world();pixels=np.where(grid==100,0,254).astype(np.uint8)
+    grid=make_world()
+    if doors:
+        from synthetic_doors import checked_doors,occupied
+        yy,xx=np.meshgrid((np.arange(grid.shape[0])+.5)*RES,(np.arange(grid.shape[1])+.5)*RES,indexing='ij')
+        grid[occupied(checked_doors(doors),xx,yy)]=100
+    pixels=np.where(grid==100,0,254).astype(np.uint8)
     (directory/'truth.pgm').write_bytes(f'P5\n{grid.shape[1]} {grid.shape[0]}\n255\n'.encode()+np.flipud(pixels).tobytes())
     (directory/'truth.yaml').write_text('image: truth.pgm\nresolution: 0.05\norigin: [0.0, 0.0, 0.0]\nnegate: 0\noccupied_thresh: 0.65\nfree_thresh: 0.196\n')
 
@@ -42,6 +47,8 @@ class World(Node):
         if os.environ.get('P2_NAV_NATIVE_EXEC'):
             from native_backend import NativeBackend
             self.native=NativeBackend()
+        from synthetic_doors import checked_doors
+        self.doors=checked_doors(json.loads(os.getenv('P2_NAV_SIM_DOORS','[]')))
         self.drop_scan=False;self.drop_odom=False;self.ground_ok=True;self.obstacle=None;self.pause=False;self.control_id=''
         self.odom=self.create_publisher(Odometry,'/odom',10)
         self.scan=self.create_publisher(LaserScan,'/scan',qos_profile_sensor_data)
@@ -62,6 +69,9 @@ class World(Node):
         for k in ('drop_scan','drop_odom','ground_ok','pause'):
             if k in v:setattr(self,k,bool(v[k]))
         if 'obstacle' in v:self.obstacle=v['obstacle']
+        if 'doors'in v:
+            from synthetic_doors import checked_doors
+            self.doors=checked_doors(v['doors'])
         if 'pose' in v:self.x,self.y,self.yaw=map(float,v['pose'])
         if isinstance(v.get('control_id'),str):self.control_id=v['control_id']
     def occupied(self,x,y):
@@ -70,6 +80,9 @@ class World(Node):
         result=self.grid[iy,ix]>50
         if self.obstacle is not None:
             ox,oy,r=self.obstacle;result|=(x-ox)**2+(y-oy)**2<r*r
+        if self.doors:
+            from synthetic_doors import occupied
+            result|=occupied(self.doors,x,y)
         return result
     def footprint_collision(self,x,y,yaw):
         # Same rectangle as Nav2, densely sampled including its interior.
@@ -128,7 +141,7 @@ class World(Node):
             scan.angle_min=-math.pi;scan.angle_increment=2*math.pi/360;scan.angle_max=scan.angle_min+359*scan.angle_increment
             scan.range_min=.12;scan.range_max=14.;scan.scan_time=.1;scan.ranges=ranges.astype(float).tolist();self.scan.publish(scan)
         msg=String();msg.data=json.dumps({'pose':[self.x,self.y,self.yaw],'collision_attempts':self.collision_count,
-            'controls':{'control_id':self.control_id,'drop_scan':self.drop_scan,'drop_odom':self.drop_odom,'ground_ok':self.ground_ok,'pause':self.pause,'obstacle':self.obstacle},
+            'controls':{'control_id':self.control_id,'drop_scan':self.drop_scan,'drop_odom':self.drop_odom,'ground_ok':self.ground_ok,'pause':self.pause,'obstacle':self.obstacle,'doors':self.doors},
             'travelled_m':self.travel,'command':self.cmd,'elapsed_s':time.monotonic()-self.start,
             'simulation':'native dynamics + ray-cast scan' if self.native else 'planar kinematics + ray-cast scan; not a humanoid dynamics validation'})
         self.truth.publish(msg)

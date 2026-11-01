@@ -118,7 +118,7 @@ class Catalog:
         path=self.path(map_id)
         try:stat=path.stat()
         except FileNotFoundError:return blank(map_id)
-        identity=(stat.st_mtime_ns,stat.st_size)
+        identity=(stat.st_dev,stat.st_ino,stat.st_mtime_ns,stat.st_ctime_ns,stat.st_size)
         if stat.st_size>MAX_BYTES:raise ValueError('内容包过大')
         cached=self.cache.get(map_id)
         if cached and cached[0]==identity:return cached[1]
@@ -132,6 +132,26 @@ class Catalog:
         with self.lock:
             document=self._load(map_id)
             return {'map_id':map_id,'revision':document['revision'],'doors':copy.deepcopy(document['doors'])}
+    def versions(self,map_id):
+        with self.lock:
+            current=self.read(map_id);rows=[]
+            paths=list((self.root/'history'/ident(map_id)).glob('*.json'))
+            for path in sorted(paths,key=lambda p:int(p.stem),reverse=True)[:30]:
+                revision=int(path.stem);document=self.read_revision(map_id,revision)
+                rows.append(dict(revision=revision,points=len(document['points']),routes=len(document['routes']),products=len(document['products'])))
+            return {'current_revision':current['revision'],'versions':rows}
+    def read_revision(self,map_id,revision):
+        if type(revision)is not int or revision<1:raise ValueError('历史修订号无效')
+        with self.lock:
+            current=self.read(map_id)
+            if revision==current['revision']:return current
+            path=self.root/'history'/ident(map_id)/(str(revision)+'.json')
+            if not path.is_file()or path.stat().st_size>MAX_BYTES:raise ValueError('该内容版本不存在或已超过保留范围')
+            d=validate(json.loads(path.read_text()))
+            if d['map_id']!=map_id or d['revision']!=revision:raise ValueError('历史内容标识不一致')
+            return d
+    def restore(self,map_id,revision,expected_revision):
+        return self.save(self.read_revision(map_id,revision),expected_revision)
     def save(self, document, expected_revision):
         d = validate(document)
         if type(expected_revision) is not int: raise ValueError('修订号无效')
@@ -142,6 +162,7 @@ class Catalog:
             if old['revision']:
                 atomic_json(self.root/'history'/d['map_id']/f"{old['revision']}.json", old)
             atomic_json(self.path(d['map_id']), d)
+            self.cache.pop(d['map_id'],None)
             # Bound private revision storage; retain the most recent 30.
             versions = sorted((self.root/'history'/d['map_id']).glob('*.json'), key=lambda p: int(p.stem))
             for p in versions[:-30]: p.unlink()

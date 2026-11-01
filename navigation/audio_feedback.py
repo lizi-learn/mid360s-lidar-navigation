@@ -142,6 +142,7 @@ class CuePolicy:
         self.obstacle_announced = False
         self.last_obstacle = -math.inf
         self.last_now = None
+        self.reception_run=None;self.reception_announced=False;self.reception_wait=None
         self.epoch += 1
 
     def disconnected(self):
@@ -197,10 +198,31 @@ class CuePolicy:
                     kind = {'manual': 'manual', 'paused': 'paused'}.get(phase, 'stopped')
             self.blocked_since = None
             self.obstacle_announced = False
+        kind=self.reception_filter(kind,data,now)
         return Cue(kind, generation, self.epoch, now) if kind else None
+
+    def reception_filter(self,kind,data,now):
+        mission=(data.get('reception')or{}).get('mission')or{}
+        phase=mission.get('phase');run=mission.get('run_id')
+        active=phase in {'dispatching','navigating','rerouting','waiting_route','presenting','guest_wait','dwell','paused'}
+        if not run or not active:return kind
+        if run!=self.reception_run:
+            self.reception_run=run;self.reception_announced=False;self.reception_wait=None
+        # Internal leg cancellation is part of the same task, not a user stop.
+        if phase in ('dispatching','rerouting','waiting_route')and kind in ('started','stopped'):kind=None
+        if kind=='started':
+            if self.reception_announced:kind=None
+            else:self.reception_announced=True
+        if phase=='waiting_route':
+            if self.reception_wait is None:self.reception_wait=now
+            if now-self.reception_wait>=self.obstacle_delay and now-self.last_obstacle>=self.obstacle_cooldown:
+                self.last_obstacle=now;kind='obstacle'
+        else:self.reception_wait=None
+        return kind
 
     def valid(self, cue, data, now, max_age=3.):
         phase = (data.get('session') or {}).get('phase')
+        reception_phase=((data.get('reception')or{}).get('mission')or{}).get('phase')
         generation = (data.get('session') or {}).get('generation')
         allowed = {
             'started': {'executing'}, 'continued': {'executing'},
@@ -211,4 +233,4 @@ class CuePolicy:
         }
         return (cue.epoch == self.epoch and cue.generation == generation and
                 0 <= now - cue.created and (max_age is None or now - cue.created <= max_age) and
-                (cue.kind == 'test' or phase in allowed[cue.kind]))
+                (cue.kind == 'test' or phase in allowed[cue.kind] or cue.kind=='obstacle' and reception_phase=='waiting_route'))

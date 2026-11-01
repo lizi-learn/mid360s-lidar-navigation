@@ -80,9 +80,19 @@ class PositionOnlyLattice : public nav2_smac_planner::SmacPlannerLattice {
     for(double a:angles)if(clear(x,y,a)&&clear(cx,cy,a))return a;
     throw nav2_core::PlannerException("No full-body heading fits position endpoint");
   }
+  nav_msgs::msg::Path completed(nav_msgs::msg::Path path) {
+    // This timestamp belongs to the newly computed path, not the original
+    // user's goal request. Relay nodes must preserve this producer timestamp.
+    // Sensor, odometry and costmap measurement stamps are never renewed here.
+    const auto node=_node.lock();
+    if(!node)throw nav2_core::PlannerException("Planner node expired");
+    path.header.stamp=node->now();
+    for(auto &pose:path.poses)pose.header=path.header;
+    return path;
+  }
   nav_msgs::msg::Path message(const std::vector<std::array<double,3>> &samples,const std_msgs::msg::Header &header) {
     nav_msgs::msg::Path out;out.header=header;
-    for(const auto &p:samples){geometry_msgs::msg::PoseStamped pose;pose.header=header;pose.pose.position.x=p[0];pose.pose.position.y=p[1];pose.pose.orientation=nav2_util::geometry_utils::orientationAroundZAxis(p[2]);out.poses.push_back(pose);}return out;
+    for(const auto &p:samples){geometry_msgs::msg::PoseStamped pose;pose.header=header;pose.pose.position.x=p[0];pose.pose.position.y=p[1];pose.pose.orientation=nav2_util::geometry_utils::orientationAroundZAxis(p[2]);out.poses.push_back(pose);}return completed(std::move(out));
   }
  public:
   nav_msgs::msg::Path createPlan(const geometry_msgs::msg::PoseStamped &start,
@@ -141,7 +151,7 @@ class PositionOnlyLattice : public nav2_smac_planner::SmacPlannerLattice {
         const int n=std::max({1,static_cast<int>(std::ceil(std::hypot(b.position.x-a.position.x,b.position.y-a.position.y)/.01)),static_cast<int>(std::ceil(std::abs(da)/.01))});
         for(int k=0;k<=n;++k){double f=static_cast<double>(k)/n;std::array<double,3> p{a.position.x+f*(b.position.x-a.position.x),a.position.y+f*(b.position.y-a.position.y),tf2::getYaw(a.orientation)+f*da};if(!clear(p[0],p[1],p[2]))bad.push_back(p);}
       }
-      if(bad.empty())return path;
+      if(bad.empty())return completed(std::move(path));
       unsigned added=0;
       for(const auto &p:bad){unsigned x,y;if(search.worldToMap(p[0],p[1],x,y))for(int dy=-1;dy<=1;++dy)for(int dx=-1;dx<=1;++dx){int nx=static_cast<int>(x)+dx,ny=static_cast<int>(y)+dy;if(nx>=0&&ny>=0&&nx<static_cast<int>(search.getSizeInCellsX())&&ny<static_cast<int>(search.getSizeInCellsY())&&search.getCost(nx,ny)<253){search.setCost(nx,ny,253);++added;}}}
       RCLCPP_INFO(_logger,"Repair %d: %zu actual full-body intersections, %u search-only centre exclusions",attempt,bad.size(),added);

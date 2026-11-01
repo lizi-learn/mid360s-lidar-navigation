@@ -1,0 +1,177 @@
+{
+  "passed": true,
+  "cases": [
+    {
+      "case": "continuous_native_transit",
+      "passed": true,
+      "windows": {
+        "2.8": {
+          "samples": 7,
+          "minimum_forward": 0.375
+        },
+        "3.6": {
+          "samples": 7,
+          "minimum_forward": 0.375
+        }
+      }
+    },
+    {
+      "case": "observed_closed_door_reopens_and_live_shortcut",
+      "passed": true,
+      "evidence": {
+        "source": "projected_scan",
+        "state": "observing",
+        "frames": 13,
+        "source_ns": 1793555863091402927,
+        "processing_ms": 0.49851112999022007,
+        "doors": [
+          {
+            "door_id": "front_door",
+            "state": "open",
+            "source_monotonic": 1438138.5241791732,
+            "coverage_bins": 24,
+            "total_bins": 24,
+            "blocking_returns": 0,
+            "scope": "finite projected scan rays, not full 3D clearance",
+            "source_sequence": 13,
+            "source_ros_ns": 1793555863091402927
+          }
+        ]
+      },
+      "overlay": {
+        "changed_cells": 96,
+        "door_states": {
+          "front_door": "open"
+        },
+        "original_map_modified": false,
+        "unknown_cells_promoted": 0
+      },
+      "decisions": [
+        {
+          "points": [
+            "start",
+            "north_a",
+            "north_b",
+            "goal"
+          ],
+          "edges": [
+            "0",
+            "1",
+            "2"
+          ],
+          "cost": 13.71006354650654
+        },
+        {
+          "kind": "live_update",
+          "reason": "发现更短的开放通道",
+          "old_cost": 13.712742619761801,
+          "new_cost": 4.149439988541216
+        }
+      ]
+    },
+    {
+      "case": "actual_dynamic_obstacle_and_complete",
+      "passed": true,
+      "ray_returns": 21,
+      "circle": [
+        9.752412542464436,
+        2.5129082826531848,
+        0.28
+      ]
+    },
+    {
+      "case": "middle_pause_then_explicit_resume_native",
+      "passed": true
+    },
+    {
+      "case": "manual_cancel_no_auto_resume_and_durable_receipts",
+      "passed": true,
+      "history_events": 29
+    }
+  ],
+  "final_pose": [
+    10.634082246115222,
+    4.180464647941304,
+    2.5993766013378266
+  ],
+  "elapsed_s": 69.97284217784181,
+  "stop_profile": "baseline-directional",
+  "hardware_commands": 0,
+  "interfaces": [
+    "lo"
+  ],
+  "scope": "Actual Console, ROS2/Nav2 actions and projected-ray plant, unchanged55cm full-body model. No RL or physical robot acceptance.",
+  "seed": 0,
+  "actual_parameters": {
+    "local_footprint": [
+      [
+        0.275,
+        0.275
+      ],
+      [
+        0.275,
+        -0.275
+      ],
+      [
+        -0.275,
+        -0.275
+      ],
+      [
+        -0.275,
+        0.275
+      ]
+    ],
+    "padding": 0.0,
+    "collision_polygons": [
+      "StopZone",
+      "SweptZone"
+    ],
+    "source_timeout": 0.5,
+    "stop": {
+      "type": "polygon",
+      "points": [
+        0.275,
+        0.275,
+        0.275,
+        -0.275,
+        -0.275,
+        -0.275,
+        -0.275,
+        0.275
+      ],
+      "action_type": "stop",
+      "max_points": 2,
+      "visualize": true,
+      "polygon_pub_topic": "stop_zone"
+    },
+    "swept": {
+      "type": "polygon",
+      "action_type": "approach",
+      "max_points": 2,
+      "time_before_collision": 1.0,
+      "simulation_time_step": 0.02,
+      "footprint_topic": "/local_costmap/published_footprint",
+      "visualize": true,
+      "polygon_pub_topic": "swept_zone"
+    }
+  },
+  "compiled_planner_sha256": "2f110dde619b79c529a5b1ee6b728dd2f9fd09ecf518ce893f24a8bfdabd6c0d",
+  "planner_source_sha256": "77bee3e1a283b6ec166786bc94fb08755e481453b125ad4260e2b7d114fab906",
+  "python_tests": 306,
+  "remaining": [
+    "Production ARM parallel load and actual body speaker custom introductions",
+    "Actual G12 screen after this software rollout",
+    "2D projected opening evidence is not full-height3D clearance",
+    "Legacy baseline replay/delayed-turn failures remain recorded"
+  ],
+  "failures_retained": [
+    "Exact-timeTF callback arrival race: fixed one latest original scan slot",
+    "Incorrect synthetic door annotation included jamb: fixture corrected; jamb wall retained",
+    "Partial aperture view wrongly revoked fresh complete evidence: partial cannot refresh existing3s expiry",
+    "Legacy rectangle profile blocked detour: tests now explicitly use already deployed baseline directional profile",
+    "Combined obstacle recovered path inherited old goal timestamp: fixed actual producer; relay/sensor stamps unchanged",
+    "Clear-hold consumed before plan callback: asynchronous plan receipt latched until renewed blockage",
+    "Default colcon Make jobs ignored CMAKE_BUILD_PARALLEL_LEVEL: explicit MAKEFLAGS bounded build; first180s timeout retained",
+    "Catalog equal-sized atomic revision cache invalidation fixed; audio waiting-route debounce failure retained"
+  ]
+}

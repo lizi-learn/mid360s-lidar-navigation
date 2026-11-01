@@ -5,7 +5,13 @@ from reception_routes import DoorEvidence, route, worthwhile_shortcut
 
 class RouteDecisions:
     def __init__(self):
-        self.lock=threading.RLock();self.doors={};self.sequence=0
+        self.lock=threading.RLock();self.doors={};self.sequence=0;self.map_id=None;self.definitions={}
+    def bind(self,document):
+        definitions={d['id']:(d['x'],d['y'],d['width'],d['yaw'])for d in document['doors']}
+        with self.lock:
+            if self.map_id!=document['map_id']:self.doors={}
+            else:self.doors={i:e for i,e in self.doors.items()if self.definitions.get(i)==definitions.get(i)}
+            self.map_id=document['map_id'];self.definitions=definitions
     def observe(self,data,now,clear_hold=1.5):
         if not isinstance(data,dict) or set(data)-{'door_id','state','source_monotonic','source_sequence'}:
             raise ValueError('门状态证据字段无效')
@@ -17,6 +23,7 @@ class RouteDecisions:
             if accepted:self.sequence+=1
             return accepted
     def states(self,document,now):
+        self.bind(document)
         with self.lock:return {d['id']:self.doors[d['id']].current(now)if d['id']in self.doors else 'unknown'for d in document['doors']}
     def plan(self,document,start,goal,now):return route(document,start,goal,self.states(document,now))
     def expand(self,document,route_id,now):
@@ -36,7 +43,7 @@ class RouteDecisions:
             if index:
                 previous=visits[index-1]['point_id'];path=self.plan(document,previous,step['point_id'],now)
                 if path:
-                    steps.extend({'point_id':i,'speak':False}for i in path['points'][1:-1]);reports.append(path)
+                    steps.extend({'point_id':i,'speak':False,'_transit':True}for i in path['points'][1:-1]);reports.append(path)
             steps.append(step)
         r['steps']=steps
         return result,reports

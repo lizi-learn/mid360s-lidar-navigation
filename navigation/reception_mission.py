@@ -11,28 +11,39 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from reception_catalog import introduction, content_key
 
-BUSY = {'dispatching', 'navigating', 'presenting', 'guest_wait', 'dwell'}
+BUSY = {'dispatching', 'navigating', 'presenting', 'guest_wait', 'dwell', 'rerouting', 'waiting_route'}
 
 class Mission:
-    def __init__(self):
+    def __init__(self,event_sink=None):
+        self.event_sink=event_sink
         self.lock = threading.RLock(); self.epoch = secrets.randbits(48)*256; self.reset()
     def reset(self):
+        self.run_id='';self.paused_from=None;self.pause_remaining=0.
         self.phase = 'idle'; self.steps = []; self.index = 0; self.document = None
-        self.route_name = ''; self.error = ''; self.goal_generation = None
+        self.route_id = ''; self.route_mode='showcase';self.actual_transit=[];self.waiting_since=None;self.route_reason=''
+        self.route_name = ''; self.error = ''; self.goal_generation = None; self.batch_end = None
         self.presentation_started = None; self.deadline = None; self.speech_key = ''; self.events = []; self.event_seq = 0
     def event(self, kind, **data):
         self.event_seq += 1
         self.events.append({'sequence': self.event_seq, 'kind': kind, **data})
         self.events = self.events[-100:]
+        if self.event_sink and self.run_id:
+            point_id=data.get('point');point=next((p for p in self.document['points']if p['id']==point_id),{})
+            self.event_sink(dict(self.events[-1],point_name=point.get('name',''),run_id=self.run_id,map_id=self.document['map_id'],route_name=self.route_name,wall_time=time.time(),epoch=self.epoch))
     def start(self, document, route_id, now):
         with self.lock:
             if self.phase in BUSY: raise ValueError('当前任务正在执行，请先取消或暂停')
             route = next((r for r in document['routes'] if r['id'] == route_id), None)
             if route is None: raise ValueError('路线不存在')
-            self.reset(); self.epoch += 1; self.document = copy.deepcopy(document)
+            self.reset(); self.run_id=secrets.token_hex(12);self.epoch += 1; self.document = copy.deepcopy(document)
             points = {p['id']: p for p in document['points']}
-            self.steps = [dict(point=copy.deepcopy(points[s['point_id']]), speak=s['speak'])
+            def make_step(s):
+                point=copy.deepcopy(points[s['point_id']])
+                if s.get('_transit'):point.update(kind='transit',yaw=None,script='',product_id='',dwell=0.,guest_wait=False)
+                return dict(point=point,speak=s['speak'])
+            self.steps = [make_step(s)
                           for _ in range(route['loops']) for s in route['steps']]
+            self.route_id=route_id;self.route_mode=route['mode']
             self.route_name = route['name']; self.phase = 'dispatching'
             self.event('started', at=now, route=route_id, revision=document['revision'])
             return self.epoch
@@ -40,14 +51,52 @@ class Mission:
         with self.lock: return epoch == self.epoch and self.phase in BUSY
     def cancel(self, reason='cancelled'):
         with self.lock:
+            if reason=='paused' and self.phase in BUSY:
+                self.paused_from=self.phase;self.pause_remaining=max(0.,(self.deadline or time.monotonic())-time.monotonic())
             self.epoch += 1; self.phase = reason; self.speech_key = ''
             self.event(reason); return self.epoch
-    def dispatched(self, epoch, generation):
+    def resume(self,now):
         with self.lock:
-            if epoch != self.epoch or self.phase != 'dispatching': return False
-            self.goal_generation = generation; self.phase = 'navigating'
-            self.event('leg_started', point=self.steps[self.index]['point']['id'])
+            if self.phase!='paused' or not self.document or not self.paused_from:raise ValueError('当前没有可继续的暂停任务')
+            previous=self.paused_from;self.epoch+=1;self.error=''
+            if previous in ('dispatching','navigating','rerouting','waiting_route'):
+                self.phase='dispatching'
+            elif previous=='presenting':
+                self.phase='presenting';self.presentation_started=now
+                self.speech_key=content_key(introduction(self.document,self.steps[self.index]['point']))
+            elif previous=='dwell':self.phase='dwell';self.deadline=now+self.pause_remaining
+            else:self.phase=previous
+            self.paused_from=None;self.event('resumed',previous_phase=previous)
+            return self.epoch
+    def batch(self):
+        """Only action-free transit points can be crossed without a stop."""
+        end=self.index
+        while end+1<len(self.steps):
+            step=self.steps[end];point=step['point']
+            if (point['kind']!='transit' or point['yaw'] is not None or point['dwell'] or point['guest_wait'] or
+                    step['speak'] and introduction(self.document,point)):break
+            end+=1
+        return end,[copy.deepcopy(s['point'])for s in self.steps[self.index:end+1]]
+    def dispatched(self, epoch, generation, end_index=None,transit_ids=None):
+        with self.lock:
+            if epoch != self.epoch or self.phase not in ('dispatching','rerouting'): return False
+            self.actual_transit=list(transit_ids)if transit_ids is not None else [s['point']['id']for s in self.steps[self.index:(self.index if end_index is None else end_index)]]
+            self.waiting_since=None
+            self.goal_generation = generation; self.batch_end = self.index if end_index is None else end_index; self.phase = 'navigating'
+            self.event('leg_started', point=self.steps[self.batch_end]['point']['id'],
+                       via=self.actual_transit)
             return True
+    def begin_reroute(self,reason):
+        with self.lock:
+            if self.phase not in ('navigating','waiting_route'):return False
+            self.phase='rerouting';self.route_reason=reason;self.event('route_replanning',reason=reason)
+            return True
+    def wait_route(self,epoch,now,reason):
+        with self.lock:
+            if epoch!=self.epoch or self.phase!='rerouting':return
+            self.phase='waiting_route';self.route_reason=reason
+            if self.waiting_since is None:self.waiting_since=now
+            self.event('route_waiting',reason=reason)
     def failed(self, epoch, error):
         with self.lock:
             if epoch != self.epoch or self.phase not in BUSY: return
@@ -59,7 +108,7 @@ class Mission:
         elif p['dwell'] > 0: self.phase = 'dwell'; self.deadline = now+p['dwell']
         else: self._next(now)
     def _next(self, now):
-        self.index += 1; self.goal_generation = None
+        self.index += 1; self.goal_generation = None; self.batch_end = None
         if self.index >= len(self.steps): self.phase = 'completed'; self.event('completed', at=now)
         else: self.phase = 'dispatching'
     def continue_visit(self, now):
@@ -76,8 +125,11 @@ class Mission:
             # Stay sensitive to takeover while parked for a presentation too.
             if not session.get('navigation_permitted', False):
                 self.cancel('manual' if session.get('operator_mode') == 'manual' else 'paused'); return None
+            if self.phase=='waiting_route' and self.waiting_since is not None and now-self.waiting_since>=self.document['policy']['max_wait']:
+                self.failed(self.epoch,'通道持续受阻，已结束本次导览');return None
             if self.phase == 'dispatching':
-                return {'epoch': self.epoch, 'point': copy.deepcopy(self.steps[self.index]['point'])}
+                end,points=self.batch()
+                return {'epoch': self.epoch, 'point': points[-1], 'points':points, 'end_index':end}
             if self.phase == 'navigating':
                 if session.get('generation') != self.goal_generation:
                     self.failed(self.epoch, '导航目标已被其他操作替换'); return None
@@ -85,6 +137,10 @@ class Mission:
                 if phase in ('blocked', 'cancelled', 'stopped', 'manual', 'paused'):
                     self.failed(self.epoch, session.get('notice', phase)); return None
                 if phase == 'arrived':
+                    if self.batch_end is not None:
+                        for point_id in self.actual_transit:
+                            self.event('transit_segment_completed',point=point_id,receipt='navigate_through_poses_succeeded')
+                        self.index=self.batch_end
                     p = self.steps[self.index]['point']; script = introduction(self.document, p) if self.steps[self.index]['speak'] else ''
                     self.event('arrived', point=p['id'], at=now)
                     if script:
@@ -102,8 +158,10 @@ class Mission:
             return None
     def status(self):
         with self.lock:
-            point = self.steps[self.index]['point'] if self.index < len(self.steps) else None
-            return {'phase': self.phase, 'epoch': self.epoch, 'route_name': self.route_name,
+            target=self.batch_end if self.batch_end is not None else self.index
+            point = self.steps[target]['point'] if target < len(self.steps) else None
+            return {'phase': self.phase, 'epoch': self.epoch, 'run_id':self.run_id, 'route_name': self.route_name,
+                    'route_id':self.route_id,'route_mode':self.route_mode,'route_reason':self.route_reason,'via':list(self.actual_transit),
                     'index': self.index, 'total': len(self.steps), 'point': copy.deepcopy(point),
                     'revision': self.document['revision'] if self.document else None,
                     'error': self.error, 'speech_key': self.speech_key,
@@ -112,14 +170,24 @@ class Mission:
 class MissionService:
     """One worker, at most one dispatch. ROS/control threads never wait on TTS."""
     def __init__(self, node, catalog):
-        self.node = node; self.catalog = catalog; self.engine = Mission()
+        self.node = node; self.catalog = catalog
+        from reception_history import History
+        self.history=History(node.runtime/'reception-history/events.sqlite3');self.engine = Mission(self.history.append)
         self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix='reception-leg')
         from reception_decisions import RouteDecisions
+        from reception_live_routes import LiveRouter
+        self.live_router=LiveRouter();self.active_command=None;self.resume_command=None
         self.decisions=RouteDecisions(); self.route_report=[]
         self.future = None; self.closed = threading.Event()
         self.thread = threading.Thread(target=self.run, daemon=True, name='reception-task'); self.thread.start()
     def map_id(self):
         return self.node.map_name if getattr(self.node, 'map_name', '') else 'unselected'
+    def observation_document(self):
+        with self.engine.lock:
+            doc=self.engine.document if self.engine.phase in BUSY else None
+            if doc:return {'map_id':doc['map_id'],'revision':doc['revision'],'doors':copy.deepcopy(doc['doors']),'policy':dict(doc['policy'])}
+        doc=self.catalog.read(self.map_id())
+        return {'map_id':doc['map_id'],'revision':doc['revision'],'doors':doc['doors'],'policy':doc['policy']}
     def command(self, data):
         command = data.get('command')
         if command == 'start':
@@ -130,11 +198,25 @@ class MissionService:
                 if not state['navigation_permitted']: raise ValueError('当前 E 档位或摇杆未允许导航')
                 if self.node.session.phase in ('starting', 'executing', 'replanning'): raise ValueError('已有导航正在执行')
                 if self.future is not None and not self.future.done(): raise ValueError('上一任务正在退出，请稍候')
-                doc,self.route_report=self.decisions.expand(doc,data['route_id'],time.monotonic())
+                route_id=data.get('route_id')
+                if data.get('point_id'):
+                    point=next((p for p in doc['points']if p['id']==data['point_id']),None)
+                    if point is None:raise ValueError('点位不存在')
+                    route_id='single_visit';doc['routes']=[r for r in doc['routes']if r['id']!=route_id]+[dict(id=route_id,name=point['name'],mode='showcase',loops=1,description='',steps=[dict(point_id=point['id'],speak=True)])]
+                doc,self.route_report=self.decisions.expand(doc,route_id,time.monotonic())
                 self.node.session.configure_obstruction(doc['policy'])
-                self.engine.start(doc, data['route_id'], time.monotonic())
+                self.engine.start(doc, route_id, time.monotonic())
+                self.active_command=None;self.resume_command=None;self.live_router.reset()
+        elif command=='resume':
+            with self.node.lock:
+                if data.get('epoch')!=self.engine.epoch:raise ValueError('任务已更新，请刷新后继续')
+                if not self.node.session.status(time.monotonic())['navigation_permitted']:raise ValueError('当前 E 档位或摇杆未允许导航')
+                if not self.engine.document or self.engine.document['map_id']!=self.map_id():raise ValueError('当前地图已切换，请重新开始任务')
+                if self.future is not None and not self.future.done():raise ValueError('上一导航正在退出，请稍候')
+                self.engine.resume(time.monotonic());self.live_router.reset()
         elif command in ('cancel', 'pause'):
             with self.node.lock:
+                if command=='pause':self.capture_resume()
                 self.engine.cancel('paused' if command == 'pause' else 'cancelled'); self.node.stop()
         elif command in ('continue', 'skip'):
             if data.get('epoch')!=self.engine.epoch:raise ValueError('讲解任务已更新，请刷新后继续')
@@ -144,17 +226,61 @@ class MissionService:
             else: self.engine.skip(time.monotonic())
         else: raise ValueError('任务命令无效')
         return self.engine.status()
+    def capture_resume(self):
+        self.resume_command=None
+        if self.engine.phase not in ('navigating','rerouting','waiting_route') or not self.active_command:return
+        command=copy.deepcopy(self.active_command);feedback=getattr(self.node,'feedback',{})
+        remaining=feedback.get('poses_remaining')if feedback.get('generation')==self.engine.goal_generation else None
+        if type(remaining)is int and 0<remaining<=len(command['points']):command['points']=command['points'][-remaining:]
+        command.pop('reroute',None);command.pop('wait',None)
+        self.resume_command=command
     def dispatch(self, command):
-        epoch = command['epoch']; p = command['point']
+        epoch = command['epoch']
+        if self.resume_command and not command.get('reroute'):
+            command=dict(self.resume_command,epoch=epoch);self.resume_command=None
+        p = command['point']
         data = {'x': p['x'], 'y': p['y'], 'yaw': p['yaw'] or 0.,
                 'heading_mode': 'position' if p['yaw'] is None else 'pose'}
         try:
             if not self.engine.valid(epoch): return
+            if command.get('reroute'):
+                if not self.node.cancel_reception_leg(epoch):return
+                if command.get('wait'):
+                    self.engine.wait_route(epoch,time.monotonic(),command['reason']);return
+            points=command.get('points',[p])
+            if len(points)>1:
+                data['_route_goals']=[{'x':q['x'],'y':q['y'],'yaw':q['yaw'] or 0.}for q in points]
             result = self.node.set_goal(data)
+            # Allow the existing observations/lifecycle to finish initializing.
+            # Do not change freshness requirements or resume after takeover.
+            deadline=time.monotonic()+8.
+            while hasattr(self.node,'health_ready') and not self.node.health_ready():
+                if not self.engine.valid(epoch):return
+                state=self.node.session.status(time.monotonic())
+                if not state['navigation_permitted'] or state['generation']!=result['generation']:return
+                if time.monotonic()>=deadline:raise ValueError('定位或避障观测尚未收到有效数据，请查看实时状态')
+                time.sleep(.05)
             if not self.engine.valid(epoch): return
             self.node.confirm_goal({'generation': result['generation'], '_mission_epoch': epoch})
-            self.engine.dispatched(epoch, result['generation'])
+            if self.engine.dispatched(epoch, result['generation'],command.get('end_index'),[q['id']for q in points[:-1]]):
+                self.active_command=copy.deepcopy(command)
         except Exception as error: self.engine.failed(epoch, error)
+    def update_live_route(self):
+        snapshot=self.engine.status()
+        if snapshot['route_mode']!='adaptive' or snapshot['phase']not in ('navigating','waiting_route') or not self.active_command:return
+        if self.future is not None and not self.future.done():return
+        document=self.engine.document;pose=self.node.reception_pose()if hasattr(self.node,'reception_pose')else getattr(self.node,'pose',None)
+        states=self.decisions.states(document,time.monotonic())
+        feedback=getattr(self.node,'feedback',{})
+        remaining=feedback.get('poses_remaining')if feedback.get('generation')==self.engine.goal_generation else None
+        previous=self.engine.steps[self.engine.index-1]['point']['id']if self.engine.index else None
+        decision=self.live_router.choose(document,states,pose,self.active_command,previous,remaining,time.monotonic(),snapshot['phase']=='waiting_route')
+        if not decision or not self.engine.begin_reroute(decision['reason']):return
+        command=dict(epoch=self.engine.epoch,point=self.engine.steps[self.engine.batch_end]['point'],end_index=self.engine.batch_end,
+                     reroute=True,**decision)
+        if not decision['wait']:command['point']=decision['points'][-1]
+        self.route_report=(self.route_report+[{'kind':'live_update','reason':decision['reason'],'old_cost':decision.get('old_cost'),'new_cost':decision.get('new_cost')}])[-20:]
+        self.future=self.executor.submit(self.dispatch,command)
     def run(self):
         while not self.closed.wait(.1):
             try:
@@ -172,9 +298,11 @@ class MissionService:
                         except (OSError,ValueError):worker={}
                         if not 0<=time.time()-worker.get('updated_at',0)<=3:
                             speech={'key':snapshot['speech_key'],'result':'failed'}
+                if not state.get('navigation_permitted') and snapshot['phase'] in BUSY:self.capture_resume()
                 command = self.engine.tick(state, time.monotonic(), speech)
                 if command and (self.future is None or self.future.done()): self.future = self.executor.submit(self.dispatch, command)
+                self.update_live_route()
             except Exception as error: self.engine.failed(self.engine.epoch, error)
     def close(self):
         self.closed.set(); self.engine.cancel(); self.thread.join(timeout=1)
-        self.executor.shutdown(wait=False, cancel_futures=True)
+        self.executor.shutdown(wait=False, cancel_futures=True);self.history.close()

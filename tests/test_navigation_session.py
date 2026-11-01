@@ -50,6 +50,21 @@ class SessionTests(unittest.TestCase):
         self.assertEqual(s.phase,'blocked');self.assertTrue(s.status(10.03)['force_navigation_zero']);self.assertIn('归零',s.message)
         s=NavigationSession();self.active(s);s.obstacle(10.);s.reroute(18.,False,True)
         self.assertEqual(s.phase,'blocked');self.assertIn('无法绕行',s.message)
+    def test_reception_clear_hold_and_plan_receipt_need_not_coincide(self):
+        s=NavigationSession();self.active(s)
+        s.configure_obstruction(dict(brief_wait=4.,max_wait=25.,clear_hold=1.5,replan_interval=3.,shortcut_gain=.2));s.obstacle(10.)
+        self.op(s,10.1);s.reroute(10.1,True,True)
+        self.assertEqual(s.phase,'replanning')
+        self.op(s,11.61);s.reroute(11.61,False,True)
+        self.assertEqual(s.phase,'executing')
+    def test_reception_old_plan_or_renewed_blockage_cannot_resume(self):
+        s=NavigationSession();self.active(s)
+        s.configure_obstruction(dict(brief_wait=4.,max_wait=25.,clear_hold=1.5,replan_interval=3.,shortcut_gain=.2));s.obstacle(10.)
+        self.op(s,10.1);s.reroute(10.1,True,True)
+        s.reroute(10.5,False,False)
+        self.op(s,11.);s.reroute(11.,False,True)
+        self.op(s,12.6);s.reroute(12.6,False,True);self.assertEqual(s.phase,'replanning')
+        self.op(s,12.61);s.reroute(12.61,True,True);self.assertEqual(s.phase,'executing')
     def test_no_old_result_can_complete_new_goal(self):
         s=NavigationSession();old=self.active(s);s.cancel();s.acknowledge_cancel(old);new=self.ready(s,10.01)
         self.assertFalse(s.finished(old,True));self.assertEqual(s.phase,'ready');self.assertGreater(new,old)

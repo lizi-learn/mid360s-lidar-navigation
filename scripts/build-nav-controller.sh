@@ -19,6 +19,11 @@ mkdir -p "$nav_workspace/src"
 nav_target="$nav_workspace/src/p2_nav_controller"
 if [[ ! -e "$nav_target" && ! -L "$nav_target" ]]; then ln -s "$nav_root/navigation/p2_nav_controller" "$nav_target"; fi
 test "$(readlink -f "$nav_target")" = "$nav_root/navigation/p2_nav_controller" || { echo 'Unexpected existing controller source.' >&2; exit 2; }
-export CMAKE_BUILD_PARALLEL_LEVEL="${BUILD_JOBS:-2}"
+nav_build_jobs="${BUILD_JOBS:-2}"
+[[ "$nav_build_jobs" =~ ^[1-9][0-9]*$ ]] && (( nav_build_jobs <= 32 )) || { echo 'BUILD_JOBS must be an integer from 1 to 32.' >&2; exit 2; }
+export CMAKE_BUILD_PARALLEL_LEVEL="$nav_build_jobs"
+# colcon's Make executor otherwise adds host-CPU-count -j flags and ignores
+# CMAKE_BUILD_PARALLEL_LEVEL. Bound compilation on the robot and in containers.
+export MAKEFLAGS="${MAKEFLAGS:-} -j$nav_build_jobs -l$nav_build_jobs"
 cd "$nav_workspace"
 colcon build --executor sequential --parallel-workers 1 --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF

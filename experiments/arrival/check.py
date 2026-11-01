@@ -48,6 +48,9 @@ def main():
             row.update(actual_parameters=actual,case=name,plugin=plugin,expected_position_path=case['expected'],private=case.get('private',False),snapshot_sha256=case.get('snapshot_sha256'))
             if row['planned']:
                 path=[[float(z[k])for k in ('x','y','yaw')]for z in csv.DictReader(prefix.with_suffix('.csv').open())];row['body_intrusions']=intrusions(grid,case['r'],case['origin'],path);row['endpoint_error_m']=math.hypot(path[-1][0]-case['goal'][0],path[-1][1]-case['goal'][1]);row['path_length_m']=sum(math.dist(x[:2],y[:2])for x,y in zip(path,path[1:]));row['full55cm_square_checked_every_m_rad']=.01
+                if plugin=='PositionOnlyLattice':
+                    assert row['path_stamp_s']-row['input_goal_stamp_s']>=4.9,'output reused old goal request time'
+                    assert -.01<=row['path_age_at_result_s']<=.5,'newly computed path source stamp invalid'
             if plugin=='PositionOnlyLattice':
                 row['passed']=row['planned']==case['expected'] and (not row['planned']or row['body_intrusions']==0 and row['endpoint_error_m']<=.15) and proc.returncode==0;ok=ok and row['passed']
             rows.append(row);out.write_text(json.dumps({'complete':False,'cases':rows},indent=2));print(json.dumps(row),flush=True)

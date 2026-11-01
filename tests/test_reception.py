@@ -33,6 +33,14 @@ class CatalogTest(unittest.TestCase):
             with self.assertRaises(ValueError):store.save(one,1)
             self.assertEqual(store.read('elsewhere')['points'],[])
             self.assertTrue((Path(root)/'history/synthetic_office/1.json').is_file())
+    def test_atomic_replace_same_mtime_and_size_does_not_reuse_stale_revision(self):
+        import os
+        with tempfile.TemporaryDirectory() as root:
+            store=Catalog(root);one=store.save(fixture(),0);store.read(one['map_id'])
+            path=store.path(one['map_id']);original=path.stat()
+            two=store.save(one,1);os.utime(path,ns=(original.st_atime_ns,original.st_mtime_ns))
+            self.assertEqual(store.read(one['map_id'])['revision'],2)
+            with self.assertRaises(ValueError):store.save(one,1)
     def test_path_traversal(self):
         with tempfile.TemporaryDirectory() as root:
             for s in ['../other','/tmp/a','x/abc','']:
@@ -68,6 +76,22 @@ class CatalogTest(unittest.TestCase):
 class MissionTest(unittest.TestCase):
     def start(self,d=None):
         m=Mission();d=d or fixture();epoch=m.start(d,'tour',0);return m,d,epoch
+    def test_plain_transit_batch_has_one_native_action_and_no_fake_arrivals(self):
+        d=fixture();d['points'][1]['kind']='transit';d['points'][1]['dwell']=0
+        m,d,e=self.start(d);cmd=m.tick(permitted(),0)
+        self.assertEqual([p['id']for p in cmd['points']],['b','c']);self.assertEqual(cmd['end_index'],1)
+        m.dispatched(e,1,cmd['end_index']);m.tick(permitted('arrived'),1)
+        self.assertEqual(m.index,1);self.assertEqual(m.phase,'presenting')
+        self.assertEqual([x['point']for x in m.events if x['kind']=='arrived'],['c'])
+        self.assertEqual([x['point']for x in m.events if x['kind']=='transit_segment_completed'],['b'])
+    def test_transit_with_heading_dwell_intro_or_guest_wait_remains_stop(self):
+        for change in [{'yaw':1.},{'dwell':1.},{'guest_wait':True},{'script':'这一站请停下讲解'}]:
+            d=fixture();d['points'][1].update(kind='transit',**change)
+            m,d,e=self.start(d);self.assertEqual(len(m.tick(permitted(),0)['points']),1)
+    def test_cancelled_batch_cannot_accept_late_action_or_arrival(self):
+        d=fixture();d['points'][1]['kind']='transit';m,d,e=self.start(d);cmd=m.tick(permitted(),0)
+        m.cancel();self.assertFalse(m.dispatched(e,1,cmd['end_index']));m.tick(permitted('arrived'),2)
+        self.assertEqual(m.phase,'cancelled');self.assertFalse(any(x['kind']=='arrived'for x in m.events))
     def test_full_tour_arrival_speech_and_completed(self):
         m,d,e=self.start();cmd=m.tick(permitted(),0);self.assertEqual(cmd['point']['id'],'b')
         m.dispatched(e,1);m.tick(permitted('arrived'),1);self.assertEqual(m.phase,'dispatching')

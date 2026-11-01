@@ -32,9 +32,9 @@ def main():
             doc=node.reception_catalog.save(doc,doc['revision'])
             node.reception.command({'command':'start','route_id':'welcome_tour','revision':doc['revision']})
             wait(lambda:node.reception.engine.phase=='completed')
-            assert len(node.commands)==2
+            assert len(node.commands)==1
             assert abs(node.pose[0]-1.2)<.1 and abs(node.pose[2]-1.)<.01
-            scenarios.append({'name':'single_start_two_stops_and_heading','passed':True,'model_arrivals':2,'hardware_commands':0})
+            scenarios.append({'name':'single_start_continuous_transit_and_final_heading','passed':True,'model_arrivals':1,'transit_receipts':1,'hardware_commands':0})
             # New run owns a copy; editing the catalog must not move its target.
             node.pose=[0.,0.,0.]
             node.reception.command({'command':'start','route_id':'welcome_tour','revision':doc['revision']})
@@ -61,9 +61,21 @@ def main():
             d.observe('open',11.5,3,11.5);d.observe('open',12.,4,12.);d.observe('open',12.6,5,12.6);opened=route(doc,'hall','side',{'side_door':d.current(12.6)})
             assert closed is not None and opened is not None and opened['cost']<closed['cost']
             scenarios.append({'name':'door_opening_hysteresis_and_shorter_graph_route','passed':True,'occupancy_cells_modified':0})
+            node.reception.command({'command':'start','point_id':'robot','revision':doc['revision']})
+            wait(lambda:node.reception.engine.phase=='navigating')
+            node.reception.command({'command':'pause'});wait(lambda:node.reception.engine.phase=='paused')
+            count=len(node.commands);time.sleep(.2);assert len(node.commands)==count and node.velocity==[0.,0.,0.]
+            node.reception.command({'command':'resume','epoch':node.reception.engine.epoch})
+            wait(lambda:node.reception.engine.phase=='guest_wait')
+            node.reception.command({'command':'continue','epoch':node.reception.engine.epoch})
+            scenarios.append({'name':'single_point_pause_explicit_resume','passed':True,'hardware_commands':0})
+            node.reception.history.pending.join()
+            history=node.reception.history.read(node.map_name)
+            assert any(e['kind']=='paused'for e in history['events'])and any(e['kind']=='resumed'for e in history['events'])
+            scenarios.append({'name':'durable_task_history_actual_events','passed':True,'hardware_commands':0})
             result={'passed':True,'scenarios':scenarios,'hardware_commands':0,'model_start_requests':len(node.commands),
                     'scope':'Actual MissionService thread and NavigationSession with own synthetic planar/A* adapter. Not Nav2, RL gait, or physical motion validation.',
-                    'boundaries':['Continuous no-stop transit tracking not implemented','Live LiDAR door evidence producer not yet wired','Dynamic graph updates currently evaluated at mission start']}
+                    'boundaries':['This adapter is not ROS/Nav2 or biped acceptance; see separate native report for actual action and laser evidence checks.']}
         finally:node.close()
     Path(args.output).parent.mkdir(parents=True,exist_ok=True);Path(args.output).write_text(json.dumps(result,ensure_ascii=False,indent=2));print(json.dumps(result,ensure_ascii=False))
 if __name__=='__main__':main()
