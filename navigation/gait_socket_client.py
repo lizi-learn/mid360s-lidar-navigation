@@ -56,7 +56,7 @@ def decode_reply(data,now_ns):
 def encode_frame(operation,client,sequence,now_ns,authority,reply=None,velocity=(0.,0.,0.),command_stamp_ns=None):
     if operation==Operation.VELOCITY:
         vx,vy,wz=velocity
-        if not all(math.isfinite(v) for v in velocity) or not(0<=vx<=.8 and vy==0 and abs(wz)<=.6):
+        if not all(math.isfinite(v) for v in velocity) or not(0<=vx<=.8 and vy==0 and abs(wz)<=1.):
             raise ValueError('physical_forward_speed_contract')
     elif operation==Operation.MEASURED_VELOCITY:
         if (not all(math.isfinite(v) for v in velocity) or abs(velocity[0])>2 or

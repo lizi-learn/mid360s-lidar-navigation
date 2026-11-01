@@ -82,3 +82,22 @@ set. Do not send a0.6 request to an older0.24 native lease. The IMU application
 source is unchanged in this candidate. Successful encoding/ARM builds and
 socket receipts do not establish physical turn response; it still needs the
 subsequent supported cutover and real test.
+
+The operator then superseded that unactivated0.6 candidate: turn input maximum
+1.0, ordinary bends with forward input around0.6 and simultaneous yaw, lateral
+input0. The paired candidate now uses yaw1.0 throughout the native lease,
+encoder, buffer, smoother and final gate. Its yaw input ramp is0.5/s. RPP's
+ordinary curvature minimum is0.6; endpoint approach slowdown remains separate.
+The pivot threshold changes from0.35 to1.2 radians, so ordinary bends up to
+about69 degrees can continue forward instead of repeatedly pivoting. Larger
+heading corrections and final heading may still require an in-place turn.
+
+The controller bounds its yaw request before returning it. When that changes
+a forward arc, it checks the actual bounded arc against the costmap as well
+as the original RPP check. Collision STOP, E-middle pause, E-right/stick
+takeover, cancellation, original source expiry and the requested55cm square
+remain. No motion is injected into a zero request. The existing IMU application
+source is unchanged. This is a policy-input setting, not a calibrated claim of
+0.6m/s or1rad/s physical body motion. The isolated component test exercises
+the actual Nav2 plugin on a synthetic map, including an obstacle verified in
+its costmap; it does not establish physical balance or office navigation success.

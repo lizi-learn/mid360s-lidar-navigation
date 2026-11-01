@@ -47,8 +47,9 @@ def config(controller='rpp', tree=None, minimum_speed=.03, footprint_vertices=No
         rotate_to_heading_min_angle=.5,max_angular_accel=.5,max_robot_pose_search_dist=3.)
     if gait_profile=='p2-flat-model':
         rpp.update(plugin='p2_nav_controller::SettledGoalRPP',desired_linear_vel=.8,min_lookahead_dist=.4,max_lookahead_dist=.8,
-            lookahead_time=2.0,rotate_to_heading_angular_vel=.6,rotate_to_heading_min_angle=.35,cost_scaling_dist=1.0,
+            lookahead_time=2.0,rotate_to_heading_angular_vel=1.0,rotate_to_heading_min_angle=1.2,cost_scaling_dist=1.0,
             max_angular_accel=20.,regulated_linear_scaling_min_radius=1.25,
+            regulated_linear_scaling_min_speed=max(.6,minimum_speed),
             use_cost_regulated_linear_velocity_scaling=False)
     mppi=dict(plugin='nav2_mppi_controller::MPPIController',time_steps=48,model_dt=.05,batch_size=1000,
         iteration_count=1,vx_std=.10,vy_std=0.,wz_std=.20,vx_max=.30,vx_min=0.,vy_max=0.,wz_max=.35,
@@ -141,8 +142,8 @@ def config(controller='rpp', tree=None, minimum_speed=.03, footprint_vertices=No
         result['velocity_smoother']['ros__parameters']['max_velocity'][0]=.8
         result['velocity_smoother']['ros__parameters']['max_accel'][0]=.4
         result['velocity_smoother']['ros__parameters']['max_decel'][0]=-.8
-        result['velocity_smoother']['ros__parameters']['max_velocity'][2]=.6
-        result['velocity_smoother']['ros__parameters']['min_velocity'][2]=-.6
+        result['velocity_smoother']['ros__parameters']['max_velocity'][2]=1.
+        result['velocity_smoother']['ros__parameters']['min_velocity'][2]=-1.
         # Routes must fit the monitor's stop clearance, rather than repeatedly
         # selecting a physical-footprint gap that the monitor will reject.
         clearance=np.asarray(stop_points).reshape(-1,2).tolist()

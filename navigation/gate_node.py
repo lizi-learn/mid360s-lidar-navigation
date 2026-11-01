@@ -21,7 +21,7 @@ class GateNode(Node):
         self.handoff=None;self.intent=(0.,0.,0.);self.intent_time=0.;self.measured=None
         self.recovery=None;self.recovery_wait=False;self.collision_stop=False
         if self.declare_parameter('gait_handoff',False).value:
-            self.gate=ForwardGate(Limits(max_v=.8,max_w=.6,accel=.4,decel=.8))
+            self.gate=ForwardGate(Limits(max_v=.8,max_w=1.,accel=.4,decel=.8))
             from gait_handoff import GaitHandoff
             self.handoff=GaitHandoff()
             from clearance_recovery import ClearanceRecovery

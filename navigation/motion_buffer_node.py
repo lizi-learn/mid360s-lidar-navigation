@@ -12,7 +12,7 @@ from navigation_reference import reference_ready
 
 class MotionBufferNode(Node):
     def __init__(self):
-        super().__init__('gait_motion_buffer');self.buffer=MotionBuffer(accel=.4,decel=.8);self.target=(0.,0.,0.)
+        super().__init__('gait_motion_buffer');self.buffer=MotionBuffer(accel=.4,decel=.8,angular_accel=.5);self.target=(0.,0.,0.)
         self.measured=(0.,0.,0.);self.command_time=0.;self.odom_stamp=0.
         self.armed=False;self.paused=True;self.collision=True;self.reference=False;self.reference_time=0.
         self.output=self.create_publisher(Twist,'/p2_nav/cmd_buffered',10)
@@ -28,7 +28,7 @@ class MotionBufferNode(Node):
         # Bound finite yaw requests before the buffer contract; rejecting the
         # whole vector would repeatedly erase an otherwise valid forward input.
         w=m.angular.z
-        limit=.6 if m.linear.x==0. and m.linear.y==0. else .24
+        limit=1.
         self.target=(m.linear.x,m.linear.y,max(-limit,min(limit,w)) if math.isfinite(w) else w)
         self.command_time=time.monotonic()
     def odom(self,m):

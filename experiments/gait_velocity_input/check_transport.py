@@ -52,10 +52,13 @@ def scenario(binary,commissioned):
             wait(lambda:transport.speed_tracking and abs(transport.speed_tracking['policy_input_x']-.4)<1e-6,timeout=2.5)
             result['manual_equivalent_half_reaches_native_point_four']=True
             result['target_measurement_and_policy_input_are_distinct']=True
-            state['target']=(0.,0.,.6)
-            wait(lambda:transport.speed_tracking and transport.speed_tracking['policy_input_yaw']>.599,timeout=3.)
+            state['target']=(0.,0.,1.)
+            wait(lambda:transport.speed_tracking and transport.speed_tracking['policy_input_yaw']>.999,timeout=3.)
             assert transport.speed_tracking['policy_input_x']==0.
-            result['pure_turn_reaches_native_manual_half_yaw_point_six']=True
+            result['pure_turn_reaches_native_requested_yaw_one']=True
+            state['target']=(.6,0.,-.8)
+            wait(lambda:transport.speed_tracking and abs(transport.speed_tracking['policy_input_x']-.6)<1e-6 and abs(transport.speed_tracking['policy_input_yaw']+.8)<1e-6,timeout=5.)
+            result['forward_point_six_and_turn_together_without_lateral_input']=True
             state['target']=(.4,0.,0.)
             wait(lambda:transport.speed_tracking and transport.speed_tracking['policy_input_x']>.399,timeout=2.)
             state['mode']=2

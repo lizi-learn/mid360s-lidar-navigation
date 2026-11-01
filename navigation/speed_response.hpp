@@ -35,7 +35,7 @@ class SpeedResponse {
     if(!owned || (vx==0. && wz==0.)){reset();return state_;}
     if(!std::isfinite(vx)||!std::isfinite(wz)||!std::isfinite(measured_x)||
        !std::isfinite(measured_yaw)||!std::isfinite(dt)||dt<=0.||dt>.1||
-       vx<0.||vx>.800001||std::abs(wz)>.600001||
+       vx<0.||vx>.800001||std::abs(wz)>1.000001||
        std::abs(measured_x)>2.||std::abs(measured_yaw)>4.){
       reset();state_.reason=speed_invalid_input;return state_;
     }
@@ -50,7 +50,7 @@ class SpeedResponse {
     // A zero on takeover, collision or cancellation clears immediately above.
     // Other input changes are slewed; measured velocity never rescales this
     // explicit manual-equivalent command or silently multiplies half twice.
-    const double target[2]={vx,wz}, slew[2]={.4,.30};
+    const double target[2]={vx,wz}, slew[2]={.4,.5};
     for(unsigned i=0;i<2;++i){
       if(target[i]==0.)output_[i]=0.;
       else {

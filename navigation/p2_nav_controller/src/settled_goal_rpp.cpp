@@ -44,7 +44,21 @@ class SettledGoalRPP : public nav2_regulated_pure_pursuit_controller::RegulatedP
     const bool aligned=std::abs(error)<std::abs(tf2::getYaw(tolerance.orientation));
     const bool rotate_final=phase_.step(distance,tolerance.position.x,now,aligned);
     if (!use_rotate_to_heading_ || (!rotate_final && distance>2.*tolerance.position.x)) {
-      base_lock.unlock(); return Base::computeVelocityCommands(pose,speed,checker);
+      base_lock.unlock();
+      auto out=Base::computeVelocityCommands(pose,speed,checker);
+      // The D-policy turn input is bounded before returning it. Clipping yaw
+      // changes a forward arc, so collision-check that actual arc as well.
+      base_lock.lock();
+      const double bounded=std::clamp(out.twist.angular.z,
+        -rotate_to_heading_angular_vel_,rotate_to_heading_angular_vel_);
+      if (bounded!=out.twist.angular.z) {
+        auto *map=costmap_ros_->getCostmap();
+        std::unique_lock<nav2_costmap_2d::Costmap2D::mutex_t> map_lock(*(map->getMutex()));
+        if (use_collision_detection_ && isCollisionImminent(pose,out.twist.linear.x,bounded,distance))
+          throw nav2_core::PlannerException("Bounded forward arc collision ahead");
+        out.twist.angular.z=bounded;
+      }
+      return out;
     }
     // A new lattice plan can contain a tight arrival loop to impose final yaw.
     // In the bounded terminal region, acquire XY first and then pivot. No lateral
