@@ -2,4 +2,5 @@
   <class name="p2_nav_controller::ExactHeadingLattice" type="p2_nav_controller::ExactHeadingLattice" base_class_type="nav2_core::GlobalPlanner">
     <description>Smac lattice plus collision-checked terminal pivot to the requested yaw.</description>
   </class>
+  <class name="p2_nav_controller::PositionOnlyLattice" type="p2_nav_controller::PositionOnlyLattice" base_class_type="nav2_core::GlobalPlanner"><description>Forward lattice with checked initial pivot and arrival from an observed point-route, without a forced final yaw.</description></class>
 </library>

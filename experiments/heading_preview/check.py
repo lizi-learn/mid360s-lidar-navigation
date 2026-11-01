@@ -19,6 +19,7 @@ def main():
     prefix=out.parent/f'{cohort}-{kind}-{name}'
     params=config(gait_profile='p2-flat-model',footprint_vertices=[[.275,.275],[.275,-.275],[-.275,-.275],[-.275,.275]],footprint_padding=0.)
     controller=params['controller_server']['ros__parameters'];controller['FollowPath'].update(min_lookahead_dist=lo,max_lookahead_dist=hi)
+    if name=='before':controller['FollowPath'].update(collision_lookahead_floor=0.,minimum_pivot_input=0.)
     paramfile=prefix.with_suffix('.params.yaml');paramfile.write_text(yaml.safe_dump({'preview_controller':{'ros__parameters':controller}}))
     cmd=[a.binary,str(prefix),kind,str(gain),str(delay),'--ros-args','--params-file',str(paramfile),'--log-level','error']
     result=subprocess.run(cmd,capture_output=True,text=True,timeout=45)

@@ -86,6 +86,26 @@ jobs:
           name: heading-preview-component-evidence
           path: /tmp/heading-preview/*
           if-no-files-found: ignore
+      - name: Check position-goal planning, stalled pivots and position-only tracking
+        shell: bash
+        env:
+          ROS_LOCALHOST_ONLY: '1'
+          ROS_DOMAIN_ID: '209'
+          ROS_LOG_DIR: /tmp/arrival-ros-logs
+        run: |
+          source /opt/ros/humble/setup.bash
+          source nav_controller_ws/install/setup.bash
+          cmake -S experiments/arrival -B /tmp/arrival-build
+          cmake --build /tmp/arrival-build -j2
+          python3 experiments/arrival/check.py --binary /tmp/arrival-build/arrival_planner --output /tmp/arrival/planner/comparison.json
+          python3 experiments/arrival/check_pivot.py --binary /tmp/arrival-build/pivot_model --output /tmp/arrival/pivot/comparison.json
+          python3 experiments/arrival/check_tracking.py --binary /tmp/heading-preview-build/heading_preview --output /tmp/arrival/tracking/comparison.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: position-arrival-component-evidence
+          path: /tmp/arrival/*
+          if-no-files-found: ignore
       - name: Reject missing, stale, unknown and untransformable obstacle observations
         shell: bash
         env:

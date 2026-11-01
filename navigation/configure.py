@@ -53,7 +53,7 @@ def config(controller='rpp', tree=None, minimum_speed=.03, footprint_vertices=No
             lookahead_time=2.0,rotate_to_heading_angular_vel=1.0,rotate_to_heading_min_angle=1.2,cost_scaling_dist=1.0,
             max_angular_accel=20.,regulated_linear_scaling_min_radius=1.25,
             regulated_linear_scaling_min_speed=max(.6,minimum_speed),
-            use_cost_regulated_linear_velocity_scaling=False)
+            use_cost_regulated_linear_velocity_scaling=False,minimum_pivot_input=.5,collision_lookahead_floor=.55)
     mppi=dict(plugin='nav2_mppi_controller::MPPIController',time_steps=48,model_dt=.05,batch_size=1000,
         iteration_count=1,vx_std=.10,vy_std=0.,wz_std=.20,vx_max=.30,vx_min=0.,vy_max=0.,wz_max=.35,
         ax_max=.15,ax_min=-.30,az_max=.5,prune_distance=1.8,transform_tolerance=.15,
@@ -101,6 +101,17 @@ def config(controller='rpp', tree=None, minimum_speed=.03, footprint_vertices=No
             lookup_table_size=20.,cache_obstacle_heuristic=False,analytic_expansion_ratio=3.5,
             analytic_expansion_max_length=2.,smooth_path=True,
             smoother=dict(max_iterations=200,w_smooth=.3,w_data=.2,tolerance=1e-10,do_refinement=True))))
+    if gait_profile=='p2-flat-model':
+        import copy
+        planner=result['planner_server']['ros__parameters']
+        planner['planner_plugins'].append('PositionOnly')
+        planner['PositionOnly']=copy.deepcopy(planner['GridBased'])
+        planner['PositionOnly']['plugin']='p2_nav_controller::PositionOnlyLattice'
+        planner['PositionOnly']['smooth_path']=False
+        planner['PositionOnly']['cache_obstacle_heuristic']=True
+        control=result['controller_server']['ros__parameters']
+        control['goal_checker_plugins'].append('position_goal_checker')
+        control['position_goal_checker']=dict(plugin='p2_nav_controller::PositionGoalChecker',xy_goal_tolerance=.15)
     add('behavior_server',dict(use_sim_time=False,costmap_topic='local_costmap/costmap_raw',
         footprint_topic='local_costmap/published_footprint',cycle_frequency=10.,behavior_plugins=['wait'],
         wait=dict(plugin='nav2_behaviors/Wait'),global_frame='odom',robot_base_frame='base_link',transform_tolerance=.2))

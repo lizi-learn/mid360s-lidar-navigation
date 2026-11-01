@@ -338,9 +338,13 @@ class Console(Node):
     def set_goal(self,data):
         if self.mode!='navigation':raise ValueError('请先载入地图进入导航模式')
         pose=self.checked_pose(data)
+        heading_mode=data.get('heading_mode','pose')
+        if heading_mode not in ('pose','position'):raise ValueError('未知目标朝向模式')
+        if heading_mode=='position' and self.gait_profile!='p2-flat-model':raise ValueError('当前配置不支持位置目标规划')
         if not self.gate.get('localized'):raise ValueError('定位尚未就绪，请先设置初始位置')
         with self.lock:
             generation=self.session.prepare(data,time.monotonic());self.path=[];self.goal=None
+            self.goal_heading_mode=heading_mode
             self.pending_plan_accept=True
             self.op(armed=False,paused=True)
         try:self.wait_planner_active()
@@ -352,7 +356,7 @@ class Console(Node):
             with self.lock:
                 self.pending_plan_accept=False;self.session.planned(generation,0,time.monotonic());self.acknowledge_if_quiet(generation)
             raise ValueError('规划服务尚未就绪')
-        request=ComputePathToPose.Goal();request.goal=pose;request.planner_id='GridBased'
+        request=ComputePathToPose.Goal();request.goal=pose;request.planner_id='PositionOnly' if heading_mode=='position' else 'GridBased'
         with self.lock:
             if self.session.generation!=generation or self.session.phase!='planning':
                 self.pending_plan_accept=False;self.acknowledge_if_quiet(generation);raise ValueError('规划已取消')
@@ -386,6 +390,7 @@ class Console(Node):
         if not self.nav.wait_for_server(timeout_sec=3):
             self.pending_nav_accept=False;self.session.cancel();self.stop_actions();self.acknowledge_if_quiet(generation);raise ValueError('导航服务未就绪')
         goal=NavigateToPose.Goal();goal.pose=pose
+        if getattr(self,'goal_heading_mode','pose')=='position':goal.behavior_tree=str(Path(__file__).with_name('forward_position_navigation.xml'))
         with self.lock:
             if self.session.generation!=generation or self.session.phase!='starting':
                 self.pending_nav_accept=False;self.acknowledge_if_quiet(generation);raise ValueError('开始已取消')

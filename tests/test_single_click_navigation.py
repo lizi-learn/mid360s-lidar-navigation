@@ -27,7 +27,7 @@ function fixture(){
   document:{getElementById:element,activeElement:null},window:{addEventListener(){}},
   setInterval(){},setTimeout,clearTimeout,AbortController};
  vm.createContext(sandbox);vm.runInContext(SOURCE,sandbox);
- sandbox.fixture={simulation:false,execution_ready:true,robot_name:'fixture',mode:'navigation',pose:[0,0,0],
+ sandbox.fixture={simulation:false,gait_profile:'p2-flat-model',execution_ready:true,robot_name:'fixture',mode:'navigation',pose:[0,0,0],
   session:{generation:0,phase:'idle',navigation_permitted:true,operator_mode:'navigation_allowed'},
   gate:{ground_ok:true,localized:true,calibration_ready:true,collision_source_valid:true,
     data_fresh:true,scan_age:.1,odom_age:.1,command:[0,0,0]},maps:[],map:null,map_revision:0};
@@ -53,7 +53,7 @@ function fixture(){
   assert.equal(calls.length,0,'Entering left mode or refreshing never starts movement');
   await sandbox.confirmStart();assert.deepEqual(calls.map(c=>c[0]),['goal','confirm']);
   assert.equal(element('confirm').disabled,true,'Executing route cannot be started again');
-  assert.equal(calls[0][1].yaw,Math.atan2(2,1),'Point-only goals use forward arrival, not forced map-east');
+  assert.equal(calls[0][1].heading_mode,'position','Point goal explicitly omits final heading');
  }
  {
   const {sandbox,calls}=fixture();await sandbox.refresh();
@@ -72,7 +72,7 @@ function fixture(){
  }
  {
   const {sandbox,calls,element}=fixture();await sandbox.refresh();element('fixedYaw').checked=true;
-  await sandbox.confirmStart();assert.equal(calls[0][1].yaw,0,'An explicit zero-degree arrival is preserved');
+  await sandbox.confirmStart();assert.equal(calls[0][1].yaw,0,'An explicit zero-degree arrival is preserved');assert.equal(calls[0][1].heading_mode,'pose');
  }
  for(const action of ['cancel','change_target']){
   const {sandbox,calls}=fixture();await sandbox.refresh();let release;

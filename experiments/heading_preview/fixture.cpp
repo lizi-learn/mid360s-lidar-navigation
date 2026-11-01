@@ -11,6 +11,7 @@
 #include <numeric>
 #include <string>
 #include <vector>
+#include <cstdlib>
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp_lifecycle/lifecycle_node.hpp"
 #include "pluginlib/class_loader.hpp"
@@ -72,9 +73,11 @@ int main(int argc,char **argv){
  for(size_t i=0;i<names.size();++i){if(i)actual<<",";actual<<"\""<<names[i]<<"\":"<<parent->get_parameter("FollowPath."+names[i]).value_to_string();}
  actual<<",\"actual_footprint\":[";auto footprint=cm->getRobotFootprint();for(size_t i=0;i<footprint.size();++i){if(i)actual<<",";actual<<"["<<footprint[i].x<<","<<footprint[i].y<<"]";}actual<<"]}";actual.close();
  pluginlib::ClassLoader<nav2_core::GoalChecker> goals("nav2_core","nav2_core::GoalChecker");
- auto checker=goals.createSharedInstance("nav2_controller::SimpleGoalChecker");checker->initialize(parent,"goal_checker",cm);
+ const bool position_only=std::getenv("P2_TEST_POSITION_GOAL")!=nullptr;
+ auto checker=goals.createSharedInstance(position_only?"p2_nav_controller::PositionGoalChecker":"nav2_controller::SimpleGoalChecker");checker->initialize(parent,"goal_checker",cm);
  auto points=path_points(kind);nav_msgs::msg::Path path;path.header.frame_id="fixture_world";
  for(size_t i=0;i<points.size();++i){geometry_msgs::msg::PoseStamped p;p.header=path.header;p.pose.position.x=points[i].x;p.pose.position.y=points[i].y;auto a=points[i?i-1:i],b=points[std::min(i+1,points.size()-1)];p.pose.orientation=nav2_util::geometry_utils::orientationAroundZAxis(std::atan2(b.y-a.y,b.x-a.x));path.poses.push_back(p);}
+ if(position_only)path.poses.back().pose.orientation=nav2_util::geometry_utils::orientationAroundZAxis(pi);
  control->setPlan(path);
  double x=0.,y=.25,yaw=.15,v=0.,w=0.,time=0.,rms=0.,max_error=0.,last_sign=0.,progress=0.;int counted=0,reversals=0,collisions=0,stops=0;bool reached=false,obstacle=false,triggered=false,verified_obstacle=false,cleared=false;double obstacle_at=-1,ox=0,oy=0;
  p2_nav::SpeedResponse native;std::deque<std::array<double,2>> latency(static_cast<size_t>(std::round(delay/dt))+1,{0.,0.});
