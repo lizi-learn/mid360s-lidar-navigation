@@ -165,6 +165,24 @@ def apply_runtime_geometry(params_file):
     if not isinstance(padding,(int,float)) or not math.isfinite(padding) or not 0<=padding<=.05:
         raise ValueError('Invalid configured footprint padding')
     params=yaml.safe_load(path.read_text())
+    # The same configured body must be used by costmaps AND collision polygons.
+    # Preserve existing front/rear/side clearances while replacing the body;
+    # otherwise an old wide model silently remains a navigation stop condition.
+    old_shape=checked(json.loads(params['local_costmap']['local_costmap']['ros__parameters']['footprint']))
+    old_lo,old_hi=np.asarray(old_shape).min(axis=0),np.asarray(old_shape).max(axis=0)
+    new_lo,new_hi=np.asarray(vertices).min(axis=0),np.asarray(vertices).max(axis=0)
+    monitor=params.get('collision_monitor',{}).get('ros__parameters',{})
+    for name in ('StopZone','SlowZone'):
+        zone=monitor.get(name)
+        if not zone or zone.get('type')!='polygon':continue
+        points=np.asarray(zone['points'],dtype=float).reshape(-1,2)
+        zlo,zhi=points.min(axis=0),points.max(axis=0)
+        # Configured zones are axis-aligned rectangles around the body bounds.
+        if len(points)!=4 or not all(x in (zlo[0],zhi[0]) and y in (zlo[1],zhi[1]) for x,y in points):
+            raise ValueError('Configured collision zone is not a rectangular body-clearance polygon')
+        lower=new_lo-(old_lo-zlo);upper=new_hi+(zhi-old_hi)
+        zone['points']=[float(upper[0]),float(upper[1]),float(upper[0]),float(lower[1]),
+                        float(lower[0]),float(lower[1]),float(lower[0]),float(upper[1])]
     for name in ('local_costmap','global_costmap'):
         grid=params[name][name]['ros__parameters']
         grid['footprint']=json.dumps(vertices);grid['footprint_padding']=padding

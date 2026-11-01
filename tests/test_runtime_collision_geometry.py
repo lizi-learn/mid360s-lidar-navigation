@@ -1,0 +1,21 @@
+"""A requested body change must reach real collision polygons, not just maps."""
+import unittest,pathlib,tempfile,json,sys,yaml
+sys.path.insert(0,str(pathlib.Path(__file__).resolve().parents[1]/'navigation'))
+from configure import config,apply_runtime_geometry
+class RuntimeCollisionGeometryTests(unittest.TestCase):
+ def test_requested_55cm_body_preserves_clearances_and_obstacle_action(self):
+  with tempfile.TemporaryDirectory()as d:
+   p=pathlib.Path(d)/'nav2.yaml';original=config(gait_profile='p2-flat-model',stop_side_margin=.05)
+   p.write_text(yaml.safe_dump(original));shape=[[.275,.275],[.275,-.275],[-.275,-.275],[-.275,.275]]
+   p.with_name('planning_geometry.json').write_text(json.dumps({'footprint':shape,'footprint_padding':0.}))
+   apply_runtime_geometry(p);out=yaml.safe_load(p.read_text())
+   for name,front,rear,side in [('StopZone',.53,.15,.05),('SlowZone',.95,.25,.32)]:
+    zone=out['collision_monitor']['ros__parameters'][name];points=zone['points']
+    self.assertAlmostEqual(max(points[::2]),.275+front);self.assertAlmostEqual(min(points[::2]),-.275-rear)
+    self.assertAlmostEqual(max(points[1::2]),.275+side);self.assertAlmostEqual(min(points[1::2]),-.275-side)
+    self.assertEqual(zone['max_points'],original['collision_monitor']['ros__parameters'][name]['max_points'])
+    self.assertEqual(zone['action_type'],original['collision_monitor']['ros__parameters'][name]['action_type'])
+   self.assertEqual(json.loads(out['local_costmap']['local_costmap']['ros__parameters']['footprint']),shape)
+   self.assertEqual(out['collision_monitor']['ros__parameters']['StopZone']['action_type'],'stop')
+   apply_runtime_geometry(p);self.assertEqual(yaml.safe_load(p.read_text()),out)
+if __name__=='__main__':unittest.main()

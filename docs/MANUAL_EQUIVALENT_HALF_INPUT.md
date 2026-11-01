@@ -26,3 +26,11 @@ native policy input. These checks are not evidence of physical walking. Earlier
 no-motion tests, source-clock and health failures remain in the existing report.
 Actual joint targets, measured joint response and driver overrides must be
 reported from the subsequent real test before claiming that it moved.
+
+Runtime geometry follow-up: the first real request still produced zero. The
+configured costmaps used the requested55cm body, but collision StopZone retained
+the old1.14m width and oscillated STOP/clear. Runtime geometry now updates both
+StopZone and SlowZone from the same body, retaining the existing clearances,
+point threshold and stop/slowdown actions. No returns are removed or reclassified.
+The original failed request remains in private evidence; this fix needs a new
+real request before it can establish movement.
