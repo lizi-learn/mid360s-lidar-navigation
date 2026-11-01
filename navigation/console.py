@@ -490,6 +490,7 @@ def main():
             check_calibration(profile,data)
     rclpy.init();node=Console(runtime,args.simulation,args.minimum_speed,vertices,args.odometry_model,args.gait_profile,args.gait_socket);node.robot_name=profile['name'] if selected else None;node.robot_identity=identity(profile) if selected else None;executor=SingleThreadedExecutor();executor.add_node(node)
     thread=threading.Thread(target=executor.spin,daemon=True);thread.start()
+    from audio_feedback import save_resource
     class Handler(BaseHTTPRequestHandler):
         def log_message(self,*a):pass
         def send(self,body,status=200,content_type='application/json'):
@@ -512,7 +513,7 @@ def main():
                 d=json.loads(self.rfile.read(length))
                 routes={'/api/audio':lambda:node.audio.update(d),'/api/start':lambda:node.start(d['mode'],d.get('name','office'),d.get('controller','rpp')),
                     '/api/sim_mapping_route':lambda:node.simulated_mapping_route(d['name']),
-                    '/api/save':lambda:node.save_map(d['name']),'/api/goal':lambda:node.set_goal(d),
+                    '/api/save':lambda:save_resource(node,d),'/api/goal':lambda:node.set_goal(d),
                     '/api/confirm':lambda:node.confirm_goal(d),'/api/sim_operator':lambda:node.simulation_operator(d),
                     '/api/initialpose':lambda:node.set_pose(d),'/api/speed':lambda:node.speed(d['speed'],d.get('velocity_scale')),
                     '/api/stop':lambda:(node.stop() or {'stopped':True})}

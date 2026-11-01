@@ -97,6 +97,20 @@ class AudioSettings:
         return result
 
 
+def save_resource(node, data):
+    """Old G12 gateways already carry configuration Save requests.
+
+    The typed audio payload saves ONLY audio preferences. It never calls map
+    saving or a navigation action; mixed audio/map requests are rejected first.
+    New gateways may use the dedicated /api/audio endpoint instead.
+    """
+    if 'audio_feedback' in data:
+        if set(data) != {'audio_feedback'}:
+            raise ValueError('声音设置不能与保存地图混合提交')
+        return node.audio.update(data['audio_feedback'])
+    return node.save_map(data['name'])
+
+
 @dataclass(frozen=True)
 class Cue:
     kind: str

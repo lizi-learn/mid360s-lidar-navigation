@@ -29,7 +29,7 @@ async function confirmStart(){if(goalRequestPending||!canStart(state,prepared))r
 async function stop(){invalidate();apiMessage='正在提交取消与停车请求…';byId('message').textContent=apiMessage;try{await api('stop',{});apiMessage='';await refresh()}catch(e){showError(e)}}
 async function initial(){try{await api('initialpose',target(true));apiMessage='';await refresh()}catch(e){showError(e)}}
 async function setVelocityScale(scale){try{await api('speed',{speed:Number(byId('speed').value),velocity_scale:scale});apiMessage='';await refresh()}catch(e){showError(e)}}
-async function setAudio(data){try{await api('audio',data);apiMessage='';await refresh()}catch(e){showError(e)}}
+async function setAudio(data){try{await api(API_BASE?'save':'audio',API_BASE?{audio_feedback:data}:data);apiMessage='';await refresh()}catch(e){showError(e)}}
 async function setSpeed(){try{await api('speed',{speed:Number(byId('speed').value)});apiMessage=''}catch(e){showError(e)}}
 async function simMode(mode){try{await api('sim_operator',{mode});apiMessage='';await refresh()}catch(e){showError(e)}}
 const nameValue=()=>byId('name').value.trim();

@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'navigation'))
-from audio_feedback import AudioSettings, CuePolicy, PHRASES
+from audio_feedback import AudioSettings, CuePolicy, PHRASES, save_resource
 from audio_worker import LocalPlayer, status_url
 
 
@@ -87,6 +87,17 @@ class AudioSettingsTests(unittest.TestCase):
             for data in [{'volume':True},{'volume':-1},{'volume':101},{'volume':float('nan')},{'enabled':'yes'},{'test':1},{'start':True}]:
                 with self.assertRaises(ValueError):s.update(data)
             self.assertFalse(s.path.exists())
+
+    def test_legacy_g12_save_route_keeps_audio_and_map_operations_separate(self):
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        with tempfile.TemporaryDirectory() as d:
+            node=SimpleNamespace(audio=AudioSettings(Path(d)/'audio-settings.json'),save_map=Mock(return_value={'map_saved':True}))
+            result=save_resource(node,{'audio_feedback':{'volume':33,'test':True}})
+            self.assertEqual(result['volume'],33);self.assertEqual(result['test_generation'],1);node.save_map.assert_not_called()
+            with self.assertRaises(ValueError):save_resource(node,{'audio_feedback':{'enabled':False},'name':'office'})
+            self.assertTrue(node.audio.read()['enabled']);node.save_map.assert_not_called()
+            self.assertEqual(save_resource(node,{'name':'office'}),{'map_saved':True});node.save_map.assert_called_once_with('office')
 
     def test_only_loopback_get_observer(self):
         self.assertEqual(status_url('http://127.0.0.1:8930'),'http://127.0.0.1:8930/api/status?summary=1')
