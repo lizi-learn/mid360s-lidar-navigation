@@ -36,3 +36,9 @@ for(const name of input.exports)if(typeof ctx[name]!=='function')throw Error('In
 console.log('Legacy global collision reproduced; isolated startup and all inline actions passed');"""
 embedded=embedded_reception_html(ROOT/'navigation')
 subprocess.run(['node','-e',probe],input=json.dumps({'direct':re.findall(r'<script[^>]*>(.*?)</script>',app,re.S)[0],'embedded':re.findall(r'<script[^>]*>(.*?)</script>',embedded,re.S)[0],'exports':sorted(set(re.findall(r'onclick="([A-Za-z_$][\w$]*)\(',app)))}).encode(),check=True)
+
+# The compact panel must never label an unknown/unverified switch as left.
+mode_helper=app[app.index('function operatorInstruction()'):app.index('function toast(')]
+mode_probe=r"""const vm=require('vm'),fs=require('fs'),input=JSON.parse(fs.readFileSync(0,'utf8'));const c=vm.createContext({});vm.runInContext('let state=null;'+input.source,c);
+for(const [session,expected]of [[null,'连接'],[{operator_verified:false,operator_mode:'navigation_allowed'},'连接'],[{operator_verified:true,operator_mode:'manual'},'右档'],[{operator_verified:true,operator_mode:'paused'},'中档'],[{operator_verified:true,operator_mode:'navigation_allowed'},'左档'],[{operator_verified:true,operator_mode:'unknown'},'未允许'],[{operator_verified:true,operator_mode:'navigation_allowed',manual_activity:true},'摇杆']]){c.fixture={session};vm.runInContext('state=fixture',c);if(!vm.runInContext('operatorInstruction()',c).includes(expected))throw Error('Wrong operator mode presentation: '+expected);}console.log('Actual operator hint:7 verified/manual/pause/unknown/takeover cases passed');"""
+subprocess.run(['node','-e',mode_probe],input=json.dumps({'source':mode_helper}).encode(),check=True)

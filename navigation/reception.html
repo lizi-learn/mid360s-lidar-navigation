@@ -17,7 +17,7 @@ let state=null,doc=null,voice=null,tab='points',selected=null,selectedRoute=null
 const canvas=$('mapCanvas'),ctx=canvas.getContext('2d');
 async function request(path,data){const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),data?.reception?.operation?.startsWith('map_')?90000:15000);try{const r=await fetch(API_BASE+path,{method:data===undefined?'GET':'POST',headers:data===undefined?{}:{'Content-Type':'application/json','X-Nav-Token':state?.request_token||''},body:data===undefined?undefined:JSON.stringify(data),signal:controller.signal});let j=await r.json();if(!r.ok)throw Error(j.error||'请求失败');return j}finally{clearTimeout(timer)}}
 function returnToNavigation(){location.href=API_BASE?location.pathname+'?embedded=1':'/';}
-function operatorInstruction(){const s=state?.session;return !s?.operator_verified?'正在连接 E 档位':s.operator_mode==='manual'?'E 右档 · 手动控制，切左档后可开始':s.operator_mode==='paused'?'E 中档 · 已暂停，回左档后点继续':s.manual_activity?'摇杆已接管，请重新开始任务':'E 左档允许导航；右档或摇杆立即接管';}
+function operatorInstruction(){const s=state?.session;return !s?.operator_verified?'正在连接 E 档位':s.operator_mode==='manual'?'E 右档 · 手动控制，切左档后可开始':s.operator_mode==='paused'?'E 中档 · 已暂停，回左档后点继续':s.manual_activity?'摇杆已接管，请重新开始任务':s.operator_mode==='navigation_allowed'?'E 左档允许导航；右档或摇杆立即接管':'当前档位未允许导航';}
 function toast(s){$('toast').textContent=s;$('toast').style.display='block';clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').style.display='none',4500)}
 function touch(){dirty=true;$('saveButton').textContent='保存更改 · 未保存';$('revisionBadge').textContent='草稿 · v'+doc.revision}
 function uid(prefix){return prefix+'_'+crypto.getRandomValues(new Uint32Array(2)).join('_')}
