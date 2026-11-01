@@ -48,7 +48,8 @@ def config(controller='rpp', tree=None, minimum_speed=.03, footprint_vertices=No
     if gait_profile=='p2-flat-model':
         rpp.update(plugin='p2_nav_controller::SettledGoalRPP',desired_linear_vel=.8,min_lookahead_dist=.4,max_lookahead_dist=.8,
             lookahead_time=2.0,rotate_to_heading_angular_vel=.24,rotate_to_heading_min_angle=.35,cost_scaling_dist=1.0,
-            max_angular_accel=20.,regulated_linear_scaling_min_radius=1.25)
+            max_angular_accel=20.,regulated_linear_scaling_min_radius=1.25,
+            use_cost_regulated_linear_velocity_scaling=False)
     mppi=dict(plugin='nav2_mppi_controller::MPPIController',time_steps=48,model_dt=.05,batch_size=1000,
         iteration_count=1,vx_std=.10,vy_std=0.,wz_std=.20,vx_max=.30,vx_min=0.,vy_max=0.,wz_max=.35,
         ax_max=.15,ax_min=-.30,az_max=.5,prune_distance=1.8,transform_tolerance=.15,
@@ -130,6 +131,10 @@ def config(controller='rpp', tree=None, minimum_speed=.03, footprint_vertices=No
             action_type='slowdown',slowdown_ratio=.4,max_points=2,visualize=True,polygon_pub_topic='slow_zone'),
         observation_sources=['scan'],scan=dict(type='scan',topic='/scan',enabled=True)))
     if gait_profile=='p2-flat-model':
+        # Use the selected manual-equivalent input, one operator multiplier,
+        # and the actual collision STOP. The old cost multiplier and wide
+        # SlowZone compounded into sub-actuation inputs (0.39*0.4*0.5).
+        result['collision_monitor']['ros__parameters']['polygons']=['StopZone']
         result['planner_server']['ros__parameters']['GridBased']['plugin']='p2_nav_controller::ExactHeadingLattice'
         for costmap in ('local_costmap','global_costmap'):result[costmap][costmap]['ros__parameters']['inflation_layer']['inflation_radius']=1.2
         result['controller_server']['ros__parameters']['progress_checker']['movement_time_allowance']=40.

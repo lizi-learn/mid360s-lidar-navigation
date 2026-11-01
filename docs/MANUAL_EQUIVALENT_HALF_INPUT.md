@@ -34,3 +34,11 @@ StopZone and SlowZone from the same body, retaining the existing clearances,
 point threshold and stop/slowdown actions. No returns are removed or reclassified.
 The original failed request remains in private evidence; this fix needs a new
 real request before it can establish movement.
+
+The next real request stayed navigation_active but input peaked at0.09816.
+Actual staged values established the extra reductions: raw0.39046, collision
+slowdown0.15618, then the operator half multiplier. For the P2 manual-equivalent
+profile, cost-based RPP speed scaling and the separate SlowZone multiplier are
+therefore removed. Curvature and endpoint approach scaling, real collision STOP,
+source expiry, operator takeover and input ramps remain. Generic profiles keep
+their prior configuration. This change is not a claim of physical movement.
