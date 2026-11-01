@@ -27,3 +27,27 @@ front/rear corner sweeps, a collision on the left arc, present body intrusion,
 empty footprint, stale scan and failed TF, then clear recovery. It does not use
 an office map, a physical plant or an actuator connection. Physical application
 and navigation outcome must be reported separately after installation.
+
+
+## Supervised physical follow-up, 2026-11-01
+
+The optional profile was installed on an ARM robot without restarting its
+existing gait, motor driver or neck processes. The final outward segment
+planned about16.7m and returned Nav2 `arrived` after32.6s; the onsite operator
+confirmed reaching the far end. The return request targeted the actual pose
+recorded before the outward run, planned about43.7m and returned `arrived`
+after94.5s with one replan and two Nav2 recoveries. The final three-second
+read-only sample showed navigation disarmed and all native inputs zero, with
+localization-estimated position error about0.24m and heading error about3deg.
+Commands combined forward and yaw with lateral input zero. These are physical
+execution receipts, with no independent ground-truth accuracy measurement.
+
+The intermediate180deg in-place goal did not fully converge: it turned about
+159deg and was stopped at its45s observation deadline, still about21deg short.
+The return completed from that actual heading. Low-input terminal turn response
+remains unresolved; the outward settled heading also missed its configured
+tolerance. Earlier blocked detours and synthetic fixture failures remain in the
+private audit. These two reached endpoints do not erase the prior failures or
+certify all navigation, physical stopping or collision-envelope performance.
+No office coordinates, maps, recordings, vendor code or credentials accompany
+this public summary.
