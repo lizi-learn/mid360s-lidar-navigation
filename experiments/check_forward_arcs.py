@@ -30,7 +30,7 @@ def main():
     qos=QoSProfile(depth=1,durability=DurabilityPolicy.TRANSIENT_LOCAL,reliability=ReliabilityPolicy.RELIABLE)
     maps=n.create_publisher(OccupancyGrid,'/turn_arc_fixture/map',qos)
     odom=n.create_publisher(Odometry,'/turn_arc_fixture/odom',10)
-    trace=[];results=[];phase={'wall':False}
+    trace=[];results=[];phase={'wall':False,'boxed':False}
     n.create_subscription(Twist,'/turn_arc_fixture/command',lambda m:trace.append((time.monotonic(),m.linear.x,m.linear.y,m.angular.z)),10)
     tf=StaticTransformBroadcaster(n);t=TransformStamped();t.header.stamp=n.get_clock().now().to_msg()
     t.header.frame_id='fixture_odom';t.child_frame_id='fixture_base';t.transform.rotation.w=1.;tf.sendTransform(t)
@@ -42,6 +42,9 @@ def main():
         if phase['wall']:
             for iy in range(80,161):
                 for ix in (131,132):cells[iy*240+ix]=100
+        if phase['boxed']:
+            for i in range(112,129):
+                for j in (112,127):cells[i*240+j]=100;cells[j*240+i]=100
         m.data=cells;maps.publish(m)
         v=Odometry();v.header.stamp=stamp;v.header.frame_id='fixture_odom';v.child_frame_id='fixture_base';v.pose.pose.orientation.w=1.;odom.publish(v)
     n.create_timer(.1,publish);publish()
@@ -92,8 +95,33 @@ def main():
         assert max(costs)>=253,{'wall_costs':costs}
         start=time.monotonic();handle=complete(action.send_goal_async(wall_goal));assert handle.accepted;spin(.8)
         rows=[r for r in trace if r[0]>=start]
+        assert rows and all(r[1]==r[2]==0 and abs(r[3])<=1. for r in rows),rows
+        # Forward motion is blocked, but an in-place pivot may be clear. Verify
+        # its entire padded square against the ACTUAL map over the unchanged1.5s
+        # horizon, rather than equating every nonzero yaw with failed avoidance.
+        half=.275+local['footprint_padding'];res=m.metadata.resolution
+        for command in rows:
+            for k in range(151):
+                yaw=command[3]*k*.01;c=math.cos(yaw);s=math.sin(yaw)
+                for iy in range(int((-half*1.5-m.metadata.origin.position.y)/res),int((half*1.5-m.metadata.origin.position.y)/res)+1):
+                    for ix in range(int((-half*1.5-m.metadata.origin.position.x)/res),int((half*1.5-m.metadata.origin.position.x)/res)+1):
+                        if m.data[iy*m.metadata.size_x+ix]<254:continue
+                        dx=m.metadata.origin.position.x+(ix+.5)*res;dy=m.metadata.origin.position.y+(iy+.5)*res
+                        overlap=abs(dx)<=half*(abs(c)+abs(s))+res/2 and abs(dy)<=half*(abs(c)+abs(s))+res/2 and abs(c*dx+s*dy)<=half+res/2*(abs(c)+abs(s)) and abs(-s*dx+c*dy)<=half+res/2*(abs(c)+abs(s))
+                        assert not overlap,{'unsafe_pivot':command,'yaw':yaw,'occupied_cell':[ix,iy]}
+        results.append({'case':'confirmed_wall_blocks_forward_and_pivot_is_clear','wall_costs':costs,'samples':len(rows),'full_padded_body_sweep_clear':True,'sweep_horizon_s':1.5})
+        complete(handle.cancel_goal_async());spin(.1)
+        phase['boxed']=True;publish();spin(1.)
+        box=complete(service.call_async(GetCostmap.Request())).map
+        def actual_cost(x,y):
+            ix=int((x-box.metadata.origin.position.x)/box.metadata.resolution);iy=int((y-box.metadata.origin.position.y)/box.metadata.resolution)
+            return box.data[iy*box.metadata.size_x+ix]
+        box_costs=[actual_cost(x,y)for x,y in[(.375,0),(-.375,0),(0,.375),(0,-.375)]]
+        assert min(box_costs)>=254,box_costs
+        start=time.monotonic();handle=complete(action.send_goal_async(wall_goal));assert handle.accepted;spin(.8)
+        rows=[r for r in trace if r[0]>=start]
         assert rows and all(r[1]==r[2]==r[3]==0 for r in rows),rows
-        results.append({'case':'confirmed_wall_stops_actual_controller','wall_costs':costs,'samples':len(rows),'all_zero':True})
+        results.append({'case':'confirmed_box_stops_actual_controller','box_costs':box_costs,'samples':len(rows),'all_zero':True})
         complete(handle.cancel_goal_async())
     finally:
         if process.poll() is None:
@@ -102,8 +130,8 @@ def main():
             except subprocess.TimeoutExpired:os.killpg(process.pid,signal.SIGKILL);process.wait(timeout=3)
         log.close();n.destroy_node();rclpy.shutdown()
         output.write_text(json.dumps({'scope':'Actual Nav2 RPP plugin, synthetic static map and stationary pose; no gait, plant, robot hardware or actuator socket.',
-            'seed':0,'parameters':params,'cases':results,'complete':len(results)==9,'hardware_commands':0},indent=2))
-    assert len(results)==9
+            'seed':0,'parameters':params,'cases':results,'complete':len(results)==10,'hardware_commands':0},indent=2))
+    assert len(results)==10
     print(json.dumps({'complete':True,'cases':len(results),'hardware_commands':0}))
 
 if __name__=='__main__':main()

@@ -52,7 +52,7 @@ jobs:
           name: directional-stop-component-evidence
           path: /tmp/directional-stop-component*
           if-no-files-found: ignore
-      - name: Check forward bends and a confirmed obstacle with the actual RPP plugin
+      - name: Check bends, a clear obstacle pivot and a fully blocked stop
         shell: bash
         env:
           ROS_LOCALHOST_ONLY: '1'
