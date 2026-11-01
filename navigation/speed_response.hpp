@@ -1,6 +1,7 @@
 #pragma once
-// Physical speed targets and learned-policy observation inputs are different
-// quantities. This controller uses measured velocity, not a model inverse curve.
+// User-requested D-policy manual-equivalent input. Full forward0.8 times
+// upstream half-speed0.5 gives policy input0.4. This is not measured body speed.
+// Actual velocity remains separately reported; no model curve or PI gain is used.
 // Pure arithmetic: no hardware, socket, allocation or filesystem operations.
 #include <algorithm>
 #include <cmath>
@@ -34,7 +35,7 @@ class SpeedResponse {
     if(!owned || (vx==0. && wz==0.)){reset();return state_;}
     if(!std::isfinite(vx)||!std::isfinite(wz)||!std::isfinite(measured_x)||
        !std::isfinite(measured_yaw)||!std::isfinite(dt)||dt<=0.||dt>.1||
-       vx<0.||vx>.150001||std::abs(wz)>.240001||
+       vx<0.||vx>.800001||std::abs(wz)>.240001||
        std::abs(measured_x)>2.||std::abs(measured_yaw)>4.){
       reset();state_.reason=speed_invalid_input;return state_;
     }
@@ -46,41 +47,16 @@ class SpeedResponse {
     state_.target_x=vx;state_.target_yaw=wz;
     state_.measured_x=measured_x;state_.measured_yaw=measured_yaw;
     state_.source_ns=source_ns;state_.valid=1;state_.reason=speed_tracking;
-    const double target[2]={vx,wz}, measured[2]={measured_x,measured_yaw};
-    // Candidate actor-input bounds/rates are controller tuning, not physical
-    // speed limits or a claim that a model response curve calibrates hardware.
-    const double maximum[2]={.30,.50}, slew[2]={.15,.30};
-    const double proportional[2]={.10,.12}, integration[2]={.15,.35};
+    // A zero on takeover, collision or cancellation clears immediately above.
+    // Other input changes are slewed; measured velocity never rescales this
+    // explicit manual-equivalent command or silently multiplies half twice.
+    const double target[2]={vx,wz}, slew[2]={.4,.30};
     for(unsigned i=0;i<2;++i){
-      if(!initialized_)filtered_[i]=measured[i];
-      else filtered_[i]+=dt/(.15+dt)*(measured[i]-filtered_[i]);
-      if(target[i]==0.){integral_[i]=output_[i]=moving_time_[i]=0.;started_[i]=false;continue;}
-      const double sign=target[i]>0.?1.:-1.;
-      if(output_[i]*sign<0.){integral_[i]=output_[i]=moving_time_[i]=0.;started_[i]=false;continue;}
-      const double error=sign*(target[i]-filtered_[i]);
-      // Search gradually only while actual measured motion remains below a
-      // fifth of the target. Once moving, ordinary PI avoids the bias produced
-      // by sign-normalizing oscillatory biped feedback.
-      const double ki=i==0&&std::abs(target[i])<.05?.60:integration[i];
-      double rate=ki*error;
-      // A sustained measured onset ends the search. A short pose oscillation
-      // is not an onset; later gait phases must not add a search bias to PI.
-      moving_time_[i]=std::max(0.,moving_time_[i]+
-        (sign*filtered_[i]>=.5*std::abs(target[i])?dt:-dt));
-      if(moving_time_[i]>=1.)started_[i]=true;
-      if(!started_[i] && sign*filtered_[i]<.5*std::abs(target[i]) && error>0.)
-        rate=std::max(rate,i==0?.04:.06);
-      const double delta=rate*dt;
-      double next=std::clamp(integral_[i]+delta,0.,maximum[i]);
-      const double kp=proportional[i];
-      const double requested=std::clamp(next+kp*error,0.,maximum[i]);
-      const double applied=std::clamp(sign*requested,output_[i]-slew[i]*dt,output_[i]+slew[i]*dt);
-      // Freeze only extra positive windup at an upper actuator slew limit.
-      // Negative error must still lower the integral while braking is slewed.
-      if(error>0. && (sign*requested-applied)*sign>0.)next=integral_[i];
-      integral_[i]=next;
-      output_[i]=std::clamp(sign*std::clamp(next+kp*error,0.,maximum[i]),
-                            output_[i]-slew[i]*dt,output_[i]+slew[i]*dt);
+      if(target[i]==0.)output_[i]=0.;
+      else {
+        const double rate=i==0 && target[i]<output_[i]?.8:slew[i];
+        output_[i]=std::clamp(target[i],output_[i]-rate*dt,output_[i]+rate*dt);
+      }
     }
     initialized_=true;
     state_.policy_x=output_[0];state_.policy_yaw=output_[1];return state_;

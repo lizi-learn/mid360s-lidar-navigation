@@ -23,7 +23,7 @@ class ForwardGate:
 
     def set_speed(self, value):
         if not math.isfinite(value) or not .03 <= value <= self.limits.max_v:
-            raise ValueError('speed must be finite and between 0.03 and 0.30 m/s')
+            raise ValueError(f'speed/input must be finite and between 0.03 and {self.limits.max_v}')
         self.speed = value
 
     def set_velocity_scale(self, value):

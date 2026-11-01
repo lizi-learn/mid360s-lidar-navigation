@@ -17,7 +17,7 @@ def config(controller='rpp', tree=None, minimum_speed=.03, footprint_vertices=No
     if gait_profile not in ('generic','p2-flat-model'):raise ValueError('Unknown gait profile')
     if gait_profile=='p2-flat-model':
         if controller!='rpp':raise ValueError('The experimental P2 model profile requires RPP')
-        if minimum_speed>.15:raise ValueError('P2 model profile minimum speed exceeds its 0.15 m/s candidate cap')
+        if minimum_speed>.8:raise ValueError('P2 profile minimum input exceeds the D-policy manual command range of 0.8')
         if footprint_vertices is None:footprint_vertices=load_footprint(Path(__file__).parent/'profiles/p2-model-envelope.json')
         odometry_model='omni'
     if odometry_model not in ('differential','omni'):raise ValueError('Unknown localization odometry model')
@@ -46,7 +46,7 @@ def config(controller='rpp', tree=None, minimum_speed=.03, footprint_vertices=No
         regulated_linear_scaling_min_speed=max(.08,minimum_speed),use_rotate_to_heading=True,allow_reversing=False,
         rotate_to_heading_min_angle=.5,max_angular_accel=.5,max_robot_pose_search_dist=3.)
     if gait_profile=='p2-flat-model':
-        rpp.update(plugin='p2_nav_controller::SettledGoalRPP',desired_linear_vel=.15,min_lookahead_dist=.4,max_lookahead_dist=.8,
+        rpp.update(plugin='p2_nav_controller::SettledGoalRPP',desired_linear_vel=.8,min_lookahead_dist=.4,max_lookahead_dist=.8,
             lookahead_time=2.0,rotate_to_heading_angular_vel=.24,rotate_to_heading_min_angle=.35,cost_scaling_dist=1.0,
             max_angular_accel=20.,regulated_linear_scaling_min_radius=1.25)
     mppi=dict(plugin='nav2_mppi_controller::MPPIController',time_steps=48,model_dt=.05,batch_size=1000,
@@ -133,7 +133,9 @@ def config(controller='rpp', tree=None, minimum_speed=.03, footprint_vertices=No
         result['planner_server']['ros__parameters']['GridBased']['plugin']='p2_nav_controller::ExactHeadingLattice'
         for costmap in ('local_costmap','global_costmap'):result[costmap][costmap]['ros__parameters']['inflation_layer']['inflation_radius']=1.2
         result['controller_server']['ros__parameters']['progress_checker']['movement_time_allowance']=40.
-        result['velocity_smoother']['ros__parameters']['max_velocity'][0]=.15
+        result['velocity_smoother']['ros__parameters']['max_velocity'][0]=.8
+        result['velocity_smoother']['ros__parameters']['max_accel'][0]=.4
+        result['velocity_smoother']['ros__parameters']['max_decel'][0]=-.8
         result['velocity_smoother']['ros__parameters']['max_velocity'][2]=.24
         result['velocity_smoother']['ros__parameters']['min_velocity'][2]=-.24
         # Routes must fit the monitor's stop clearance, rather than repeatedly

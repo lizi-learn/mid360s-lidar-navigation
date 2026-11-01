@@ -86,7 +86,7 @@ class PhysicalSpeedInput {
       revoke("navigation_command_expired");return false;
     }
     if(bytes!=sizeof(Packet)||p.magic!=0x504e4156||p.version!=1||p.flags!=1||p.reserved||!p.instance||!p.sequence){revoke("invalid_navigation_packet");return false;}
-    if(!std::isfinite(p.vx)||!std::isfinite(p.vy)||!std::isfinite(p.wz)||p.vx<0||p.vx>.15f||p.vy!=0.f||std::abs(p.wz)>.24f){revoke("forward_velocity_contract");return false;}
+    if(!std::isfinite(p.vx)||!std::isfinite(p.vy)||!std::isfinite(p.wz)||p.vx<0||p.vx>.8f||p.vy!=0.f||std::abs(p.wz)>.24f){revoke("forward_velocity_contract");return false;}
     if(!fresh(p.monotonic_ns,now,command_timeout)){revoke("navigation_packet_expired");return false;}
     if(p.monotonic_ns<armed_at_){revoke("navigation_packet_predates_arm");return false;}
     if(bound_&&p.instance!=source_){revoke("navigation_source_changed");return false;}

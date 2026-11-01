@@ -34,7 +34,7 @@ class Console(Node):
             self.gait=GaitTransport(gait_socket,trace_path=runtime/'gait-velocity.private.jsonl')
         self.robot_name=None;self.runtime=runtime;self.simulation=simulation;self.mode='idle';self.controller='rpp';self.process=None
         self.minimum_speed=minimum_speed;self.footprint=footprint;self.odometry_model=odometry_model;self.gait_profile=gait_profile
-        self.maximum_speed=.15 if gait_profile=='p2-flat-model' else .30
+        self.maximum_speed=.8 if gait_profile=='p2-flat-model' else .30
         self.route_process=None;self.route_directory=None
         self.lock=threading.RLock();self.grid=None;self.path=[];self.gate={};self.truth={};self.goal=None
         self.last_action='等待选择建图或载入地图';self.goal_handle=None;self.feedback={}
@@ -44,7 +44,7 @@ class Console(Node):
         self.collision_stop=False;self.path_revision=0;self.obstacle_path_revision=0
         self.virtual_operator=None;self.virtual_sequence=0;self.virtual_source=secrets.randbits(63)+1
         self.request_token=secrets.token_urlsafe(24)
-        self.speed_value=min(.20,self.maximum_speed)
+        self.speed_value=.8 if gait_profile=='p2-flat-model' else min(.20,self.maximum_speed)
         self.velocity_scale=.5 if gait_profile=='p2-flat-model' else 1.
         qos=QoSProfile(depth=1,durability=DurabilityPolicy.TRANSIENT_LOCAL,reliability=ReliabilityPolicy.RELIABLE)
         self.create_subscription(OccupancyGrid,'/map',self.on_map,qos)
@@ -464,7 +464,7 @@ def main():
             from robot_profile import check_simulation_runtime
             check_simulation_runtime(runtime)
     runtime.mkdir(parents=True,exist_ok=True);(runtime/'maps').mkdir(exist_ok=True)
-    if not .03<=args.minimum_speed<=(.15 if args.gait_profile=='p2-flat-model' else .25):raise ValueError('Invalid minimum speed profile')
+    if not .03<=args.minimum_speed<=(.8 if args.gait_profile=='p2-flat-model' else .25):raise ValueError('Invalid minimum speed profile')
     from footprint import load as load_footprint
     vertices=load_footprint(args.footprint_profile) if args.footprint_profile else None
     if selected and args.footprint_profile:

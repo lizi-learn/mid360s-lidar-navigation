@@ -62,7 +62,7 @@ class BufferTest(unittest.TestCase):
         with self.assertRaises(ValueError):MotionBuffer(feedback_timeout=.501)
 
     def test_no_sideways_reverse_or_excess_request(self):
-        for target in ((.151,0,0),(.1,.01,0),(-.01,0,0),(0,0,.241),(float('nan'),0,0)):
+        for target in ((.801,0,0),(.1,.01,0),(-.01,0,0),(0,0,.241),(float('nan'),0,0)):
             self.assertEqual(MotionBuffer().step(target,(0,0,0),0.,.01,frame_verified=True),(0,0,0))
 
 if __name__=='__main__':unittest.main()

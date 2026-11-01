@@ -9,7 +9,7 @@ from nav2_msgs.msg import CollisionMonitorState
 from sensor_msgs.msg import LaserScan
 from std_msgs.msg import Bool, String
 from tf2_ros import Buffer, TransformListener
-from gate import ForwardGate
+from gate import ForwardGate, Limits
 from navigation_reference import reference_ready
 
 class GateNode(Node):
@@ -21,6 +21,7 @@ class GateNode(Node):
         self.handoff=None;self.intent=(0.,0.,0.);self.intent_time=0.;self.measured=None
         self.recovery=None;self.recovery_wait=False;self.collision_stop=False
         if self.declare_parameter('gait_handoff',False).value:
+            self.gate=ForwardGate(Limits(max_v=.8,max_w=.24,accel=.4,decel=.8))
             from gait_handoff import GaitHandoff
             self.handoff=GaitHandoff()
             from clearance_recovery import ClearanceRecovery

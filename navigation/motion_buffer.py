@@ -27,7 +27,7 @@ class MotionBuffer:
         dt=.01 if self.last is None else now-self.last
         if (hard_stop or not frame_verified or not all(math.isfinite(x) for x in values)
                 or not 0<dt<=.25 or not -.005<=feedback_age<=self.feedback_timeout
-                or not 0<=target[0]<=.15 or target[1]!=0 or abs(target[2])>.24):
+                or not 0<=target[0]<=.8 or target[1]!=0 or abs(target[2])>.24):
             self.reset();self.phase='immediate_zero';return (0.,0.,0.)
         self.last=now
         v,_,w=target

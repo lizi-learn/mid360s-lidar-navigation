@@ -32,7 +32,7 @@ def scenario(binary,commissioned):
                         source.send(packet)
                     if transport:
                         stamp=time.monotonic_ns()
-                        transport.update({'evaluated_monotonic_ns':stamp,'data_fresh':True,'calibration_ready':True,'ground_ok':True,'localized':True,'command':(.1,0.,0.),'body_velocity_feedback':(0.,0.,0.),'velocity_source_monotonic_ns':stamp},True)
+                        transport.update({'evaluated_monotonic_ns':stamp,'data_fresh':True,'calibration_ready':True,'ground_ok':True,'localized':True,'command':(.4,0.,0.),'body_velocity_feedback':(0.,0.,0.),'velocity_source_monotonic_ns':stamp},True)
                         if state['stale_command']:
                             with transport.lock:transport.command_stamp=stamp-400_000_000
                     stopping.wait(.01)
@@ -44,11 +44,13 @@ def scenario(binary,commissioned):
                 except ValueError:result['client_health_cannot_open_local_gate']=True
                 else:raise AssertionError('uncommissioned ARM accepted')
                 return result
-            wait(transport.ready);transport.arm(101);wait(lambda:transport.feedback.navigation_owned and transport.feedback.vx>.09)
+            wait(transport.ready);transport.arm(101);wait(lambda:transport.feedback.navigation_owned and transport.feedback.vx>.399)
             result['python_rpc_to_cpp_lease_physical_velocity']=True
             wait(lambda:transport.speed_tracking and transport.speed_tracking['valid'] and transport.speed_tracking['policy_input_x']>0)
-            assert abs(transport.speed_tracking['target_x']-.1)<1e-6
+            assert abs(transport.speed_tracking['target_x']-.4)<1e-6
             assert transport.speed_tracking['measured_x']==0
+            wait(lambda:transport.speed_tracking and abs(transport.speed_tracking['policy_input_x']-.4)<1e-6,timeout=2.5)
+            result['manual_equivalent_half_reaches_native_point_four']=True
             result['target_measurement_and_policy_input_are_distinct']=True
             state['mode']=2
             wait(lambda:transport.feedback and transport.feedback.operator_mode==2 and transport.feedback.cancel_pending and not transport.feedback.navigation_owned)

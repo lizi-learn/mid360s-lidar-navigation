@@ -148,7 +148,7 @@ class GaitTransport:
                 'controller_instance':r.controller if r else None,'policy_generation':r.generation if r else None,
                 'navigation_owned':bool(r and r.navigation_owned),'manual_owned':bool(r and r.manual_owned),
                 'tick':r.tick if r else 0,'velocity':[r.vx,r.vy,r.wz] if r else None,
-                'velocity_semantics':'requested_physical_target_not_measured_speed',
+                'velocity_semantics':'D_policy_manual_equivalent_input_not_measured_speed',
                 'speed_tracking':self.speed_tracking,
                 'armed':bool(r and r.armed),'force_zero':bool(r and r.force_zero),
                 'receiver_instance':r.receiver_instance if r else 0,'receiver_generation':r.receiver_generation if r else 0,

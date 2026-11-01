@@ -48,7 +48,7 @@ int main(){
  }
  for(int i=0;i<12;++i){
   PhysicalSpeedInput q;active(q);auto p=packet(3,.1f);
-  if(i==0)p.vy=.001f;if(i==1)p.vx=-.01f;if(i==2)p.vx=.150001f;if(i==3)p.wz=.240001f;
+  if(i==0)p.vy=.001f;if(i==1)p.vx=-.01f;if(i==2)p.vx=.800001f;if(i==3)p.wz=.240001f;
   if(i==4)p.vx=std::numeric_limits<float>::quiet_NaN();if(i==5)p.monotonic_ns=base-300000001;
   if(i==6)p.monotonic_ns=base+5000001;if(i==7)++p.instance;if(i==8)p.sequence=2;
   if(i==9)p.reserved=1;

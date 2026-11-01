@@ -8,15 +8,18 @@ SOURCE=r'''
 using namespace p2_nav;
 int main(){
  SpeedResponse c;std::uint64_t now=10000000000ULL;SpeedTrackingState s;
- double measured=0.;
- // An unknown learned deadband, absent any inverse curve or minimum kick.
- // Closed loop must leave standing, track the target, then clear immediately.
- for(int k=0;k<6000;++k){
-  now+=10000000;s=c.step(.075,0.,measured,0.,.01,now-100000000,now,true);
-  measured+=(std::max(0.,(s.policy_x-.22)*4.)-measured)*.05;
-  assert(s.valid&&s.policy_x>=0.&&s.policy_x<=.30);
+ double measured=.02, previous=0.;
+ // Same manual maximum0.8, exactly one upstream half multiplier.
+ // A different measured speed is reported, not mistaken for this input.
+ for(int k=0;k<200;++k){
+  now+=10000000;s=c.step(.8*.5,0.,measured,0.,.01,now-100000000,now,true);
+  assert(s.valid&&s.policy_x>=previous&&s.policy_x-previous<=.00400001);
+  previous=s.policy_x;
  }
- assert(measured>.065&&measured<.085);
+ assert(std::abs(s.target_x-.4)<1e-12&&std::abs(s.policy_x-.4)<1e-12);
+ assert(std::abs(s.measured_x-.02)<1e-12);
+ for(int k=0;k<20;++k){now+=10000000;s=c.step(.4,0.,k%2?.2:-.1,0.,.01,now,now,true);assert(s.policy_x==.4);}
+ s=c.step(.2,0.,.2,0.,.01,now,now,true);assert(s.policy_x>.2&&s.policy_x<.4);
  s=c.step(0.,0.,measured,0.,.01,now,now,true);assert(s.policy_x==0.&&s.policy_yaw==0.);
  for(int i=0;i<4;++i){
   for(int k=0;k<50;++k){now+=10000000;c.step(.075,.1,0.,0.,.01,now,now,true);}
@@ -33,7 +36,7 @@ int main(){
 '''
 class SpeedResponseTests(unittest.TestCase):
  @unittest.skipUnless(shutil.which('g++'),'C++ compiler required')
- def test_measured_feedback_deadband_and_immediate_stop(self):
+ def test_manual_half_input_slew_and_immediate_stop(self):
   with tempfile.TemporaryDirectory() as d:
    p=pathlib.Path(d);(p/'test.cpp').write_text(SOURCE)
    subprocess.run(['g++','-std=c++17','-Wall','-Wextra','-Werror','-fsanitize=undefined','-fno-sanitize-recover=all','-I'+str(ROOT/'navigation'),str(p/'test.cpp'),'-o',str(p/'test')],check=True,capture_output=True)
