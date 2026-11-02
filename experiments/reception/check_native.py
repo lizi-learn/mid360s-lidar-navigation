@@ -8,7 +8,7 @@ from pathlib import Path
 ROOT=Path(__file__).resolve().parents[2];NAV=ROOT/'navigation';sys.path.insert(0,str(NAV))
 
 def main():
-    ap=argparse.ArgumentParser();ap.add_argument('--output',required=True);ap.add_argument('--setup',required=True);ap.add_argument('--port',type=int,default=8947);ap.add_argument('--domain',type=int,default=208);ap.add_argument('--stop-profile',choices=['baseline-directional','legacy-rectangle'],default='baseline-directional');ap.add_argument('--scenario',choices=['transit','all','obstacle','tools','maps'],default='all');ap.add_argument('--obstacle-offset',type=float,default=0.);args=ap.parse_args()
+    ap=argparse.ArgumentParser();ap.add_argument('--output',required=True);ap.add_argument('--setup',required=True);ap.add_argument('--port',type=int,default=8947);ap.add_argument('--domain',type=int,default=208);ap.add_argument('--stop-profile',choices=['baseline-directional','legacy-rectangle'],default='baseline-directional');ap.add_argument('--scenario',choices=['transit','all','obstacle','tools','maps','blockage'],default='all');ap.add_argument('--block-case',choices=['persistent','transient','takeover'],default='persistent');ap.add_argument('--obstacle-offset',type=float,default=0.);args=ap.parse_args()
     if not math.isfinite(args.obstacle_offset):raise ValueError('Invalid synthetic obstacle offset')
     out=Path(args.output).resolve().parent
     if out.exists()and any(out.iterdir()):raise ValueError('Use a new output directory; old failures are retained')
@@ -19,6 +19,8 @@ def main():
     os.environ.update({k:env[k]for k in ['ROS_DOMAIN_ID','ROS_LOCALHOST_ONLY']})
     if args.stop_profile=='baseline-directional':env['P2_NAV_DIRECTIONAL_STOP']='true'
     # Explicit optional loopback DDS configuration supplied by the caller.
+    if args.scenario=='blockage':
+        env['P2_NAV_SIM_CORRIDOR']='1';os.environ['P2_NAV_SIM_CORRIDOR']='1'
     from sim_world import save_truth
     from reception_catalog import blank
     door={'id':'front_door','x':5.9,'y':2.5,'yaw':math.pi/2,'width':2.4,'thickness':.15,'closed':True}
@@ -128,7 +130,7 @@ def main():
         call('/api/sim_operator',{'mode':'navigation_allowed'});wait(lambda d:d['session']['navigation_permitted'],5)
         call('/api/speed',{'speed':.75,'velocity_scale':.5})
         d=status();doc=blank('native_showroom')
-        if args.scenario not in ('obstacle','tools','maps'):
+        if args.scenario not in ('obstacle','tools','maps','blockage'):
             doc=blank('native_showroom');doc['points']=[point('a',2.8,2.5),point('b',3.6,2.5),point('c',4.4,2.5,'visit')]
             doc['routes']=[{'id':'tour','name':'continuous transit','mode':'showcase','loops':1,'description':'synthetic','steps':[{'point_id':i,'speak':False}for i in ['a','b','c']]}]
             doc=save(doc);start(doc);d=complete();mission=d['reception']['mission']
@@ -141,6 +143,77 @@ def main():
                 assert samples and min(t['command'][0]for t in samples)>.05,('transit stopped or unobserved',x)
                 windows[str(x)]={'samples':len(samples),'minimum_forward':min(t['command'][0]for t in samples)}
             events.append({'case':'continuous_native_transit','passed':True,'windows':windows})
+        if args.scenario=='blockage':
+            ros=ScenarioROS()
+            doc=blank('native_showroom');doc['points']=[point('finish',5.0,2.5,'visit')]
+            doc['routes']=[dict(id='tour',name='complete obstruction test',mode='showcase',loops=1,description='',steps=[dict(point_id='finish',speak=False)])]
+            doc=save(doc);start(doc)
+            moving=wait(lambda d:d['session']['phase']=='executing' and d['truth']['command'][0]>.08,12)
+            wall=dict(id='blocked_corridor',x=moving['truth']['pose'][0]+1.05,y=5.,yaw=math.pi/2,width=10.,thickness=.15,closed=True)
+            wall_start=time.monotonic();control={'doors':[wall],'control_id':'full-width-block'}
+            for _ in range(8):ros.control(control);time.sleep(.08)
+            observed=wait(lambda d:d['truth']['controls'].get('control_id')=='full-width-block',4)
+            def returns(d):
+                if ros.scan is None:return 0
+                pose=d['truth']['pose'];n=0
+                for i,value in enumerate(ros.scan.ranges):
+                    if not math.isfinite(value):continue
+                    a=pose[2]+ros.scan.angle_min+i*ros.scan.angle_increment
+                    x=pose[0]+value*math.cos(a);y=pose[1]+value*math.sin(a)
+                    if abs(x-wall['x'])<.14 and 0<y<10:n+=1
+                return n
+            def section(grid):
+                if grid is None:return False
+                m=grid.metadata
+                for sample in range(43):
+                    y=1.45+sample*.05;iy=math.floor((y-m.origin.position.y)/m.resolution);found=False
+                    for dx in [-.15,-.10,-.05,0.,.05,.10,.15]:
+                        ix=math.floor((wall['x']+dx-m.origin.position.x)/m.resolution)
+                        if 0<=ix<m.size_x and 0<=iy<m.size_y and grid.data[iy*m.size_x+ix]>=254:found=True;break
+                    if not found:return False
+                return True
+            observed=wait(lambda d:returns(d)>=2 and section(ros.global_map)and section(ros.local_map),8);rays=returns(observed)
+            cross_section={'global_lethal_span':section(ros.global_map),'local_lethal_span':section(ros.local_map),'y_interval':[1.45,3.55]}
+
+            stopped=[];terminal=None;stop_start=None
+            while time.monotonic()-wall_start<29.:
+                d=status();elapsed=time.monotonic()-wall_start
+                if max(map(abs,d['truth']['command']))<1e-5:
+                    if stop_start is None:stop_start=time.monotonic()
+                    stopped.append([elapsed,d['truth']['pose'],d['session']['phase']])
+                elif stop_start is not None and elapsed>3.:raise AssertionError('renewed motion while wall fully blocks corridor')
+                if d['reception']['mission']['phase']in ('failed','blocked','completed','cancelled','manual'):
+                    terminal={'elapsed_s':elapsed,'mission_phase':d['reception']['mission']['phase'],'session':d['session']};break
+                if args.block_case in ('transient','takeover')and stop_start is not None and time.monotonic()-stop_start>2.:break
+                time.sleep(.1)
+            witness={'cross_section':cross_section,'wall':wall,'ray_returns':rays,'stopped_samples':len(stopped),'terminal':terminal,'collision_attempts':d['truth']['collision_attempts']}
+            events.append(dict(case='full_width_obstruction_witness',passed=bool(stopped)and rays>=2,witness=witness))
+            assert stopped and rays>=2 and d['truth']['collision_attempts']==0,witness
+            if args.block_case=='persistent':
+                assert terminal is not None,'did not terminate persistent obstruction'
+                assert terminal['elapsed_s']>=doc['policy']['max_wait']-.5,('premature terminal before configured wait',witness)
+                assert d['session']['phase']=='blocked',d['session']
+                for _ in range(8):ros.control({'doors':[dict(wall,closed=False)],'control_id':'wall-open-after-timeout'});time.sleep(.08)
+                until=time.monotonic()+3.
+                while time.monotonic()<until:
+                    d=status();assert d['session']['phase']=='blocked'and max(map(abs,d['truth']['command']))<1e-6;time.sleep(.1)
+                witness['no_auto_restart_after_timeout_and_reopen']=True
+                events.append(dict(case='persistent_obstruction_wait_timeout_zero',passed=True,witness=witness))
+            else:
+                assert terminal is None,('premature navigation termination',witness)
+                if args.block_case=='takeover':
+                    call('/api/sim_operator',{'mode':'manual'})
+                    d=wait(lambda d:d['session']['phase']=='manual'and not d['session']['cancel_pending'],6)
+                opened=dict(wall,closed=False)
+                for _ in range(8):ros.control({'doors':[opened],'control_id':'wall-reopened'});time.sleep(.08)
+                if args.block_case=='transient':
+                    d=complete();events.append(dict(case='full_block_then_clear_replan_complete',passed=True,witness=witness))
+                else:
+                    call('/api/sim_operator',{'mode':'navigation_allowed'})
+                    until=time.monotonic()+3.
+                    while time.monotonic()<until:
+                        d=status();assert d['session']['phase']=='manual'and max(map(abs,d['truth']['command']))<1e-6;time.sleep(.1)
+                    events.append(dict(case='takeover_while_blocked_no_auto_restart_after_reopen',passed=True,witness=witness))
         if args.scenario=='all':
             ros=ScenarioROS()
             # Annotate a door that really exists in the ray-cast plant and was

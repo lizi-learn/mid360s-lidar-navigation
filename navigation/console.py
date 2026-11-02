@@ -12,7 +12,7 @@ from geometry_msgs.msg import PoseStamped,PoseWithCovarianceStamped,Twist
 from nav_msgs.msg import OccupancyGrid,Path as RosPath
 from sensor_msgs.msg import LaserScan
 from nav2_msgs.action import NavigateToPose,ComputePathToPose,NavigateThroughPoses,ComputePathThroughPoses
-from nav2_msgs.msg import SpeedLimit,CollisionMonitorState,CostmapFilterInfo
+from nav2_msgs.msg import SpeedLimit,CollisionMonitorState,CostmapFilterInfo,BehaviorTreeLog
 from slam_toolbox.srv import SerializePoseGraph
 from nav2_msgs.srv import SaveMap
 from lifecycle_msgs.srv import GetState
@@ -45,6 +45,7 @@ class Console(Node):
         if self.gait:self.gait.operator_observer=lambda:self.poll_gait_authority(time.monotonic())
         self.plan_handle=None;self.pending_nav_accept=False;self.pending_plan_accept=False;self.cancel_sent_handles=[];self.action_results={};self.accepted_actions={}
         self.collision_stop=False;self.path_revision=0;self.obstacle_path_revision=0
+        self.bt_goal_source_ns=0;self.bt_recovery_report={}
         self.virtual_operator=None;self.virtual_sequence=0;self.virtual_source=secrets.randbits(63)+1
         self.request_token=secrets.token_urlsafe(24)
         self.navigation_grid=None;self.overlay_revision=0;self.overlay_report={};self._overlay_key=None;self._overlay_lock=threading.Lock()
@@ -58,6 +59,7 @@ class Console(Node):
         if self.gait:self.create_subscription(String,'/p2_nav/path_view',self.on_path_view,10)
         else:self.create_subscription(RosPath,'/plan',self.on_path,10)
         self.create_subscription(CollisionMonitorState,'/p2_nav/collision_state',self.on_collision,10)
+        self.create_subscription(BehaviorTreeLog,'/behavior_tree_log',self.on_bt_log,10)
         self.create_subscription(String,'/p2_nav/operator_authority',self.on_authority,10)
         self.create_subscription(String,'/p2_nav/gate_status',self.on_gate,10)
         self.create_subscription(String,'/p2_nav/sim_truth',lambda m:setattr(self,'truth',json.loads(m.data)),10)
@@ -212,6 +214,17 @@ class Console(Node):
                 age=(self.get_clock().now().nanoseconds-source_ns)/1e9
                 fresh=-.05<=age<=.5 and self.path_revision>self.obstacle_path_revision and len(self.path)>1
                 self.session.reroute(time.monotonic(),fresh,not self.collision_stop and self.health_ready())
+    def on_bt_log(self,msg):
+        source_ns=msg.timestamp.sec*10**9+msg.timestamp.nanosec
+        now_ns=self.get_clock().now().nanoseconds
+        with self.lock:
+            if self.session.phase not in ('executing','replanning') or source_ns<self.bt_goal_source_ns or not -.05<=(now_ns-source_ns)/1e9<=.5:return
+            for event in msg.event_log:
+                if event.node_name=='ObservedRouteWait' and event.current_status=='RUNNING':
+                    self.bt_recovery_report={'source_ros_ns':str(source_ns),'generation':self.goal_generation,'node':event.node_name,'age_at_receipt_s':(now_ns-source_ns)/1e9}
+                    if self.session.phase=='executing':
+                        self.obstacle_path_revision=self.path_revision;self.session.obstacle(time.monotonic())
+                        self.session._notice('路径暂不可用：已停车，正在等待或重新规划')
     def on_collision(self,msg):
         with self.lock:
             self.collision_stop=msg.action_type==CollisionMonitorState.STOP
@@ -560,7 +573,11 @@ class Console(Node):
         else:
             goal=NavigateToPose.Goal();goal.pose=pose
             if getattr(self,'goal_heading_mode','pose')=='position':goal.behavior_tree=str(Path(__file__).with_name('forward_position_navigation.xml'))
+        from recovery_tree import recovery_tree
+        base_tree=getattr(goal,'behavior_tree','') or str(Path(__file__).with_name('forward_navigation.xml'))
+        goal.behavior_tree=recovery_tree(base_tree,self.runtime/'recovery-trees',self.session.replan_timeout)
         with self.lock:
+            self.bt_goal_source_ns=self.get_clock().now().nanoseconds;self.bt_recovery_report={}
             if self.session.generation!=generation or self.session.phase!='starting':
                 self.pending_nav_accept=False;self.acknowledge_if_quiet(generation);raise ValueError('开始已取消')
             future=navigator.send_goal_async(goal,feedback_callback=lambda f:self.on_feedback(f,generation))
@@ -589,7 +606,7 @@ class Console(Node):
                 'mission_phase':mission['phase'],'session_phase':self.session.phase,'pose':None,
                 'pose_valid':self.health_ready(),'collision_stop':self.collision_stop,
                 'goal_generation':self.goal_generation,'path_revision':self.path_revision,
-                'path_source':self.path_source_report,'feedback':self.feedback,'speed_zones':self.speed_zone_status,
+                'control_recovery':self.bt_recovery_report,'path_source':self.path_source_report,'feedback':self.feedback,'speed_zones':self.speed_zone_status,
                 'gate':{k:self.gate.get(k)for k in ('evaluated_monotonic_ns','velocity_source_monotonic_ns','reason',
                     'command','body_velocity_feedback','velocity_stages','scan_age','odom_age','localized','ground_ok')},
                 'session_notice':self.session.status(now).get('notice')}
@@ -746,7 +763,7 @@ class Console(Node):
             'maps':sorted(p.parent.name for p in (self.runtime/'maps').glob('*/mapped.yaml')),
             'hardware_execution_enabled':bool(getattr(self,'gait',None) and self.gait.status()['navigation_owned']),
             'audio_feedback':self.audio.status(),
-            'reception':self.reception_status(),'path_source':self.path_source_report,
+            'reception':self.reception_status(),'control_recovery':self.bt_recovery_report,'path_source':self.path_source_report,
             'scope':'平面导航仿真' if self.simulation else ('雷达中心坐标导航；定位、传感器和步态状态见实时数据' if self.gate.get('navigation_reference')=='lidar_projection' else ('实机步态接口已连接；坐标与控制状态见实时数据' if self.gait else '实机导航预演'))}
 
 def main():

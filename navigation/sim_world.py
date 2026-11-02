@@ -19,6 +19,9 @@ def make_world():
     for x0,y0,x1,y1 in [(5.8,0,6.0,1.2),(5.8,3.8,6.0,7.4),(5.8,9.2,6.,10),
                          (3.4,5.,4.4,6.0),(8.0,5.4,9.,6.8),(9.4,8.,10.2,8.6)]:
         grid[int(y0/RES):int(y1/RES),int(x0/RES):int(x1/RES)]=100
+    if os.environ.get('P2_NAV_SIM_CORRIDOR')=='1':
+        grid[int(1.3/RES):int(1.45/RES),:int(5.8/RES)]=100
+        grid[int(3.55/RES):int(3.7/RES),:int(5.8/RES)]=100
     return grid
 
 def save_truth(directory,doors=None):
@@ -38,7 +41,7 @@ class World(Node):
         from footprint import checked,DEFAULT
         self.footprint=np.asarray(checked(json.loads(os.environ['P2_NAV_FOOTPRINT']) if os.getenv('P2_NAV_FOOTPRINT') else DEFAULT))
         self.grid=make_world();self.x=2.;self.y=2.5;self.yaw=0.;self.cmd=(0.,0.);self.cmd_at=0.
-        self.last=time.monotonic();self.start=self.last;self.collision_count=0;self.travel=0.;self.path=[]
+        self.last=time.monotonic();self.start=self.last;self.loop_profile={"step_gap_max_ms":0.,"sense_work_max_ms":0.};self.collision_count=0;self.travel=0.;self.path=[]
         self.native=None
         self.velocity=None
         if os.getenv('P2_NAV_VELOCITY_WINDOW'):
@@ -92,7 +95,7 @@ class World(Node):
         c,s=math.cos(yaw),math.sin(yaw)
         return bool(np.any(self.occupied(x+c*xx-s*yy,y+s*xx+c*yy)))
     def step(self):
-        now=time.monotonic();dt=min(.05,now-self.last);self.last=now
+        now=time.monotonic();self.loop_profile["step_gap_max_ms"]=max(self.loop_profile["step_gap_max_ms"],(now-self.last)*1000);dt=min(.05,now-self.last);self.last=now
         v,w=self.cmd if now-self.cmd_at<.35 and not self.pause else (0.,0.)
         actual_vy=0.
         if self.native:
@@ -125,6 +128,7 @@ class World(Node):
             o.twist.twist.linear.x=v;o.twist.twist.linear.y=actual_vy;o.twist.twist.angular.z=w;self.odom.publish(o)
         b=Bool();b.data=self.ground_ok;self.ground.publish(b)
     def sense(self):
+        sense_begin=time.monotonic();sample_stamp=self.get_clock().now().to_msg()
         if self.native:
             state,received=self.native.latest()
             if state is None or time.monotonic()-received>.25:
@@ -137,10 +141,11 @@ class World(Node):
             y=self.y+np.sin(angles[:,None])*self.radii[None,:]
             hits=self.occupied(x,y);any_hit=hits.any(axis=1)
             ranges=np.where(any_hit,self.radii[np.argmax(hits,axis=1)],np.inf)
-            scan=LaserScan();scan.header.stamp=self.get_clock().now().to_msg();scan.header.frame_id='laser'
+            scan=LaserScan();scan.header.stamp=sample_stamp;scan.header.frame_id='laser'
             scan.angle_min=-math.pi;scan.angle_increment=2*math.pi/360;scan.angle_max=scan.angle_min+359*scan.angle_increment
             scan.range_min=.12;scan.range_max=14.;scan.scan_time=.1;scan.ranges=ranges.astype(float).tolist();self.scan.publish(scan)
-        msg=String();msg.data=json.dumps({'pose':[self.x,self.y,self.yaw],'collision_attempts':self.collision_count,
+        self.loop_profile['sense_work_max_ms']=max(self.loop_profile['sense_work_max_ms'],(time.monotonic()-sense_begin)*1000)
+        msg=String();msg.data=json.dumps({'loop_profile':self.loop_profile,'pose':[self.x,self.y,self.yaw],'collision_attempts':self.collision_count,
             'controls':{'control_id':self.control_id,'drop_scan':self.drop_scan,'drop_odom':self.drop_odom,'ground_ok':self.ground_ok,'pause':self.pause,'obstacle':self.obstacle,'doors':self.doors},
             'travelled_m':self.travel,'command':self.cmd,'elapsed_s':time.monotonic()-self.start,
             'simulation':'native dynamics + ray-cast scan' if self.native else 'planar kinematics + ray-cast scan; not a humanoid dynamics validation'})

@@ -2,7 +2,7 @@
 from pathlib import Path
 from types import SimpleNamespace as NS
 from concurrent.futures import Future
-import unittest
+import unittest,tempfile,xml.etree.ElementTree as ET
 from test_console_cancellation import Console,fixture,Handle
 
 class Goal:pass
@@ -16,7 +16,8 @@ class Client:
 
 class PositionGoalTests(unittest.TestCase):
     def setup_console(self):
-        c,_=fixture();c.mode='navigation';c.gait_profile='p2-flat-model';c.gate={'localized':True};c.checked_pose=lambda d:object();c.wait_planner_active=lambda:None;c.wait_future=lambda f,t:f.result(timeout=t);c.planner=Client(True);c.nav=Client(False);c.execution_ready=lambda:True;c.health_ready=lambda:True;c.gait=None
+        temporary=tempfile.TemporaryDirectory();self.addCleanup(temporary.cleanup)
+        c,_=fixture();c.runtime=Path(temporary.name);c.get_clock=lambda:NS(now=lambda:NS(nanoseconds=1000000000));c.mode='navigation';c.gait_profile='p2-flat-model';c.gate={'localized':True};c.checked_pose=lambda d:object();c.wait_planner_active=lambda:None;c.wait_future=lambda f,t:f.result(timeout=t);c.planner=Client(True);c.nav=Client(False);c.execution_ready=lambda:True;c.health_ready=lambda:True;c.gait=None
         env=Console.set_goal.__globals__;env.update(ComputePathToPose=NS(Goal=Goal),NavigateToPose=NS(Goal=Goal),Path=Path,__file__=str(Path(__file__).resolve().parents[1]/'navigation/console.py'))
         return c
     def test_position_mode_matches_preview_and_live_planners(self):
@@ -24,10 +25,10 @@ class PositionGoalTests(unittest.TestCase):
         self.assertEqual(c.planner.sent[0].planner_id,'PositionOnly');self.assertEqual(c.session.phase,'ready')
         self.assertFalse(any(z.get('armed') for z in c.emitted))
         c.confirm_goal({'generation':receipt['generation']})
-        self.assertTrue(c.nav.sent[0].behavior_tree.endswith('/forward_position_navigation.xml'));self.assertEqual(c.session.phase,'executing')
+        tree=ET.parse(c.nav.sent[0].behavior_tree);self.assertEqual(tree.find('.//ComputePathToPose').get('planner_id'),'PositionOnly');self.assertEqual(tree.find('.//FollowPath').get('goal_checker_id'),'position_goal_checker');self.assertEqual(c.session.phase,'executing')
     def test_legacy_pose_goal_retains_explicit_terminal_heading(self):
         c=self.setup_console();receipt=c.set_goal(dict(x=1.,y=1.,yaw=0.))
-        self.assertEqual(c.planner.sent[0].planner_id,'GridBased');c.confirm_goal({'generation':receipt['generation']});self.assertFalse(hasattr(c.nav.sent[0],'behavior_tree'))
+        self.assertEqual(c.planner.sent[0].planner_id,'GridBased');c.confirm_goal({'generation':receipt['generation']});tree=ET.parse(c.nav.sent[0].behavior_tree);self.assertEqual(tree.find('.//ComputePathToPose').get('planner_id'),'GridBased');self.assertEqual(tree.find('.//FollowPath').get('goal_checker_id'),'goal_checker')
     def test_bad_mode_does_not_prepare_or_start_any_goal(self):
         c=self.setup_console();generation=c.session.generation
         with self.assertRaisesRegex(ValueError,'未知目标'):c.set_goal(dict(x=1.,y=1.,yaw=0.,heading_mode='typo'))
