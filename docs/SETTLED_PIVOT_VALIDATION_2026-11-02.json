@@ -9,11 +9,12 @@
     "lateral": 0.0
   },
   "source_sha256": {
-    "navigation/configure.py": "f0639ccd80279f54f745d7ddac59f21b1178b7cd5ee83ae7c66c7058da6b63ad",
-    "navigation/p2_nav_controller/src/settled_goal_rpp.cpp": "9a2b537f0b1bb1d8b80c967cd7f2a292f5ac03ee6dd5ee60b0b04454747fbb2f",
+    "navigation/configure.py": "0034f7f25ccb890d96b65da0a8ee36ffcf6fc03f512ae87267e8b35699b9230d",
+    "navigation/p2_nav_controller/src/settled_goal_rpp.cpp": "6597181136e1f3806c25143cd8f268870c53580a373f8ed9f364c4d2ed27b4d7",
     "navigation/p2_nav_controller/src/settled_heading_goal_checker.cpp": "f754036828ee042b08c1ec00aea6474119196b02a45d9a7fd7fd45fd239bbf1a",
     "navigation/p2_nav_controller/include/p2_nav_controller/settled_pivot.hpp": "1a2cdd78edccaf6555b468439ec3960b2ca7c9e38a8397826c3cdb7d436f25c0",
-    "navigation/p2_nav_controller/include/p2_nav_controller/settled_arrival.hpp": "a72de111b652343cd3c5df137d15aa3392d5a6753173e167d811974edb552b3a"
+    "navigation/p2_nav_controller/include/p2_nav_controller/settled_arrival.hpp": "a72de111b652343cd3c5df137d15aa3392d5a6753173e167d811974edb552b3a",
+    "navigation/p2_nav_controller/include/p2_nav_controller/curved_forward.hpp": "b1457f8eecab369b05ee37593403f4f399c47a97552fdb25e068c91afdb86658"
   },
   "native_goal_stop_semantics": "On actual selected goal checker success, stop issuing commands immediately; retain transport queue and verify settled residual, do not continue corrections after goal acceptance.",
   "native": {
@@ -225,7 +226,7 @@
     }
   ],
   "unit_tests": {
-    "collected": 321,
+    "collected": 322,
     "environment_skipped": 2,
     "failures": 0
   },
@@ -237,7 +238,7 @@
       "passed": true,
       "windows": {
         "2.8": {
-          "samples": 5,
+          "samples": 6,
           "minimum_forward": 0.375
         },
         "3.6": {
@@ -253,19 +254,19 @@
         "source": "projected_scan",
         "state": "observing",
         "frames": 13,
-        "source_ns": 1793578756029121126,
-        "processing_ms": 0.6524929776787758,
+        "source_ns": 1793582398316761386,
+        "processing_ms": 0.48396107740700245,
         "doors": [
           {
             "door_id": "front_door",
             "state": "open",
-            "source_monotonic": 1461031.461959868,
+            "source_monotonic": 1464674.260251919,
             "coverage_bins": 24,
             "total_bins": 24,
             "blocking_returns": 0,
             "scope": "finite projected scan rays, not full 3D clearance",
             "source_sequence": 13,
-            "source_ros_ns": 1793578756029121126
+            "source_ros_ns": 1793582398316761386
           }
         ]
       },
@@ -278,7 +279,7 @@
         "last_full_open_observation": {
           "front_door": {
             "state": "open",
-            "source_monotonic": 1461031.461959868,
+            "source_monotonic": 1464674.260251919,
             "source_sequence": 13
           }
         },
@@ -298,32 +299,32 @@
             "1",
             "2"
           ],
-          "cost": 13.710826689865591
+          "cost": 13.70523287099637
         },
         {
           "kind": "live_update",
           "reason": "\u53d1\u73b0\u66f4\u77ed\u7684\u5f00\u653e\u901a\u9053",
-          "old_cost": 13.728545412339274,
-          "new_cost": 4.1516742923889485
+          "old_cost": 13.704419530450938,
+          "new_cost": 4.1508744548475285
         }
       ]
     },
     {
       "case": "actual_dynamic_obstacle_and_complete",
       "passed": true,
-      "ray_returns": 22,
+      "ray_returns": 23,
       "circle": [
-        9.753522946783892,
-        2.4989131664657394,
+        9.752720795134115,
+        2.5051333347833507,
         0.28
       ]
     },
     {
       "case": "actual_directed_goal_settled_action_completion",
       "passed": true,
-      "requested_yaw": -0.3329230186563754,
-      "actual_yaw": -0.4069581557829019,
-      "error_rad": 0.07403513712652648
+      "requested_yaw": 0.18507927781841726,
+      "actual_yaw": 0.111966417205348,
+      "error_rad": 0.07311286061306926
     },
     {
       "case": "middle_pause_then_explicit_resume_native",
@@ -503,12 +504,378 @@
         "baseline_body_intrusions": 0
       }
     ],
-    "isolation": "Both profiles explicitly disable the new pivot response, so the old preview comparison varies preview distance only. Combined new-pivot behavior is checked separately by native pivot, actual replanning tracking and full reception actions. Fixture ROS time follows model ticks."
+    "isolation": "Both old preview profiles explicitly disable settled_pivot_response and curved_forward_input; combined new configuration has separate tracking and actual action tests."
   },
   "preserved_ci_failure": {
     "commit": "9c7b9e954be41282770a04e628041f8cf6dd537f",
     "run": 41366756202,
     "url": "https://github.com/lizi-learn/mid360s-lidar-navigation/actions/runs/41366756202",
     "cause": "Old wave fixture implicitly enabled new pivot timing but ran a fast planar loop using wall time. Isolate preview parameters and use controlled simulation time; original success/collision/improvement thresholds unchanged."
+  },
+  "main_curved_input": {
+    "limit": 0.6,
+    "meaning": "D policy manual-equivalent input; yaw preserved, operator multiplier and original ramps retained",
+    "actual_plugin_receipts": {
+      "centre": 1,
+      "heldout-left": 3,
+      "heldout-right": 2
+    },
+    "actual_workflow_groups": [
+      {
+        "placement": "centre",
+        "offset": 0,
+        "cases": [
+          {
+            "case": "continuous_native_transit",
+            "passed": true,
+            "windows": {
+              "2.8": {
+                "samples": 6,
+                "minimum_forward": 0.375
+              },
+              "3.6": {
+                "samples": 6,
+                "minimum_forward": 0.375
+              }
+            }
+          },
+          {
+            "case": "observed_closed_door_reopens_and_live_shortcut",
+            "passed": true,
+            "evidence": {
+              "source": "projected_scan",
+              "state": "observing",
+              "frames": 13,
+              "source_ns": 1793582398316761386,
+              "processing_ms": 0.48396107740700245,
+              "doors": [
+                {
+                  "door_id": "front_door",
+                  "state": "open",
+                  "source_monotonic": 1464674.260251919,
+                  "coverage_bins": 24,
+                  "total_bins": 24,
+                  "blocking_returns": 0,
+                  "scope": "finite projected scan rays, not full 3D clearance",
+                  "source_sequence": 13,
+                  "source_ros_ns": 1793582398316761386
+                }
+              ]
+            },
+            "overlay": {
+              "changed_cells": 96,
+              "door_states": {
+                "front_door": "open"
+              },
+              "original_map_modified": false,
+              "last_full_open_observation": {
+                "front_door": {
+                  "state": "open",
+                  "source_monotonic": 1464674.260251919,
+                  "source_sequence": 13
+                }
+              },
+              "unknown_cells_promoted": 0,
+              "keepout_cells": 0
+            },
+            "decisions": [
+              {
+                "points": [
+                  "start",
+                  "north_a",
+                  "north_b",
+                  "goal"
+                ],
+                "edges": [
+                  "0",
+                  "1",
+                  "2"
+                ],
+                "cost": 13.70523287099637
+              },
+              {
+                "kind": "live_update",
+                "reason": "\u53d1\u73b0\u66f4\u77ed\u7684\u5f00\u653e\u901a\u9053",
+                "old_cost": 13.704419530450938,
+                "new_cost": 4.1508744548475285
+              }
+            ]
+          },
+          {
+            "case": "actual_dynamic_obstacle_and_complete",
+            "passed": true,
+            "ray_returns": 23,
+            "circle": [
+              9.752720795134115,
+              2.5051333347833507,
+              0.28
+            ]
+          },
+          {
+            "case": "actual_directed_goal_settled_action_completion",
+            "passed": true,
+            "requested_yaw": 0.18507927781841726,
+            "actual_yaw": 0.111966417205348,
+            "error_rad": 0.07311286061306926
+          },
+          {
+            "case": "middle_pause_then_explicit_resume_native",
+            "passed": true
+          },
+          {
+            "case": "manual_cancel_no_auto_resume_and_durable_receipts",
+            "passed": true,
+            "history_events": 33
+          }
+        ],
+        "collision_attempts": 0
+      },
+      {
+        "placement": "heldout-left",
+        "offset": 0.12,
+        "cases": [
+          {
+            "case": "continuous_native_transit",
+            "passed": true,
+            "windows": {
+              "2.8": {
+                "samples": 5,
+                "minimum_forward": 0.375
+              },
+              "3.6": {
+                "samples": 6,
+                "minimum_forward": 0.375
+              }
+            }
+          },
+          {
+            "case": "observed_closed_door_reopens_and_live_shortcut",
+            "passed": true,
+            "evidence": {
+              "source": "projected_scan",
+              "state": "observing",
+              "frames": 13,
+              "source_ns": 1793582720719128304,
+              "processing_ms": 0.44687907211482525,
+              "doors": [
+                {
+                  "door_id": "front_door",
+                  "state": "open",
+                  "source_monotonic": 1464996.662565037,
+                  "coverage_bins": 24,
+                  "total_bins": 24,
+                  "blocking_returns": 0,
+                  "scope": "finite projected scan rays, not full 3D clearance",
+                  "source_sequence": 13,
+                  "source_ros_ns": 1793582720719128304
+                }
+              ]
+            },
+            "overlay": {
+              "changed_cells": 96,
+              "door_states": {
+                "front_door": "open"
+              },
+              "original_map_modified": false,
+              "last_full_open_observation": {
+                "front_door": {
+                  "state": "open",
+                  "source_monotonic": 1464996.662565037,
+                  "source_sequence": 13
+                }
+              },
+              "unknown_cells_promoted": 0,
+              "keepout_cells": 0
+            },
+            "decisions": [
+              {
+                "points": [
+                  "start",
+                  "north_a",
+                  "north_b",
+                  "goal"
+                ],
+                "edges": [
+                  "0",
+                  "1",
+                  "2"
+                ],
+                "cost": 13.712494495841554
+              },
+              {
+                "kind": "live_update",
+                "reason": "\u53d1\u73b0\u66f4\u77ed\u7684\u5f00\u653e\u901a\u9053",
+                "old_cost": 13.707912213519528,
+                "new_cost": 4.147092175731954
+              }
+            ]
+          },
+          {
+            "case": "actual_dynamic_obstacle_and_complete",
+            "passed": true,
+            "ray_returns": 23,
+            "circle": [
+              9.752054056834679,
+              2.6164636618798065,
+              0.28
+            ]
+          },
+          {
+            "case": "actual_directed_goal_settled_action_completion",
+            "passed": true,
+            "requested_yaw": 1.6423974983103147,
+            "actual_yaw": 1.566990321987009,
+            "error_rad": 0.07540717632330574
+          },
+          {
+            "case": "middle_pause_then_explicit_resume_native",
+            "passed": true
+          },
+          {
+            "case": "manual_cancel_no_auto_resume_and_durable_receipts",
+            "passed": true,
+            "history_events": 33
+          }
+        ],
+        "collision_attempts": 0
+      },
+      {
+        "placement": "heldout-right",
+        "offset": -0.12,
+        "cases": [
+          {
+            "case": "continuous_native_transit",
+            "passed": true,
+            "windows": {
+              "2.8": {
+                "samples": 7,
+                "minimum_forward": 0.375
+              },
+              "3.6": {
+                "samples": 6,
+                "minimum_forward": 0.375
+              }
+            }
+          },
+          {
+            "case": "observed_closed_door_reopens_and_live_shortcut",
+            "passed": true,
+            "evidence": {
+              "source": "projected_scan",
+              "state": "observing",
+              "frames": 13,
+              "source_ns": 1793582816684416491,
+              "processing_ms": 0.7198830135166645,
+              "doors": [
+                {
+                  "door_id": "front_door",
+                  "state": "open",
+                  "source_monotonic": 1465092.627936918,
+                  "coverage_bins": 24,
+                  "total_bins": 24,
+                  "blocking_returns": 0,
+                  "scope": "finite projected scan rays, not full 3D clearance",
+                  "source_sequence": 13,
+                  "source_ros_ns": 1793582816684416491
+                }
+              ]
+            },
+            "overlay": {
+              "changed_cells": 96,
+              "door_states": {
+                "front_door": "open"
+              },
+              "original_map_modified": false,
+              "last_full_open_observation": {
+                "front_door": {
+                  "state": "open",
+                  "source_monotonic": 1465092.627936918,
+                  "source_sequence": 13
+                }
+              },
+              "unknown_cells_promoted": 0,
+              "keepout_cells": 0
+            },
+            "decisions": [
+              {
+                "points": [
+                  "start",
+                  "north_a",
+                  "north_b",
+                  "goal"
+                ],
+                "edges": [
+                  "0",
+                  "1",
+                  "2"
+                ],
+                "cost": 13.70825246385142
+              },
+              {
+                "kind": "live_update",
+                "reason": "\u53d1\u73b0\u66f4\u77ed\u7684\u5f00\u653e\u901a\u9053",
+                "old_cost": 13.716089651994693,
+                "new_cost": 4.147960265794915
+              }
+            ]
+          },
+          {
+            "case": "actual_dynamic_obstacle_and_complete",
+            "passed": true,
+            "ray_returns": 22,
+            "circle": [
+              9.752635475172715,
+              2.3786257665114294,
+              0.28
+            ]
+          },
+          {
+            "case": "actual_directed_goal_settled_action_completion",
+            "passed": true,
+            "requested_yaw": 0.3963214211244893,
+            "actual_yaw": 0.3311939566985784,
+            "error_rad": 0.06512746442591094
+          },
+          {
+            "case": "middle_pause_then_explicit_resume_native",
+            "passed": true
+          },
+          {
+            "case": "manual_cancel_no_auto_resume_and_durable_receipts",
+            "passed": true,
+            "history_events": 33
+          }
+        ],
+        "collision_attempts": 0
+      }
+    ],
+    "receipt_count_audit": "The first local centre report counted the console supervisor log. Independent correction reads the actual Nav2 runtime/workflow.log; raw report retained. Later runs record the actual log directly.",
+    "additional_source_sha256": {
+      "experiments/reception/check_native.py": "e1e8576486169b303927c6c8ccf1ecf189687aab7ba24213f65fa93823b527dd",
+      "tests/test_curved_forward.py": "a3b1bc080dd78d5df2cc1f8ce48c6d944e088adb2d241dc9edd167800079271c"
+    }
+  },
+  "preserved_ci_dynamic_failure": {
+    "commit": "75ca7fbb9e5b07a76b9f75367c57e2d71e63a7c7",
+    "main_run": 41367602146,
+    "main_conclusion": "failure in actual dynamic-obstacle workflow; no physical commands",
+    "tag_run": 41367690995,
+    "tag_conclusion": "success4/4 does not erase failed main run",
+    "reason": "Local RPP collision projection rejected window commands near the obstacle. Passive frozen costmap, TF and plan capture added for precise follow-up; do not attribute success to an unused exact-window prototype.",
+    "model_body_intrusions": 0
+  },
+  "rejected_exact_window_prototype": {
+    "workflow_groups_passed": 3,
+    "selected_branch_receipts": 0,
+    "snapshot_geometry_probes": 12,
+    "raster_vs_filled_discrepancies": 1,
+    "all_original_moving_inputs_blocked_cases_resolved": 0,
+    "adopted": false
+  },
+  "latest_private_frozen_return": {
+    "passed": false,
+    "remaining_m": 33.0722,
+    "body_intrusions": 0,
+    "scope": "Static user map + planar response replay; not physical robot acceptance. Private geometry excluded."
   }
 }

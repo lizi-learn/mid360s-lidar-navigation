@@ -10,6 +10,7 @@
 #include "p2_nav_controller/terminal_velocity.hpp"
 #include "p2_nav_controller/pivot_breakaway.hpp"
 #include "p2_nav_controller/settled_pivot.hpp"
+#include "p2_nav_controller/curved_forward.hpp"
 
 namespace p2_nav_controller {
 class SettledGoalRPP : public nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController {
@@ -26,6 +27,9 @@ class SettledGoalRPP : public nav2_regulated_pure_pursuit_controller::RegulatedP
     node->get_parameter(name+".corner_preview",corner_preview_);
     nav2_util::declare_parameter_if_not_declared(node,name+".settled_pivot_response",rclcpp::ParameterValue(false));
     node->get_parameter(name+".settled_pivot_response",settled_pivot_response_);
+    nav2_util::declare_parameter_if_not_declared(node,name+".curved_forward_input",rclcpp::ParameterValue(0.));
+    node->get_parameter(name+".curved_forward_input",curved_forward_input_);
+    if(!std::isfinite(curved_forward_input_)||curved_forward_input_<0.)throw nav2_core::PlannerException("Invalid curved forward input");
     if(!std::isfinite(collision_lookahead_floor_)||collision_lookahead_floor_<0||collision_lookahead_floor_>min_lookahead_dist_)
       throw nav2_core::PlannerException("Invalid collision lookahead floor");
     if(!std::isfinite(minimum_pivot_)||minimum_pivot_<0||minimum_pivot_>rotate_to_heading_angular_vel_)
@@ -123,6 +127,9 @@ class SettledGoalRPP : public nav2_regulated_pure_pursuit_controller::RegulatedP
           out.twist.linear.x=0.;out.twist.angular.z=settled_pivot_.step(angle,tf2::getYaw(pose.pose.orientation),speed.angular.z,clock_->now().seconds());
         }else if(out.twist.linear.x>0.)settled_pivot_.reset();
         const double bounded=std::clamp(out.twist.angular.z,-rotate_to_heading_angular_vel_,rotate_to_heading_angular_vel_);
+        const double previous_forward=out.twist.linear.x;
+        out.twist.linear.x=curved_forward(previous_forward,bounded,curved_forward_input_);
+        if(out.twist.linear.x<previous_forward-1e-6)RCLCPP_INFO_THROTTLE(costmap_ros_->get_logger(),*clock_,2000,"Curved forward input blended: requested=%.6f applied=%.6f yaw=%.6f",previous_forward,out.twist.linear.x,bounded);
         // A shorter carrot must not shorten the original time horizon: check
         // its actual bounded arc out to the unchanged goal/time limit as well.
         {auto *map=costmap_ros_->getCostmap();std::unique_lock<nav2_costmap_2d::Costmap2D::mutex_t> map_lock(*map->getMutex());
@@ -161,7 +168,7 @@ class SettledGoalRPP : public nav2_regulated_pure_pursuit_controller::RegulatedP
   }
   std::mutex phase_mutex_; TerminalHeading phase_; geometry_msgs::msg::PoseStamped goal_;
   SettledPivot settled_pivot_;bool settled_pivot_response_=false,position_only_goal_=false;
-  PivotBreakaway breakaway_;double minimum_pivot_=0.,collision_lookahead_floor_=0.;bool have_goal_=false,corner_preview_=false;
+  PivotBreakaway breakaway_;double curved_forward_input_=0.,minimum_pivot_=0.,collision_lookahead_floor_=0.;bool have_goal_=false,corner_preview_=false;
 };
 }
 PLUGINLIB_EXPORT_CLASS(p2_nav_controller::SettledGoalRPP,nav2_core::Controller)

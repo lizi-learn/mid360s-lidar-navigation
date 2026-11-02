@@ -8,7 +8,8 @@ from pathlib import Path
 ROOT=Path(__file__).resolve().parents[2];NAV=ROOT/'navigation';sys.path.insert(0,str(NAV))
 
 def main():
-    ap=argparse.ArgumentParser();ap.add_argument('--output',required=True);ap.add_argument('--setup',required=True);ap.add_argument('--port',type=int,default=8947);ap.add_argument('--domain',type=int,default=208);ap.add_argument('--stop-profile',choices=['baseline-directional','legacy-rectangle'],default='baseline-directional');ap.add_argument('--scenario',choices=['transit','all','obstacle','tools','maps'],default='all');args=ap.parse_args()
+    ap=argparse.ArgumentParser();ap.add_argument('--output',required=True);ap.add_argument('--setup',required=True);ap.add_argument('--port',type=int,default=8947);ap.add_argument('--domain',type=int,default=208);ap.add_argument('--stop-profile',choices=['baseline-directional','legacy-rectangle'],default='baseline-directional');ap.add_argument('--scenario',choices=['transit','all','obstacle','tools','maps'],default='all');ap.add_argument('--obstacle-offset',type=float,default=0.);args=ap.parse_args()
+    if not math.isfinite(args.obstacle_offset):raise ValueError('Invalid synthetic obstacle offset')
     out=Path(args.output).resolve().parent
     if out.exists()and any(out.iterdir()):raise ValueError('Use a new output directory; old failures are retained')
     out.mkdir(parents=True,exist_ok=True);runtime=out/'runtime';runtime.mkdir()
@@ -38,7 +39,7 @@ def main():
     def status():
         nonlocal latest
         latest=call('/api/status?summary=1')
-        if ros:ros.spin()
+        if ros:ros.spin();ros.snapshot(latest)
         if latest.get('truth'):trace.append({'truth':latest['truth'],'feedback':latest['feedback'],'session':latest['session'],'path_source':latest.get('path_source',{}),'mission':{k:latest['reception']['mission'][k]for k in ['phase','index','epoch']}})
         return latest
     def wait(predicate,seconds=50):
@@ -68,13 +69,46 @@ def main():
             from std_msgs.msg import String
             from sensor_msgs.msg import LaserScan
             from nav2_msgs.msg import Costmap
+            from nav_msgs.msg import Path as ROSPath
+            from tf2_ros import Buffer,TransformListener
             from rclpy.qos import qos_profile_sensor_data
-            rclpy.init();self.rclpy=rclpy;self.String=String;self.node=Node('reception_synthetic_scenario');self.scan=None;self.local_map=None;self.global_map=None
+            rclpy.init();self.rclpy=rclpy;self.String=String;self.node=Node('reception_synthetic_scenario');self.scan=None;self.local_map=None;self.global_map=None;self.plan=None;self.snapshot_at=0.;self.snapshot_index=0
+            self.tf=Buffer();self.tf_listener=TransformListener(self.tf,self.node)
+            self.plan_sub=self.node.create_subscription(ROSPath,'/plan',lambda m:setattr(self,'plan',m),10)
             self.pub=self.node.create_publisher(String,'/p2_nav/sim_control',10)
             self.local_sub=self.node.create_subscription(Costmap,'/local_costmap/costmap_raw',lambda m:setattr(self,'local_map',m),10)
             self.global_sub=self.node.create_subscription(Costmap,'/global_costmap/costmap_raw',lambda m:setattr(self,'global_map',m),10)
             self.sub=self.node.create_subscription(LaserScan,'/scan',lambda m:setattr(self,'scan',m),qos_profile_sensor_data)
-        def spin(self):self.rclpy.spin_once(self.node,timeout_sec=0.)
+        def spin(self):
+            for _ in range(12):self.rclpy.spin_once(self.node,timeout_sec=0.)
+        def snapshot(self,d):
+            if d.get('truth',{}).get('controls',{}).get('control_id')!='reception-person-block':return
+            if time.monotonic()-self.snapshot_at<.5 or self.snapshot_index>=60:return
+            self.snapshot_at=time.monotonic();self.snapshot_index+=1
+            folder=out/'obstacle-snapshots';folder.mkdir(exist_ok=True)
+            record={'truth':d['truth'],'estimate_pose':d.get('pose'),'session':d['session'],'maps':{}}
+            for name,g in [('local',self.local_map),('global',self.global_map)]:
+                if g is None:continue
+                m=g.metadata;stem=f'{self.snapshot_index:03d}-{name}'
+                (folder/(stem+'.map.txt')).write_text(f'{m.size_x} {m.size_y} {m.resolution:.17g} {m.origin.position.x:.17g} {m.origin.position.y:.17g}\n'+' '.join(map(str,g.data)))
+                item={'frame':g.header.frame_id,'source_ros_ns':str(g.header.stamp.sec*1000000000+g.header.stamp.nanosec),'file':stem+'.map.txt'}
+                try:
+                    t=self.tf.lookup_transform(g.header.frame_id,'base_link',self.rclpy.time.Time());q=t.transform.rotation
+                    item['robot_pose']=[t.transform.translation.x,t.transform.translation.y,math.atan2(2*(q.w*q.z+q.x*q.y),1-2*(q.y*q.y+q.z*q.z))]
+                    item['pose_source_ros_ns']=str(t.header.stamp.sec*1000000000+t.header.stamp.nanosec)
+                except Exception as e:item['transform_error']=str(e)
+                if self.plan:
+                    try:
+                        t=self.tf.lookup_transform(g.header.frame_id,self.plan.header.frame_id,self.rclpy.time.Time());q=t.transform.rotation
+                        item['plan_transform']=[t.transform.translation.x,t.transform.translation.y,math.atan2(2*(q.w*q.z+q.x*q.y),1-2*(q.y*q.y+q.z*q.z))]
+                        item['plan_transform_source_ros_ns']=str(t.header.stamp.sec*1000000000+t.header.stamp.nanosec)
+                    except Exception as e:item['plan_transform_error']=str(e)
+                record['maps'][name]=item
+            if self.plan:
+                record['plan_frame']=self.plan.header.frame_id
+                record['plan_source_ros_ns']=str(self.plan.header.stamp.sec*1000000000+self.plan.header.stamp.nanosec)
+                record['path']=[[p.pose.position.x,p.pose.position.y,math.atan2(2*(p.pose.orientation.w*p.pose.orientation.z+p.pose.orientation.x*p.pose.orientation.y),1-2*(p.pose.orientation.y**2+p.pose.orientation.z**2))]for p in self.plan.poses]
+            (folder/(f'{self.snapshot_index:03d}.json')).write_text(json.dumps(record))
         def control(self,data):
             message=self.String();message.data=json.dumps(data);self.pub.publish(message);self.spin()
         def obstacle_rays(self,d,circle):
@@ -134,7 +168,7 @@ def main():
             if ros is None:ros=ScenarioROS()
             x,y=d['pose'][:2]
             if not doc['routes']:doc['routes']=[dict(id='tour',name='dynamic obstacle',mode='showcase',loops=1,description='',steps=[])]
-            circle=[x+1.5,y,.28]
+            circle=[x+1.5,y+args.obstacle_offset,.28]
             doc['points']=[point('finish',min(10.95,x+3.),y,'visit')];doc['edges']=[];doc['routes'][0].update(name='dynamic obstacle',mode='showcase',steps=[{'point_id':'finish','speak':False}]);doc=save(doc)
             start(doc);wait(lambda d:d['session']['phase']=='executing',10)
             control={'obstacle':circle,'control_id':'reception-person-block'}
@@ -209,7 +243,7 @@ def main():
             events.append(dict(case='actual_slam_save_resume_local_patch_versions',passed=True,first_save=saved,local_update=updated,versions=versions))
             d=status()
         report={'passed':True,'cases':events,'final_pose':d['pose'],'truth':d['truth'],'elapsed_s':time.monotonic()-started,
-                'stop_profile':args.stop_profile,'fixture_seed':0,'amcl_seed':'Nav2 default; stochastic localization is not forced to match one successful run','hardware_commands':0,'interfaces':os.listdir('/sys/class/net'),'source_sha':{str(p.relative_to(ROOT)):hashlib.sha256(p.read_bytes()).hexdigest()for p in [NAV/'console.py',NAV/'reception_mission.py',NAV/'reception_doors.py',NAV/'sim_world.py']},
+                'stop_profile':args.stop_profile,'obstacle_offset':args.obstacle_offset,'fixture_seed':0,'amcl_seed':'Nav2 default; stochastic localization is not forced to match one successful run','hardware_commands':0,'interfaces':os.listdir('/sys/class/net'),'source_sha':{str(p.relative_to(ROOT)):hashlib.sha256(p.read_bytes()).hexdigest()for p in [NAV/'console.py',NAV/'reception_mission.py',NAV/'reception_doors.py',NAV/'sim_world.py']},
                 'scope':'Actual Console, ROS2/Nav2 actions and projected-ray plant, unchanged55cm full-body model. No RL or physical robot acceptance.'}
     except Exception as error:
         latest=copy.deepcopy(latest);latest.pop('request_token',None)
@@ -221,7 +255,7 @@ def main():
             try:process.wait(timeout=25)
             except subprocess.TimeoutExpired:os.killpg(process.pid,signal.SIGKILL);process.wait()
         if ros:ros.close()
-        log.close();Path(args.output).write_text(json.dumps(report,ensure_ascii=False,indent=2))
+        log.close();report['curved_forward_receipts']=sum('Curved forward input blended'in line for line in(runtime/'workflow.log').read_text(errors='replace').splitlines())if(runtime/'workflow.log').is_file()else None;Path(args.output).write_text(json.dumps(report,ensure_ascii=False,indent=2))
     print(json.dumps({k:v for k,v in report.items()if k not in ('latest','source_sha','truth')},ensure_ascii=False))
     return 0 if report.get('passed')else 1
 if __name__=='__main__':sys.exit(main())
