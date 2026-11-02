@@ -52,6 +52,31 @@ class ConsoleGaitTests(unittest.TestCase):
             return dict(phase='active',cancel_pending=False)
         c.gait.status=delayed_status;c.poll_session()
         self.assertEqual(c.session.phase,'executing');self.assertTrue(c.emitted[-1]['armed']);self.assertFalse(c.emitted[-1]['paused'])
+    def test_observer_update_between_clock_read_and_session_poll_is_not_expiry(self):
+        import inspect
+        from unittest.mock import patch
+        c,g=self.setup_console();c.gate={};c.session.start(g,time.monotonic(),True,True);c.session.started(g,time.monotonic());c.gait.phase='active'
+        def observe():
+            now=time.monotonic();return dict(mode='navigation_allowed',verified=True,connected=True,activity=False,
+                source=c.session.source,sequence=c.session.sequence+1,stamp=now,reply_stamp=now)
+        c.gait.operator_authority=observe
+        actual_time=time;reads=0
+        class Clock:
+            @staticmethod
+            def monotonic():
+                nonlocal reads
+                now=actual_time.monotonic()
+                if inspect.currentframe().f_back.f_code.co_name=='poll_session':
+                    reads+=1
+                    if reads==2:
+                        # The separate real-source observer commits while this
+                        # UI caller is descheduled after reading its clock.
+                        actual_time.sleep(.025);fresh=actual_time.monotonic()
+                        c.session.operator('navigation_allowed',True,True,False,c.session.source,c.session.sequence+1,fresh,fresh)
+                return now
+        with patch.dict(c.poll_session.__globals__,time=Clock):c.poll_session()
+        self.assertEqual(c.session.phase,'executing');self.assertTrue(c.emitted[-1]['armed'])
+        self.assertFalse(c.emitted[-1]['paused']);self.assertTrue(c.session.verified)
     def test_out_of_order_read_only_native_snapshots_do_not_cancel(self):
         c,g=self.setup_console();now=time.monotonic()
         c.session.source=77;c.session.sequence=100;c.session.source_time=now-.04

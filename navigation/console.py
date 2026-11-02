@@ -293,7 +293,7 @@ class Console(Node):
             # instead of waiting for a separate session timer and RPC cycle.
             gait=getattr(self,'gait',None)
             if gait:
-                status=self.session.status(time.monotonic())
+                status=self.session_state()
                 gait.update(self.gate,self.session.phase=='executing' and not status['force_navigation_zero'])
     def health_ready(self):
         g=self.gate
@@ -303,8 +303,8 @@ class Console(Node):
         gait=getattr(self,'gait',None)
         if gait is None:return
         d=gait.operator_authority()
-        now=max(now,time.monotonic())
         with self.session.lock:
+            now=max(now,time.monotonic())
             source_fresh=bool(d and -.005<=now-d['stamp']<=.1)
             reply_fresh=bool(d and(d.get('source_transport')=='native_packet_snapshot' or -.005<=now-d['reply_stamp']<=.1))
             if not source_fresh or not reply_fresh:
@@ -316,6 +316,12 @@ class Console(Node):
             if d['source']==self.session.source and d['sequence']<=self.session.sequence:return
             self.session.operator(d['mode'],d['verified'],d['connected'],d['activity'],
                 d['source'],d['sequence'],d['stamp'],now)
+    def session_state(self,poll=False):
+        # Evaluate after acquiring the same lock as the native observer.
+        # A caller timestamp taken before waiting can predate a fresh packet.
+        with self.session.lock:
+            now=time.monotonic()
+            return self.session.poll(now)if poll else self.session.status(now)
     def poll_session(self):
         with self.lock:
             now=time.monotonic()
@@ -324,7 +330,7 @@ class Console(Node):
             if self.simulation and self.virtual_operator:
                 v=self.virtual_operator;self.virtual_sequence+=1
                 self.session.operator(v['mode'],True,v['connected'],v['activity'],self.virtual_source,self.virtual_sequence,now,now)
-            status=self.session.poll(now)
+            status=self.session_state(poll=True)
             gait=getattr(self,'gait',None)
             if gait:
                 state=gait.status()
@@ -334,13 +340,13 @@ class Console(Node):
                 if self.session.phase in ('manual','paused','stopped','cancelled','blocked','arrived') and gait.phase not in ('stopped','idle','disconnected'):
                     gait.stop()
                 self.acknowledge_if_quiet(self.session.cancel_generation)
-            status=self.session.status(time.monotonic())
+            status=self.session_state()
             if status['cancel_pending']:
                 self.stop_actions()
             if self.session.phase=='replanning':self.session.reroute(time.monotonic(),False,not self.collision_stop and self.health_ready())
             if self.session.phase in ('starting','executing','replanning'):
                 if not self.health_ready():self.session.cancel();self.session._notice('地面、定位或传感器未就绪，导航已停止')
-                current=self.session.status(time.monotonic())
+                current=self.session_state()
                 self.op(armed=not current['force_navigation_zero'],paused=current['force_navigation_zero'],arm_generation=self.session.generation)
     def stop_actions(self):
         gait=getattr(self,'gait',None)
@@ -663,7 +669,7 @@ class Console(Node):
                 'control_recovery':self.bt_recovery_report,'path_source':self.path_source_report,'planning_evidence':self.flight.status(),'feedback':self.feedback,'speed_zones':self.speed_zone_status,
                 'gate':{k:self.gate.get(k)for k in ('evaluated_monotonic_ns','velocity_source_monotonic_ns','reason',
                     'command','body_velocity_feedback','velocity_stages','scan_age','odom_age','localized','ground_ok')},
-                'session_notice':self.session.status(now).get('notice')}
+                'session_notice':self.session_state().get('notice')}
         try:
             t=self.buffer.lookup_transform('map','base_link',rclpy.time.Time());q=t.transform.rotation
             sample.update(pose=[t.transform.translation.x,t.transform.translation.y,math.atan2(2*q.w*q.z,1-2*q.z*q.z)],
@@ -682,7 +688,7 @@ class Console(Node):
         deadline=time.monotonic()+8.
         while True:
             if not self.reception.engine.valid(epoch):return False
-            if not self.session.status(time.monotonic())['navigation_permitted']:return False
+            if not self.session_state()['navigation_permitted']:return False
             with self.lock:
                 quiet=not self.session.cancel_pending and self.goal_handle is None and self.plan_handle is None and not self.pending_nav_accept and not self.pending_plan_accept
             if quiet:return True
@@ -809,7 +815,7 @@ class Console(Node):
             'minimum_speed':self.minimum_speed,'maximum_speed':self.maximum_speed,'velocity_scale':self.velocity_scale,
             'effective_speed_cap':self.speed_value*self.velocity_scale,'simulation_kind':'native_dynamics' if os.getenv('P2_NAV_NATIVE_EXEC') else 'planar',
             'process_alive':self.process is not None and self.process.poll() is None,'gate':self.gate,'pose':pose,
-            'session':self.session.status(time.monotonic()),'map_revision':self.display_revision(),'neck':head_feedback,
+            'session':self.session_state(),'map_revision':self.display_revision(),'neck':head_feedback,
             'execution_ready':self.execution_ready(),'gait_transport':getattr(self,'gait',None).status() if getattr(self,'gait',None) else None,'map':None if grid is None else {'width':grid.info.width,'height':grid.info.height,'resolution':grid.info.resolution,
                 'origin':[grid.info.origin.position.x,grid.info.origin.position.y],**({'cells':list(grid.data)} if include_cells else {})},
             'path':self.path,'goal':self.goal,'feedback':self.feedback,'speed_zones':self.speed_zone_status,

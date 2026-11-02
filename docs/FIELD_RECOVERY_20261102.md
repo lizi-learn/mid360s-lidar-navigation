@@ -143,3 +143,6 @@ fixture also checks original health and operator expiry, middle pause, right
 manual mode, stick takeover, no automatic rearm and parent exit. It addresses
 no robot hardware. Actual office-route completion remains a separate field
 result and must be recorded as such.
+
+
+An additional session polling race was reproduced with a current native observer sample arriving after the UI read its evaluation clock but before it acquired the session lock. The old caller stopped a valid executing session; the corrected caller takes evaluation time under the session lock. Source timestamps and deadlines are unchanged. The comparison regression fails on c9a5cfc and passes with 354 unit checks. Physical return remains incomplete at this checkpoint.
