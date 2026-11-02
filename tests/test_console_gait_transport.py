@@ -52,6 +52,19 @@ class ConsoleGaitTests(unittest.TestCase):
             return dict(phase='active',cancel_pending=False)
         c.gait.status=delayed_status;c.poll_session()
         self.assertEqual(c.session.phase,'executing');self.assertTrue(c.emitted[-1]['armed']);self.assertFalse(c.emitted[-1]['paused'])
+    def test_slow_ui_rpc_resamples_original_native_packet_before_velocity_intent(self):
+        c,g=self.setup_console();c.gate={};c.session.start(g,time.monotonic(),True,True);c.session.started(g,time.monotonic());c.gait.phase='active'
+        def actual_source():
+            now=time.monotonic();return dict(mode='navigation_allowed',verified=True,connected=True,activity=False,
+                source=c.session.source,sequence=c.session.sequence+1,stamp=now,reply_stamp=None,source_transport='native_packet_snapshot')
+        c.gait.operator_authority=actual_source
+        def slow_status():
+            # The original native packet continues outside this UI process,
+            # but its Python observer cannot run during UI GIL work.
+            time.sleep(.15);return dict(phase='active',cancel_pending=False)
+        c.gait.status=slow_status;c.poll_session()
+        self.assertEqual(c.session.phase,'executing');self.assertTrue(c.emitted[-1]['armed'])
+        self.assertFalse(c.emitted[-1]['paused'])
     def test_observer_update_between_clock_read_and_session_poll_is_not_expiry(self):
         import inspect
         from unittest.mock import patch
