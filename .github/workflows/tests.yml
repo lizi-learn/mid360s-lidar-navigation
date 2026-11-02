@@ -136,6 +136,15 @@ jobs:
           export OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 ROS_DOMAIN_ID=225 ROS_LOCALHOST_ONLY=1
           python3 experiments/console_health/check.py --legacy
           python3 experiments/console_health/check.py
+      - name: Keep native velocity I/O outside UI GIL stalls and preserve source expiry
+        shell: bash
+        run: |
+          source /opt/ros/humble/setup.bash
+          export PYTHONPATH=/usr/lib/python3/dist-packages:$PYTHONPATH
+          export OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 ROS_DOMAIN_ID=224 ROS_LOCALHOST_ONLY=1
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror -pthread -Inavigation experiments/gait_velocity_input/contract_server.cpp -o /tmp/gait-contract-process
+          python3 experiments/gait_velocity_input/check_process.py /tmp/gait-contract-process --legacy
+          python3 experiments/gait_velocity_input/check_process.py /tmp/gait-contract-process
       - name: Reject missing, stale, unknown and untransformable obstacle observations
         shell: bash
         env:

@@ -49,3 +49,27 @@ The Console previously serialized all ROS callbacks on one thread. Health now ha
 A current-map complete far-goal search still fails. A continuous reference route can be planned when intermediate poses carry travel headings rather than all-zero headings; the subsequent Start exposed the forwarding fault above. Do not classify that route preview or Start acceptance as a completed physical trip.
 
 The shared two-worker candidate was NOT deployed: exact CI41471400317 exposed a260.6ms forwarding gap in the corrected test. The revised implementation assigns the health-only subscriber its own Node and SingleThreadedExecutor/thread; the ordinary Console keeps its original serial executor. Both use the same original source stamps and unchanged100ms contract. The failed CI and ARM-vs-CI discrepancy remain recorded; no physical walking result is inferred.
+# Native transport process isolation (November 3)
+
+The independent health callback was insufficient: a subsequent field Start
+was accepted and then revoked, with no effective stepping observed. A final
+sent health sample was only about 10 ms old, but that asynchronous receipt does
+not prove that the native loop used the same sample. Neither this acceptance
+nor the previous zero-speed acknowledgements establish physical navigation.
+
+The Console now owns a separate native-control process. That process receives
+the original ROS health evaluations and measured velocity directly, and owns
+the existing native socket. Map rendering, path handling and other UI Python
+work cannot hold its GIL. A private authenticated Unix IPC carries explicit
+Start/Stop and status. The IPC key is inherited through a pipe; a second pipe
+closes the native client when the parent exits. The D binary, original source
+timestamps, lease deadlines, speed settings and E/stick behavior are unchanged.
+
+`experiments/gait_velocity_input/check_process.py` compares the old in-process
+transport with the new process using an actual compiled C++ contract fixture,
+a separate ROS/operator producer and six 250 ms UI GIL stalls. The old version
+loses ownership; the new version retains ownership and a 0.6 policy input. The
+fixture also checks original health and operator expiry, middle pause, right
+manual mode, stick takeover, no automatic rearm and parent exit. It addresses
+no robot hardware. Actual office-route completion remains a separate field
+result and must be recorded as such.

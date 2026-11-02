@@ -54,8 +54,8 @@ class Console(Node):
         self.gait=None
         if gait_socket:
             if simulation:raise ValueError('Physical gait transport requires a separate explicit contract fixture, never normal simulation')
-            from gait_transport import GaitTransport
-            self.gait=GaitTransport(gait_socket,trace_path=runtime/'gait-velocity.private.jsonl')
+            from gait_transport_process import GaitTransportProcess
+            self.gait=GaitTransportProcess(gait_socket,trace_path=runtime/'gait-velocity.private.jsonl')
         self.robot_name=None;self.runtime=runtime;self.simulation=simulation;self.mode='idle';self.controller='rpp';self.process=None
         from audio_feedback import AudioSettings
         self.audio=AudioSettings(runtime/'audio-settings.json')
@@ -303,6 +303,7 @@ class Console(Node):
         gait=getattr(self,'gait',None)
         if gait is None:return
         d=gait.operator_authority()
+        now=max(now,time.monotonic())
         with self.session.lock:
             if not d or not (-.005<=now-d['stamp']<=.1 and -.005<=now-d['reply_stamp']<=.1):
                 self.session.operator('unknown',False,False,False,0,0,0.,now);return
@@ -317,6 +318,7 @@ class Console(Node):
         with self.lock:
             now=time.monotonic()
             if getattr(self,'gait',None) is not None:self.poll_gait_authority(now)
+            now=time.monotonic()
             if self.simulation and self.virtual_operator:
                 v=self.virtual_operator;self.virtual_sequence+=1
                 self.session.operator(v['mode'],True,v['connected'],v['activity'],self.virtual_source,self.virtual_sequence,now,now)
