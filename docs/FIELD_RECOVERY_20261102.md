@@ -51,6 +51,23 @@ A current-map complete far-goal search still fails. A continuous reference route
 The shared two-worker candidate was NOT deployed: exact CI41471400317 exposed a260.6ms forwarding gap in the corrected test. The revised implementation assigns the health-only subscriber its own Node and SingleThreadedExecutor/thread; the ordinary Console keeps its original serial executor. Both use the same original source stamps and unchanged100ms contract. The failed CI and ARM-vs-CI discrepancy remain recorded; no physical walking result is inferred.
 # Native transport process isolation (November 3)
 
+The first far endpoint was later reached in the field (about 6 cm lidar/map
+position error), but return startup revoked the lease. The native trace showed
+fresh actual operator input and a roughly 1.3 ms health evaluation, while the
+forwarded operator echo was over 116 ms old. Cached authority from before a slow
+RPC had been reused. The transport now uses each latest actual reply and
+refreshes authority after control and measurement replies. Original operator,
+health and measurement sample times and all native deadlines remain unchanged.
+
+The actual C++ lease fixture reproduces a failure with one 65 ms delayed control
+reply; the corrected transport sustains a 0.6 policy input and still revokes on
+missing health without automatic rearm. A separate 65 ms measurement-delay case
+also passes. A development case combining 65 ms measurement and 35 ms control
+delay still fails sustained policy input: its measurement transport interval
+exceeds the original 100 ms frame budget and resets the response. That failed
+case is retained and is not a claimed passing result or a reason to relax the
+deadline. Office round-trip completion must be recorded separately.
+
 The corrected control chain subsequently sustained real nonzero strategy input
 while lidar odometry advanced about 4.7 m. The office leg then stopped during
 replanning; it did not reach its destination. All twelve reference goals were

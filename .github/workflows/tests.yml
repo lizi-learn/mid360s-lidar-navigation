@@ -252,6 +252,10 @@ jobs:
       - run: g++ -std=c++17 -O2 -Wall -Wextra -Werror -pthread -Inavigation experiments/gait_velocity_input/check_loop.cpp -o /tmp/gait-loop && /tmp/gait-loop
       - run: g++ -std=c++17 -O2 -Wall -Wextra -Werror -pthread -Inavigation experiments/gait_velocity_input/contract_server.cpp -o /tmp/gait-contract
       - run: PYTHONPATH=navigation python3 experiments/gait_velocity_input/check_transport.py /tmp/gait-contract
+      - name: Refresh original authority after a delayed velocity or measurement reply
+        run: |
+          python3 experiments/gait_velocity_input/check_rpc_cadence.py /tmp/gait-contract
+          python3 experiments/gait_velocity_input/check_rpc_cadence.py /tmp/gait-contract --measured-delay-ms 65 --velocity-delay-ms 0
       - run: g++ -std=c++17 -O2 -Wall -Wextra -Werror -pthread -Inavigation experiments/gait_velocity_input/check_peer_acl.cpp -o /tmp/check_peer_acl
       - run: sudo env PYTHONPATH="$GITHUB_WORKSPACE/navigation" python3 experiments/gait_velocity_input/check_peer_acl.py /tmp/check_peer_acl
       - run: g++ -std=c++17 -O2 -Wall -Wextra -Werror -pthread experiments/runtime_readiness/test_runtime_readiness.cpp -o /tmp/runtime-readiness && /tmp/runtime-readiness

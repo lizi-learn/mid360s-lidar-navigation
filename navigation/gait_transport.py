@@ -71,6 +71,10 @@ class GaitTransport:
         if self.client:self.client.close()
         self.client=None
     def _authority(self,r):
+        # Every reply carries an original native sample. Prefer the latest
+        # actual received reply, including velocity/measurement replies.
+        latest=getattr(self.client,'reply',None)
+        r=latest if latest is not None else r
         with self.lock:
             return Authority(r.receiver_instance if r else 0,r.receiver_generation if r else 0,
                 r.native_instance if r else 0,r.native_stamp if r else 0,self.health_stamp,0,self.health_flags)
@@ -81,7 +85,9 @@ class GaitTransport:
             self.feedback=reply
             self.last_authority_sample={'health_source_ns':authority.health_stamp_ns,'health_flags':authority.flags,
                 'operator_source_ns':authority.operator_stamp_ns,'reply_source_ns':reply.monotonic_ns,
-                'health_age_at_reply_ms':(reply.monotonic_ns-authority.health_stamp_ns)/1e6 if authority.health_stamp_ns else None}
+                'health_age_at_reply_ms':(reply.monotonic_ns-authority.health_stamp_ns)/1e6 if authority.health_stamp_ns else None,
+                'operator_echo_age_at_reply_ms':(reply.monotonic_ns-authority.operator_stamp_ns)/1e6 if authority.operator_stamp_ns else None,
+                'reply_operator_source_ns':reply.native_stamp}
         return reply
     def _run(self):
         while self.running:
@@ -95,17 +101,6 @@ class GaitTransport:
                     if self.phase in ('idle','stopped'):self.error=readiness_error(r)
                     measured=self.measured;measured_stamp=self.measured_source_ns
                     pending_stop=self.stop_serial!=self.sent_stop
-                # A socket reply can wait up to its actual timeout. Never hold
-                # the gate/update/state lock across that wait: doing so stalls
-                # fresh health callbacks behind optional measured telemetry.
-                if measured is not None and measured_stamp and not pending_stop:
-                    authority=self._authority(r)
-                    self.client.exchange(Operation.MEASURED_VELOCITY,authority,measured,measured_stamp)
-                    with self.lock:self.speed_tracking=self.client.tracking
-                    if time.monotonic()-start>=.02:
-                        # Forward a newly RECEIVED decision after a slow reply.
-                        # Its source time remains the original gate evaluation.
-                        r=self._exchange_authority(r)
                 operation=None;velocity=(0.,0.,0.);command_stamp=None;stop_serial=None;ack=None
                 with self.lock:
                     if self.stop_serial!=self.sent_stop:
@@ -131,10 +126,25 @@ class GaitTransport:
                         self.phase='failed';self.error='真实步态未确认接管';self.started.set();self.stop_serial+=1
                         operation=Operation.STOP;stop_serial=self.stop_serial
                 if operation is not None:
-                    self.client.exchange(operation,self._authority(r),velocity,command_stamp)
+                    reply=self.client.exchange(operation,self._authority(r),velocity,command_stamp)
                     with self.lock:
+                        self.feedback=reply
                         if stop_serial is not None:self.sent_stop=stop_serial
                         if ack is not None and self.ack_requested==ack:self.ack_requested=None
+                    # Do not let a slow control reply age the receiver echo
+                    # across the following measured-feedback exchange.
+                    r=self._exchange_authority(reply)
+                with self.lock:
+                    send_measured=(measured is not None and measured_stamp and
+                        self.stop_serial==self.sent_stop and self.phase not in ('requested','arming','handshake'))
+                if send_measured:
+                    reply=self.client.exchange(Operation.MEASURED_VELOCITY,self._authority(r),measured,measured_stamp)
+                    with self.lock:
+                        self.feedback=reply;self.speed_tracking=self.client.tracking
+                    # Original health/receiver sample times stay unchanged.
+                    # Refresh the transport echo from THIS received reply,
+                    # rather than the one from before the measured exchange.
+                    r=self._exchange_authority(reply)
             except (OSError,ValueError,KeyError,TypeError,OverflowError) as exc:self._fault(str(exc))
             observer=self.operator_observer
             if observer:observer()
