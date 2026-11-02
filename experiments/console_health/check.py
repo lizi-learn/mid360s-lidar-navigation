@@ -22,7 +22,8 @@ class Receipts:
 ap=argparse.ArgumentParser();ap.add_argument('--legacy',action='store_true');args=ap.parse_args()
 rclpy.init();temporary=tempfile.TemporaryDirectory();node=Console(Path(temporary.name),True,.03);receipts=Receipts();node.gait=receipts
 executor=SingleThreadedExecutor()if args.legacy else console_executor(node)
-if args.legacy:executor.add_node(node)
+if args.legacy:
+    executor.add_node(node);executor.add_node(node.health_node)
 source=Node('console_health_fixture_source');health=source.create_publisher(String,'/p2_nav/gate_status',10);block=source.create_publisher(String,'/console_health_fixture_block',10)
 blocked=[]
 def blocking(msg):
@@ -47,7 +48,10 @@ try:
     assert all(stamp in sent for received,stamp in unique),'Original evaluation stamp changed'
     gaps=[(b[0]-a[0])/1e6 for a,b in zip(unique,unique[1:])];ages=[(received-stamp)/1e6 for received,stamp in unique]
     maximum=max(gaps)
+    result=dict(passed=(maximum>=200 if args.legacy else maximum<100),legacy_executor=args.legacy,actual_console=True,blocked_callbacks=len(blocked),original_stamps_preserved=True,samples=len(unique),maximum_forwarding_gap_ms=maximum,maximum_evaluation_age_ms=max(ages),motion_publishers_used=False,scope='Actual ROS Console and source-stamped synthetic health; receipt stub has no socket, gait or actuator access.')
+    print(json.dumps(result),flush=True)
     assert maximum>=200 if args.legacy else maximum<100,(args.legacy,maximum)
-    print(json.dumps(dict(passed=True,legacy_executor=args.legacy,actual_console=True,blocked_callbacks=len(blocked),original_stamps_preserved=True,samples=len(unique),maximum_forwarding_gap_ms=maximum,maximum_evaluation_age_ms=max(ages),motion_publishers_used=False,scope='Actual ROS Console and source-stamped synthetic health; receipt stub has no socket, gait or actuator access.')))
 finally:
-    executor.shutdown();thread.join(timeout=3);node.gait=None;node.door_worker.close();node.reception.close();node.flight.close();node.destroy_node();source.destroy_node();rclpy.shutdown();temporary.cleanup()
+    executor.shutdown();thread.join(timeout=3);
+    if args.legacy:node.health_node.destroy_node()
+    node.gait=None;node.door_worker.close();node.reception.close();node.flight.close();node.destroy_node();source.destroy_node();rclpy.shutdown();temporary.cleanup()

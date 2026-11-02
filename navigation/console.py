@@ -5,8 +5,7 @@ from pathlib import Path
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 import rclpy
 from rclpy.node import Node
-from rclpy.executors import MultiThreadedExecutor
-from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
+from rclpy.executors import SingleThreadedExecutor
 from rclpy.action import ActionClient
 from rclpy.qos import QoSProfile,DurabilityPolicy,ReliabilityPolicy,qos_profile_sensor_data
 from geometry_msgs.msg import PoseStamped,PoseWithCovarianceStamped,Twist
@@ -25,6 +24,29 @@ from urllib.parse import urlsplit,parse_qs
 
 ROOT=Path(__file__).resolve().parent
 SAFE_NAME=re.compile(r'[A-Za-z0-9_-]{1,48}\Z')
+
+class GateHealthNode(Node):
+    def __init__(self,consume):
+        super().__init__('navigation_workflow_health_forwarder')
+        # A dedicated executor receives only original gate evaluations. It must
+        # not queue behind path/map callbacks or a shared executor worker pool.
+        self.create_subscription(String,'/p2_nav/gate_status',consume,1)
+
+
+class ConsoleExecutors:
+    def __init__(self,node):
+        self.node=node
+        self.work=SingleThreadedExecutor();self.work.add_node(node)
+        self.health=SingleThreadedExecutor();self.health.add_node(node.health_node)
+        self.health_thread=threading.Thread(target=self.health.spin,daemon=True,name='original_gate_evaluations')
+    def spin(self):
+        self.health_thread.start()
+        self.work.spin()
+    def shutdown(self):
+        self.work.shutdown();self.health.shutdown()
+        self.health_thread.join(timeout=3.)
+        self.node.health_node.destroy_node()
+
 
 class Console(Node):
     def __init__(self,runtime,simulation,minimum_speed,footprint=None,odometry_model='differential',gait_profile='generic',gait_socket=''):
@@ -52,9 +74,6 @@ class Console(Node):
         from flight_recorder import FlightRecorder
         self.flight=FlightRecorder(runtime/'planning-evidence.private.jsonl.gz')
         self.flight_costmap_at=0.
-        # Health forwarding must run while non-control ROS callbacks process
-        # paths/maps. Keep only the latest ORIGINAL evaluation, never renew it.
-        self.control_callbacks=MutuallyExclusiveCallbackGroup()
         self.navigation_grid=None;self.overlay_revision=0;self.overlay_report={};self._overlay_key=None;self._overlay_lock=threading.Lock()
         self.speed_value=.8 if gait_profile=='p2-flat-model' else min(.20,self.maximum_speed)
         self.velocity_scale=.5 if gait_profile=='p2-flat-model' else 1.
@@ -70,7 +89,7 @@ class Console(Node):
         self.create_subscription(CollisionMonitorState,'/p2_nav/collision_state',self.on_collision,10)
         self.create_subscription(BehaviorTreeLog,'/behavior_tree_log',self.on_bt_log,10)
         self.create_subscription(String,'/p2_nav/operator_authority',self.on_authority,10)
-        self.create_subscription(String,'/p2_nav/gate_status',self.on_gate,1,callback_group=self.control_callbacks)
+        self.health_node=GateHealthNode(self.on_gate)
         self.create_subscription(String,'/p2_nav/sim_truth',lambda m:setattr(self,'truth',json.loads(m.data)),10)
         self.operator=self.create_publisher(String,'/p2_nav/operator',10)
         self.limiter=self.create_publisher(SpeedLimit,'/speed_limit',10)
@@ -797,9 +816,7 @@ class Console(Node):
             'scope':'平面导航仿真' if self.simulation else ('雷达中心坐标导航；定位、传感器和步态状态见实时数据' if self.gate.get('navigation_reference')=='lidar_projection' else ('实机步态接口已连接；坐标与控制状态见实时数据' if self.gait else '实机导航预演'))}
 
 def console_executor(node):
-    executor=MultiThreadedExecutor(num_threads=2)
-    executor.add_node(node)
-    return executor
+    return ConsoleExecutors(node)
 
 
 def main():
