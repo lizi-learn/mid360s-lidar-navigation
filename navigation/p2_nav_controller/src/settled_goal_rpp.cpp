@@ -37,20 +37,29 @@ class SettledGoalRPP : public nav2_regulated_pure_pursuit_controller::RegulatedP
   }
   void setPlan(const nav_msgs::msg::Path &path) override {
     std::lock_guard<std::mutex> lock(phase_mutex_);
-    if (path.poses.empty()) { phase_.reset(); settled_pivot_.reset(); throw nav2_core::PlannerException("Empty terminal path"); }
+    if (path.poses.empty()) { reference_pivot_=false; phase_.reset(); settled_pivot_.reset(); throw nav2_core::PlannerException("Empty terminal path"); }
     auto goal=path.poses.back(); goal.header.frame_id=path.header.frame_id;
     const auto &q=goal.pose.orientation;
     const double norm=std::sqrt(q.x*q.x+q.y*q.y+q.z*q.z+q.w*q.w);
-    if (!std::isfinite(norm) || norm<.8 || norm>1.2) { phase_.reset(); settled_pivot_.reset(); throw nav2_core::PlannerException("Invalid terminal quaternion"); }
+    if (!std::isfinite(norm) || norm<.8 || norm>1.2) { reference_pivot_=false; phase_.reset(); settled_pivot_.reset(); throw nav2_core::PlannerException("Invalid terminal quaternion"); }
     if(!have_goal_||goal.header.frame_id!=goal_.header.frame_id||
       std::hypot(goal.pose.position.x-goal_.pose.position.x,goal.pose.position.y-goal_.pose.position.y)>1e-4||
-      (!position_only_goal_&&std::abs(std::remainder(tf2::getYaw(q)-tf2::getYaw(goal_.pose.orientation),2*std::acos(-1.)))>1e-4)){breakaway_.reset();settled_pivot_.reset();}
+      (!position_only_goal_&&std::abs(std::remainder(tf2::getYaw(q)-tf2::getYaw(goal_.pose.orientation),2*std::acos(-1.)))>1e-4)){reference_pivot_=false;breakaway_.reset();settled_pivot_.reset();}
     have_goal_=true;
     phase_.set_goal(goal.pose.position.x,goal.pose.position.y,tf2::getYaw(q),goal.header.frame_id);
-    goal_=goal; Base::setPlan(path);
+    // Pure-pursuit skips repeated-XY poses and can therefore drive forward
+    // through an explicit initial pivot in the reference. Honor that reference
+    // phase before tracking its straight leg; ordinary curved paths are unchanged.
+    size_t pivot_end=0;
+    while(pivot_end+1<path.poses.size()&&std::hypot(path.poses[pivot_end+1].pose.position.x-path.poses.front().pose.position.x,
+      path.poses[pivot_end+1].pose.position.y-path.poses.front().pose.position.y)<.005)++pivot_end;
+    const double reference_turn=std::abs(std::remainder(tf2::getYaw(path.poses[pivot_end].pose.orientation)-tf2::getYaw(path.poses.front().pose.orientation),2.*std::acos(-1.)));
+    if(pivot_end>0&&(reference_turn>.55||(reference_pivot_&&reference_turn>.15))){reference_pivot_=true;reference_target_=path.poses[pivot_end];reference_target_.header.frame_id=path.header.frame_id;}
+    else if(pivot_end==0)reference_pivot_=false;
+    goal_=goal; plan_source_ns_=rclcpp::Time(path.header.stamp).nanoseconds(); Base::setPlan(path);
   }
-  void activate() override { phase_.reset(); breakaway_.reset(); settled_pivot_.reset(); Base::activate(); }
-  void deactivate() override { phase_.reset(); breakaway_.reset(); settled_pivot_.reset(); Base::deactivate(); }
+  void activate() override { reference_pivot_=false; phase_.reset(); breakaway_.reset(); settled_pivot_.reset(); Base::activate(); }
+  void deactivate() override { reference_pivot_=false; phase_.reset(); breakaway_.reset(); settled_pivot_.reset(); Base::deactivate(); }
   geometry_msgs::msg::TwistStamped computeVelocityCommands(
       const geometry_msgs::msg::PoseStamped &pose,const geometry_msgs::msg::Twist &speed,
       nav2_core::GoalChecker *checker) override {
@@ -95,6 +104,17 @@ class SettledGoalRPP : public nav2_regulated_pure_pursuit_controller::RegulatedP
   geometry_msgs::msg::TwistStamped collision_aware_base(
       const geometry_msgs::msg::PoseStamped &pose,const geometry_msgs::msg::Twist &speed,
       nav2_core::GoalChecker *checker,double distance,std::unique_lock<std::mutex> &lock) {
+    if(reference_pivot_&&settled_pivot_response_) {
+      auto reference=reference_target_;reference.header.stamp=pose.header.stamp;
+      geometry_msgs::msg::PoseStamped target;
+      if(!transformPose(pose.header.frame_id,reference,target))throw nav2_core::PlannerException("Reference pivot transform unavailable");
+      const double error=std::remainder(tf2::getYaw(target.pose.orientation)-tf2::getYaw(pose.pose.orientation),2.*std::acos(-1.));
+      const double w=settled_pivot_.step(error,tf2::getYaw(pose.pose.orientation),speed.angular.z,clock_->now().seconds(),.15);
+      {auto *map=costmap_ros_->getCostmap();std::unique_lock<nav2_costmap_2d::Costmap2D::mutex_t> map_lock(*map->getMutex());
+        if(use_collision_detection_&&isCollisionImminent(pose,0.,w,distance))throw nav2_core::PlannerException("Reference pivot collision ahead");}
+      if(std::abs(error)<.15&&!settled_pivot_.pending())reference_pivot_=false;
+      geometry_msgs::msg::TwistStamped out;out.header=pose.header;out.twist.angular.z=w;return out;
+    }
     const double lo=min_lookahead_dist_,hi=max_lookahead_dist_;
     struct Restore {
       SettledGoalRPP *self;std::unique_lock<std::mutex> &lock;double lo,hi;
@@ -136,6 +156,9 @@ class SettledGoalRPP : public nav2_regulated_pure_pursuit_controller::RegulatedP
           if(use_collision_detection_&&isCollisionImminent(pose,out.twist.linear.x,bounded,distance))
             throw nav2_core::PlannerException("Forward tracking arc collision ahead");}
         out.twist.angular.z=bounded;
+        if(std::abs(bounded)>.35)RCLCPP_INFO_THROTTLE(costmap_ros_->get_logger(),*clock_,500,
+          "Pursuit evidence: source=%ld preview=%.3f attempt=%zu x=%.3f y=%.3f yaw=%.3f measured_yaw=%.3f forward=%.3f turn=%.3f",
+          static_cast<long>(plan_source_ns_),i?previews[i]:preview,i,pose.pose.position.x,pose.pose.position.y,tf2::getYaw(pose.pose.orientation),speed.angular.z,out.twist.linear.x,bounded);
         return out;
       }catch(const nav2_core::PlannerException &e){
         if(!lock.owns_lock())lock.lock();settled_pivot_.reset();last=e.what();
@@ -161,11 +184,17 @@ class SettledGoalRPP : public nav2_regulated_pure_pursuit_controller::RegulatedP
         const double score=2.*(std::pow(carrot.pose.position.x-px,2)+std::pow(carrot.pose.position.y-py,2))+.3*heading*heading+.05*w*w;
         if(score<best){best=score;best_v=v;best_w=w;found=true;}
       }
-      if(found){geometry_msgs::msg::TwistStamped out;out.header=pose.header;out.twist.linear.x=best_v;out.twist.angular.z=best_w;return out;}
+      if(found){
+        RCLCPP_INFO_THROTTLE(costmap_ros_->get_logger(),*clock_,500,
+          "Velocity window evidence: source=%ld angle=%.3f forward=%.3f turn=%.3f measured_yaw=%.3f",
+          static_cast<long>(plan_source_ns_),angle,best_v,best_w,speed.angular.z);
+        geometry_msgs::msg::TwistStamped out;out.header=pose.header;out.twist.linear.x=best_v;out.twist.angular.z=best_w;return out;}
     }
 
     throw nav2_core::PlannerException(last);
   }
+  bool reference_pivot_=false;geometry_msgs::msg::PoseStamped reference_target_;
+  int64_t plan_source_ns_=0;
   std::mutex phase_mutex_; TerminalHeading phase_; geometry_msgs::msg::PoseStamped goal_;
   SettledPivot settled_pivot_;bool settled_pivot_response_=false,position_only_goal_=false;
   PivotBreakaway breakaway_;double curved_forward_input_=0.,minimum_pivot_=0.,collision_lookahead_floor_=0.;bool have_goal_=false,corner_preview_=false;

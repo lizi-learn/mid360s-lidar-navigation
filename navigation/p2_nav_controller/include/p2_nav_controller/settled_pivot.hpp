@@ -21,7 +21,10 @@ class SettledPivot {
     if(coasting_) {
       peak_=std::max(peak_,std::abs(rate));
       quiet_=std::abs(rate)<.03?quiet_+dt:0.;
-      if(now-end_<2.||quiet_<.3)return 0.;
+      // Once an actual yaw response has been observed, measured quiet is the
+      // completion evidence. Keep the original two-second wait for a pulse that
+      // has not yet produced measurable motion (including delayed/deadzone cases).
+      if(quiet_<.3||(peak_<.03&&now-end_<2.))return 0.;
       coasting_=false;
       if(near_pulse_) {
         near_delta_=std::abs(std::remainder(yaw-from_,2.*std::acos(-1.)));

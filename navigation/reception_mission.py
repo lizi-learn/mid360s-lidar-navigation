@@ -269,11 +269,15 @@ class MissionService:
             # Allow the existing observations/lifecycle to finish initializing.
             # Do not change freshness requirements or resume after takeover.
             deadline=time.monotonic()+8.
-            while hasattr(self.node,'health_ready') and not self.node.health_ready():
+            while ((hasattr(self.node,'health_ready') and not self.node.health_ready()) or
+                   (hasattr(self.node,'execution_ready') and not self.node.execution_ready())):
                 if not self.engine.valid(epoch):return
                 state=self.node.session.status(time.monotonic())
                 if not state['navigation_permitted'] or state['generation']!=result['generation']:return
-                if time.monotonic()>=deadline:raise ValueError('定位或避障观测尚未收到有效数据，请查看实时状态')
+                if time.monotonic()>=deadline:
+                    gait=getattr(self.node,'gait',None)
+                    reason=gait.status().get('blockers','') if gait else ''
+                    raise ValueError(reason or '定位或避障观测尚未收到有效数据，请查看实时状态')
                 time.sleep(.05)
             if not self.engine.valid(epoch): return
             self.node.confirm_goal({'generation': result['generation'], '_mission_epoch': epoch})

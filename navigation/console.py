@@ -12,7 +12,7 @@ from geometry_msgs.msg import PoseStamped,PoseWithCovarianceStamped,Twist
 from nav_msgs.msg import OccupancyGrid,Path as RosPath
 from sensor_msgs.msg import LaserScan
 from nav2_msgs.action import NavigateToPose,ComputePathToPose,NavigateThroughPoses,ComputePathThroughPoses
-from nav2_msgs.msg import SpeedLimit,CollisionMonitorState,CostmapFilterInfo,BehaviorTreeLog
+from nav2_msgs.msg import SpeedLimit,CollisionMonitorState,CostmapFilterInfo,BehaviorTreeLog,Costmap
 from slam_toolbox.srv import SerializePoseGraph
 from nav2_msgs.srv import SaveMap
 from lifecycle_msgs.srv import GetState
@@ -48,6 +48,9 @@ class Console(Node):
         self.bt_goal_source_ns=0;self.bt_recovery_report={}
         self.virtual_operator=None;self.virtual_sequence=0;self.virtual_source=secrets.randbits(63)+1
         self.request_token=secrets.token_urlsafe(24)
+        from flight_recorder import FlightRecorder
+        self.flight=FlightRecorder(runtime/'planning-evidence.private.jsonl.gz')
+        self.flight_costmap_at=0.
         self.navigation_grid=None;self.overlay_revision=0;self.overlay_report={};self._overlay_key=None;self._overlay_lock=threading.Lock()
         self.speed_value=.8 if gait_profile=='p2-flat-model' else min(.20,self.maximum_speed)
         self.velocity_scale=.5 if gait_profile=='p2-flat-model' else 1.
@@ -56,6 +59,8 @@ class Console(Node):
         self.keepout_mask=self.create_publisher(OccupancyGrid,'/p2_nav/keepout_mask',qos)
         self.keepout_info=self.create_publisher(CostmapFilterInfo,'/p2_nav/keepout_filter_info',qos)
         self.create_subscription(OccupancyGrid,'/map',self.on_map,qos)
+        self.create_subscription(RosPath,'/plan',self.record_source_path,10)
+        self.create_subscription(Costmap,'/global_costmap/costmap_raw',self.record_source_costmap,10)
         if self.gait:self.create_subscription(String,'/p2_nav/path_view',self.on_path_view,10)
         else:self.create_subscription(RosPath,'/plan',self.on_path,10)
         self.create_subscription(CollisionMonitorState,'/p2_nav/collision_state',self.on_collision,10)
@@ -103,6 +108,27 @@ class Console(Node):
         self.pending_reception_scan=None;self.door_scan_rejections={}
         self.create_subscription(LaserScan,'/scan',self.on_reception_scan,qos_profile_sensor_data)
         self.create_timer(.05,self.process_reception_scan)
+    def record_source_path(self,msg):
+        if self.session.phase not in ('planning','ready','starting','executing','replanning'):return
+        try:
+            self.flight.submit('path',dict(source_ros_ns=msg.header.stamp.sec*10**9+msg.header.stamp.nanosec,
+                frame_id=msg.header.frame_id,generation=self.session.generation,phase=self.session.phase,
+                poses=[[p.pose.position.x,p.pose.position.y,p.pose.position.z,p.pose.orientation.x,
+                        p.pose.orientation.y,p.pose.orientation.z,p.pose.orientation.w]for p in msg.poses]))
+        except (ValueError,TypeError,AttributeError):self.flight.errors+=1
+    def record_source_costmap(self,msg):
+        now=time.monotonic()
+        if self.session.phase not in ('planning','ready','starting','executing','replanning')or now-self.flight_costmap_at<1.:return
+        self.flight_costmap_at=now
+        try:
+            m=msg.metadata;p=m.origin
+            self.flight.submit('costmap',dict(source_ros_ns=msg.header.stamp.sec*10**9+msg.header.stamp.nanosec,
+                update_ros_ns=m.update_time.sec*10**9+m.update_time.nanosec,
+                frame_id=msg.header.frame_id,generation=self.session.generation,phase=self.session.phase,
+                size_x=m.size_x,size_y=m.size_y,resolution=m.resolution,
+                origin=[p.position.x,p.position.y,p.position.z,p.orientation.x,p.orientation.y,p.orientation.z,p.orientation.w],
+                cells=bytes(msg.data),provenance='asynchronous raw global costmap; not an atomic planner snapshot'))
+        except (ValueError,TypeError,AttributeError):self.flight.errors+=1
     def on_map(self,msg):
         self.grid=msg;self.map_revision+=1
         if hasattr(self,'door_worker'):self.publish_reception_map(self.reception.observation_document())
@@ -606,7 +632,7 @@ class Console(Node):
                 'mission_phase':mission['phase'],'session_phase':self.session.phase,'pose':None,
                 'pose_valid':self.health_ready(),'collision_stop':self.collision_stop,
                 'goal_generation':self.goal_generation,'path_revision':self.path_revision,
-                'control_recovery':self.bt_recovery_report,'path_source':self.path_source_report,'feedback':self.feedback,'speed_zones':self.speed_zone_status,
+                'control_recovery':self.bt_recovery_report,'path_source':self.path_source_report,'planning_evidence':self.flight.status(),'feedback':self.feedback,'speed_zones':self.speed_zone_status,
                 'gate':{k:self.gate.get(k)for k in ('evaluated_monotonic_ns','velocity_source_monotonic_ns','reason',
                     'command','body_velocity_feedback','velocity_stages','scan_age','odom_age','localized','ground_ok')},
                 'session_notice':self.session.status(now).get('notice')}
@@ -763,7 +789,7 @@ class Console(Node):
             'maps':sorted(p.parent.name for p in (self.runtime/'maps').glob('*/mapped.yaml')),
             'hardware_execution_enabled':bool(getattr(self,'gait',None) and self.gait.status()['navigation_owned']),
             'audio_feedback':self.audio.status(),
-            'reception':self.reception_status(),'control_recovery':self.bt_recovery_report,'path_source':self.path_source_report,
+            'reception':self.reception_status(),'control_recovery':self.bt_recovery_report,'path_source':self.path_source_report,'planning_evidence':self.flight.status(),
             'scope':'平面导航仿真' if self.simulation else ('雷达中心坐标导航；定位、传感器和步态状态见实时数据' if self.gate.get('navigation_reference')=='lidar_projection' else ('实机步态接口已连接；坐标与控制状态见实时数据' if self.gait else '实机导航预演'))}
 
 def main():
@@ -857,5 +883,5 @@ def main():
         node.reception.close()
         node.stop_process()
         if node.gait:node.gait.close()
-        server.server_close();executor.shutdown();node.destroy_node();rclpy.shutdown()
+        server.server_close();executor.shutdown();node.flight.close();node.destroy_node();rclpy.shutdown()
 if __name__=='__main__':main()

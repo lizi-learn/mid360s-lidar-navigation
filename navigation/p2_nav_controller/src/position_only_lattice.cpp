@@ -130,6 +130,53 @@ class PositionOnlyLattice : public nav2_smac_planner::SmacPlannerLattice {
   nav_msgs::msg::Path createPlan(const geometry_msgs::msg::PoseStamped &start,
                                 const geometry_msgs::msg::PoseStamped &goal) override {
     std::lock_guard<std::mutex> stable_lock(stable_mutex_);
+    try { return plan_once(start,goal); }
+    catch(const nav2_core::PlannerException &original_error) {
+      // A locally curved exit can defeat the long-distance point guide even
+      // though its two complete native plans fit. Search an intermediate
+      // reference, never an executable partial goal or a partial success.
+      const auto saved_path=stable_path_;const auto saved_goal=stable_goal_;
+      const double x=start.pose.position.x,y=start.pose.position.y;
+      const double gx=goal.pose.position.x,gy=goal.pose.position.y;
+      if(start.header.frame_id!=goal.header.frame_id||std::hypot(gx-x,gy-y)<=3.)throw;
+      // Do not spend recovery time searching anchors across a disconnected
+      // known-space component, or when the full destination body cannot fit.
+      {std::unique_lock<nav2_costmap_2d::Costmap2D::mutex_t> lock(*_costmap->getMutex());
+        prepare_map();heading(gx,gy,std::atan2(gy-y,gx-x));
+        if(position_guide(_costmap->getCharMap(),_costmap->getSizeInCellsX(),_costmap->getSizeInCellsY(),_costmap->getResolution(),_costmap->getOriginX(),_costmap->getOriginY(),{x,y},{gx,gy},0.).empty())
+          throw nav2_core::PlannerException(original_error.what());}
+      const double yaw=tf2::getYaw(start.pose.orientation),pi=std::acos(-1.);
+      const double error=std::remainder(std::atan2(gy-y,gx-x)-yaw,2*pi);
+      const double side=error>=0.?1.:-1.;
+      const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(5);
+      for(double distance:{3.,1.5})for(double offset:{side*pi/4.,-side*pi/4.}) {
+        if(std::chrono::steady_clock::now()>deadline)break;
+        auto via=goal;via.pose.position.x=x+distance*std::cos(yaw+offset);
+        via.pose.position.y=y+distance*std::sin(yaw+offset);
+        stable_path_=saved_path;stable_goal_=saved_goal;
+        try {
+          auto joined=plan_once(start,via);
+          if(joined.poses.empty())continue;
+          auto tail=plan_once(joined.poses.back(),goal);
+          if(tail.poses.empty())continue;
+          joined.poses.insert(joined.poses.end(),tail.poses.begin()+1,tail.poses.end());
+          std::vector<std::array<double,3>> samples;
+          for(const auto &p:joined.poses)samples.push_back({p.pose.position.x,p.pose.position.y,tf2::getYaw(p.pose.orientation)});
+          // Both subplans and their join must still fit the latest unchanged
+          // full body map. No occupied/unknown cell is erased or reclassified.
+          {std::unique_lock<nav2_costmap_2d::Costmap2D::mutex_t> lock(*_costmap->getMutex());
+            prepare_map();if(!swept_clear(samples,0.))continue;}
+          RCLCPP_INFO(_logger,"Complete position route recovered through local reference: %.3f %.3f, %zu poses",via.pose.position.x,via.pose.position.y,joined.poses.size());
+          return remember(completed(std::move(joined)),goal);
+        }catch(const nav2_core::PlannerException &){}
+      }
+      stable_path_=saved_path;stable_goal_=saved_goal;
+      throw nav2_core::PlannerException(original_error.what());
+    }
+  }
+ private:
+  nav_msgs::msg::Path plan_once(const geometry_msgs::msg::PoseStamped &start,
+                                const geometry_msgs::msg::PoseStamped &goal) {
     if(start.header.frame_id!=goal.header.frame_id)throw nav2_core::PlannerException("Position goal frame mismatch");
     const double yaw=tf2::getYaw(start.pose.orientation),x=start.pose.position.x,y=start.pose.position.y;
     const double gx=goal.pose.position.x,gy=goal.pose.position.y;
