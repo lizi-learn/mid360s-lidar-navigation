@@ -5,7 +5,7 @@
       <PipelineSequence name="NavigateThroughForwardWaypoints">
         <RateController hz="1.0">
           <Sequence>
-            <RemovePassedGoals input_goals="{goals}" output_goals="{goals}" radius="0.30"/>
+            <RemovePassedGoals input_goals="{goals}" output_goals="{goals}" radius="0.75"/>
             <ComputePathThroughPoses goals="{goals}" path="{path}" planner_id="PositionOnly"/>
           </Sequence>
         </RateController>

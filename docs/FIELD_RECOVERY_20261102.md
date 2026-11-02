@@ -51,6 +51,18 @@ A current-map complete far-goal search still fails. A continuous reference route
 The shared two-worker candidate was NOT deployed: exact CI41471400317 exposed a260.6ms forwarding gap in the corrected test. The revised implementation assigns the health-only subscriber its own Node and SingleThreadedExecutor/thread; the ordinary Console keeps its original serial executor. Both use the same original source stamps and unchanged100ms contract. The failed CI and ARM-vs-CI discrepancy remain recorded; no physical walking result is inferred.
 # Native transport process isolation (November 3)
 
+The corrected control chain subsequently sustained real nonzero strategy input
+while lidar odometry advanced about 4.7 m. The office leg then stopped during
+replanning; it did not reach its destination. All twelve reference goals were
+still present after the first reference had passed behind the robot. The old
+0.30 m intermediate-reference radius could be missed between approximately
+1.2 s planner updates during continuous walking. Both continuous route trees
+now use a 0.75 m reference radius. Final position/heading checking, collision
+geometry and stops are unchanged. The actual Nav2 RemovePassedGoals plugin
+fixture compares the missed-reference case and verifies that the last goal is
+retained. An already passed prefix must also be removed before resuming a
+cancelled test; restarting the old complete list would request a return to it.
+
 A real full-route preview after deployment exposed an additional Console
 ordering fault: two readers could deliver an older native telemetry snapshot
 after a newer snapshot, causing a false raw-source replay cancellation. The
