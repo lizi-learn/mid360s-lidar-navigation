@@ -52,6 +52,23 @@ class ConsoleGaitTests(unittest.TestCase):
             return dict(phase='active',cancel_pending=False)
         c.gait.status=delayed_status;c.poll_session()
         self.assertEqual(c.session.phase,'executing');self.assertTrue(c.emitted[-1]['armed']);self.assertFalse(c.emitted[-1]['paused'])
+    def test_descheduled_ui_read_retries_actual_packet_instead_of_false_cancel(self):
+        c,g=self.setup_console();c.session.start(g,time.monotonic(),True,True);c.session.started(g,time.monotonic());calls=[]
+        def sample():
+            stamp=time.monotonic();calls.append(stamp)
+            if len(calls)==1:time.sleep(.12)
+            return dict(mode='navigation_allowed',verified=True,connected=True,activity=False,
+                source=c.session.source,sequence=c.session.sequence+len(calls),stamp=stamp,reply_stamp=None,source_transport='native_packet_snapshot')
+        c.gait.operator_authority=sample;c.poll_gait_authority(time.monotonic())
+        self.assertEqual(len(calls),2);self.assertEqual(c.session.phase,'executing');self.assertFalse(c.session.cancel_pending)
+        self.assertEqual(c.session.source_time,calls[1])
+    def test_retry_does_not_renew_truly_expired_native_packet(self):
+        c,g=self.setup_console();c.session.start(g,time.monotonic(),True,True);c.session.started(g,time.monotonic());stamp=time.monotonic()-.12;calls=[]
+        def sample():
+            calls.append(True);return dict(mode='navigation_allowed',verified=True,connected=True,activity=False,
+                source=c.session.source,sequence=c.session.sequence+1,stamp=stamp,reply_stamp=None,source_transport='native_packet_snapshot')
+        c.gait.operator_authority=sample;c.poll_gait_authority(time.monotonic())
+        self.assertEqual(len(calls),2);self.assertEqual(c.session.phase,'stopped');self.assertTrue(c.session.cancel_pending)
     def test_slow_ui_rpc_resamples_original_native_packet_before_velocity_intent(self):
         c,g=self.setup_console();c.gate={};c.session.start(g,time.monotonic(),True,True);c.session.started(g,time.monotonic());c.gait.phase='active'
         def actual_source():

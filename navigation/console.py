@@ -302,20 +302,22 @@ class Console(Node):
     def poll_gait_authority(self,now):
         gait=getattr(self,'gait',None)
         if gait is None:return
-        d=gait.operator_authority()
-        with self.session.lock:
-            now=max(now,time.monotonic())
-            source_fresh=bool(d and -.005<=now-d['stamp']<=.1)
-            reply_fresh=bool(d and(d.get('source_transport')=='native_packet_snapshot' or -.005<=now-d['reply_stamp']<=.1))
-            if not source_fresh or not reply_fresh:
-                self.session.operator('unknown',False,False,False,0,0,0.,now);return
-            # Observer and UI timers may finish their read-only requests in a
-            # different order. Never feed an older cached telemetry reply back
-            # into the raw-source replay detector or renew its original time.
-            # Native packets retain their independent strict sequence checks.
-            if d['source']==self.session.source and d['sequence']<=self.session.sequence:return
-            self.session.operator(d['mode'],d['verified'],d['connected'],d['activity'],
-                d['source'],d['sequence'],d['stamp'],now)
+        for attempt in range(2):
+            d=gait.operator_authority()
+            with self.session.lock:
+                now=max(now,time.monotonic())
+                source_fresh=bool(d and -.005<=now-d['stamp']<=.1)
+                reply_fresh=bool(d and(d.get('source_transport')=='native_packet_snapshot' or -.005<=now-d['reply_stamp']<=.1))
+                if not source_fresh or not reply_fresh:
+                    # One UI read may be descheduled while the independent
+                    # receiver keeps advancing. Re-read the actual packet;
+                    # never relabel the old sample or extend its deadline.
+                    if attempt==0:continue
+                    self.session.operator('unknown',False,False,False,0,0,0.,now);return
+                if d['source']==self.session.source and d['sequence']<=self.session.sequence:return
+                self.session.operator(d['mode'],d['verified'],d['connected'],d['activity'],
+                    d['source'],d['sequence'],d['stamp'],now)
+                return
     def session_state(self,poll=False,refresh=True):
         # A UI RPC or path callback may delay this decision past its earlier
         # read-only observation. Consume the latest ORIGINAL packet first.
