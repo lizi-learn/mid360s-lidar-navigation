@@ -20,7 +20,8 @@ def encode(result,values):
         max(0,int(result.get('source_monotonic_ns',0))),max(0,int(result.get('source_unix_us',0))),mode,flags,*axes,0)
 
 class NativePublisher:
-    def __init__(self,path):self.path=path;self.socket=None;self.retry_at=0.
+    def __init__(self,path,snapshot_path=None):
+        self.path=path;self.socket=None;self.retry_at=0.;self.snapshot_path=snapshot_path;self.snapshot=None;self.snapshot_error=''
     def send(self,result,values):
         if self.socket is None:
             if time.monotonic()<self.retry_at:return
@@ -32,7 +33,15 @@ class NativePublisher:
         try:
             packet=encode(result,values)
             if self.socket.send(packet)!=len(packet):raise OSError('short_native_packet')
+            if self.snapshot_path:
+                try:
+                    if self.snapshot is None:
+                        from native_operator_snapshot import NativeSnapshotWriter
+                        self.snapshot=NativeSnapshotWriter(self.snapshot_path)
+                    self.snapshot.publish(packet);self.snapshot_error=''
+                except OSError as error:self.snapshot_error=str(error)
         except (OSError,ValueError,OverflowError,struct.error):self.close()
     def close(self):
         if self.socket is not None:self.socket.close()
         self.socket=None
+        if self.snapshot is not None:self.snapshot.close();self.snapshot=None

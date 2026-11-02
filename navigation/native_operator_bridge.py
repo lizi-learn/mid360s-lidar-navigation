@@ -9,6 +9,7 @@ def main():
     p.add_argument('--code-root',required=True);p.add_argument('--profile',required=True)
     p.add_argument('--commissioning',required=True);p.add_argument('--socket',required=True)
     p.add_argument('--source-domain',type=int,default=106);p.add_argument('--duration',type=float,default=0)
+    p.add_argument('--snapshot',default='')
     a=p.parse_args();sys.path[:0]=[a.code_root,str(Path(a.code_root)/'navigation')]
     from robot_profile import load,check_machine,identity
     from operator_authority import ReceiverAuthority
@@ -22,7 +23,7 @@ def main():
     from rclpy.qos import QoSProfile,ReliabilityPolicy
     from std_msgs.msg import Float64MultiArray
     rclpy.init(domain_id=a.source_domain);node=Node('p2_gait_native_operator_readonly')
-    decoder=ReceiverAuthority(True);source=NativePublisher(a.socket);boot=secrets.token_bytes(32)
+    decoder=ReceiverAuthority(True);source=NativePublisher(a.socket,snapshot_path=a.snapshot or None);boot=secrets.token_bytes(32)
     endpoint={'gid':b''};stats={'messages':0,'connected':0,'sent_modes':{},'serial_opens':0,'motor_writes':0}
     def discover():
         peers=node.get_publishers_info_by_topic('/g12_sbus/output')

@@ -51,6 +51,21 @@ A current-map complete far-goal search still fails. A continuous reference route
 The shared two-worker candidate was NOT deployed: exact CI41471400317 exposed a260.6ms forwarding gap in the corrected test. The revised implementation assigns the health-only subscriber its own Node and SingleThreadedExecutor/thread; the ordinary Console keeps its original serial executor. Both use the same original source stamps and unchanged100ms contract. The failed CI and ARM-vs-CI discrepancy remain recorded; no physical walking result is inferred.
 # Native transport process isolation (November 3)
 
+The reply-only refresh candidate passed the initial x86 case but failed the ARM
+65 ms control-delay test and its CI job; it was not installed. The source path
+now optionally mirrors the exact 64-byte native operator packet after a
+successful send, in the private socket directory. The transport reads that
+source packet directly for the authority echo, checks the current native
+instance and the unchanged 100 ms original timestamp, and otherwise falls back
+to the actual gait reply. It never timestamps a snapshot read as a new sample.
+The bridge remains a subscriber to the existing receiver; it neither opens the
+serial port nor publishes joystick/motor commands. Only its own read-only user
+service needs updating; the running D/driver binaries are unchanged.
+
+The delay fixture requires the mirror to be consumed and checks every echoed
+timestamp against actual producer packet timestamps. Source identity, expiry,
+file permissions and symlink rejection have separate regression coverage.
+
 The first far endpoint was later reached in the field (about 6 cm lidar/map
 position error), but return startup revoked the lease. The native trace showed
 fresh actual operator input and a roughly 1.3 ms health evaluation, while the

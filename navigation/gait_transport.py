@@ -17,6 +17,8 @@ def readiness_error(r):
 
 class GaitTransport:
     def __init__(self,path,trace_path=None):
+        from native_operator_snapshot import NativeSnapshotReader
+        self.native_snapshot=NativeSnapshotReader(path+'.operator.snapshot')
         self.path=path;self.lock=threading.RLock();self.running=True;self.client=None
         self.last_authority_sample=None;self.feedback=None;self.error='步态接口尚未连接';self.health_stamp=0;self.health_flags=0
         self.command=(0.,0.,0.);self.command_stamp=0;self.start_request=None
@@ -76,8 +78,11 @@ class GaitTransport:
         latest=getattr(self.client,'reply',None)
         r=latest if latest is not None else r
         with self.lock:
+            sample=self.native_snapshot.sample(r.native_instance)if r else None
+            stamp=sample['stamp_ns']if sample and sample['stamp_ns']>=r.native_stamp else(r.native_stamp if r else 0)
+            self.operator_echo_origin='native_packet_snapshot'if sample and stamp==sample['stamp_ns']else'loop_reply'
             return Authority(r.receiver_instance if r else 0,r.receiver_generation if r else 0,
-                r.native_instance if r else 0,r.native_stamp if r else 0,self.health_stamp,0,self.health_flags)
+                r.native_instance if r else 0,stamp,self.health_stamp,0,self.health_flags)
     def _exchange_authority(self,r):
         authority=self._authority(r)
         reply=self.client.exchange(Operation.AUTHORITY,authority)
@@ -88,6 +93,7 @@ class GaitTransport:
                 'health_age_at_reply_ms':(reply.monotonic_ns-authority.health_stamp_ns)/1e6 if authority.health_stamp_ns else None,
                 'operator_echo_age_at_reply_ms':(reply.monotonic_ns-authority.operator_stamp_ns)/1e6 if authority.operator_stamp_ns else None,
                 'reply_operator_source_ns':reply.native_stamp}
+            self.last_authority_sample['operator_echo_origin']=self.operator_echo_origin
         return reply
     def _run(self):
         while self.running:
@@ -195,3 +201,4 @@ class GaitTransport:
         self.stop();self.running=False;self.thread.join(timeout=.5)
         if self.client:self.client.close()
         if self.trace:self.trace.close()
+        self.native_snapshot.close()

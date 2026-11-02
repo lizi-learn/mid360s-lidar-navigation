@@ -21,10 +21,11 @@ def producer(args):
     from rclpy.node import Node
     from std_msgs.msg import String
     from native_operator_source import NATIVE
+    from native_operator_snapshot import NativeSnapshotWriter
     rclpy.init();node=Node('isolated_gait_fixture_source')
     publisher=node.create_publisher(String,'/p2_nav/gate_status',1)
     source=socket.socket(socket.AF_UNIX,socket.SOCK_SEQPACKET)
-    source.connect(args.path+'.operator');state={'mode':1,'health':True,'native':True,'activity':False};sequence=0
+    source.connect(args.path+'.operator');snapshot=NativeSnapshotWriter(args.path+'.operator.snapshot');state={'mode':1,'health':True,'native':True,'activity':False};sequence=0
     with open(args.receipts,'w')as receipts:
         try:
             while True:
@@ -34,12 +35,12 @@ def producer(args):
                     state.update(json.loads(line))
                 sequence+=1;stamp=time.monotonic_ns()
                 if state['native']:
-                    source.send(NATIVE.pack(0x4e4f5031,1,40,sequence,stamp,time.time_ns()//1000,state['mode'],3|(4 if state['activity']else 0),.5 if state['activity']else 0.,0.,0.,0))
+                    packet=NATIVE.pack(0x4e4f5031,1,40,sequence,stamp,time.time_ns()//1000,state['mode'],3|(4 if state['activity']else 0),.5 if state['activity']else 0.,0.,0.,0);source.send(packet);snapshot.publish(packet)
                 if state['health']:
                     gate=dict(evaluated_monotonic_ns=stamp,data_fresh=True,calibration_ready=True,ground_ok=True,localized=True,armed=True,command=[.6,0.,0.],body_velocity_feedback=[0.,0.,0.],velocity_source_monotonic_ns=stamp)
                     publisher.publish(String(data=json.dumps(gate)));receipts.write(str(stamp)+'\n');receipts.flush()
                 time.sleep(.01)
-        finally:source.close();node.destroy_node();rclpy.shutdown()
+        finally:source.close();snapshot.close();node.destroy_node();rclpy.shutdown()
 
 def scenario(args):
     from gait_transport_process import GaitTransportProcess
