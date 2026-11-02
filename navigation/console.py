@@ -305,7 +305,9 @@ class Console(Node):
         d=gait.operator_authority()
         now=max(now,time.monotonic())
         with self.session.lock:
-            if not d or not (-.005<=now-d['stamp']<=.1 and -.005<=now-d['reply_stamp']<=.1):
+            source_fresh=bool(d and -.005<=now-d['stamp']<=.1)
+            reply_fresh=bool(d and(d.get('source_transport')=='native_packet_snapshot' or -.005<=now-d['reply_stamp']<=.1))
+            if not source_fresh or not reply_fresh:
                 self.session.operator('unknown',False,False,False,0,0,0.,now);return
             # Observer and UI timers may finish their read-only requests in a
             # different order. Never feed an older cached telemetry reply back
@@ -332,13 +334,14 @@ class Console(Node):
                 if self.session.phase in ('manual','paused','stopped','cancelled','blocked','arrived') and gait.phase not in ('stopped','idle','disconnected'):
                     gait.stop()
                 self.acknowledge_if_quiet(self.session.cancel_generation)
-            status=self.session.status(now)
+            status=self.session.status(time.monotonic())
             if status['cancel_pending']:
                 self.stop_actions()
-            if self.session.phase=='replanning':self.session.reroute(now,False,not self.collision_stop and self.health_ready())
+            if self.session.phase=='replanning':self.session.reroute(time.monotonic(),False,not self.collision_stop and self.health_ready())
             if self.session.phase in ('starting','executing','replanning'):
                 if not self.health_ready():self.session.cancel();self.session._notice('地面、定位或传感器未就绪，导航已停止')
-                self.op(armed=not self.session.status(now)['force_navigation_zero'],paused=self.session.status(now)['force_navigation_zero'],arm_generation=self.session.generation)
+                current=self.session.status(time.monotonic())
+                self.op(armed=not current['force_navigation_zero'],paused=current['force_navigation_zero'],arm_generation=self.session.generation)
     def stop_actions(self):
         gait=getattr(self,'gait',None)
         if gait and gait.phase!='stopped':gait.stop()
@@ -801,6 +804,7 @@ class Console(Node):
             pose=[t.transform.translation.x,t.transform.translation.y,math.atan2(2*q.w*q.z,1-2*q.z*q.z)]
         except Exception:pass
         grid=getattr(self,'navigation_grid',None)or self.grid
+        if getattr(self,'gait',None):self.poll_gait_authority(time.monotonic())
         return {'robot_name':self.robot_name,'gait_profile':self.gait_profile,'request_token':self.request_token,'mode':self.mode,'simulation':self.simulation,'controller':self.controller,'message':self.last_action,
             'minimum_speed':self.minimum_speed,'maximum_speed':self.maximum_speed,'velocity_scale':self.velocity_scale,
             'effective_speed_cap':self.speed_value*self.velocity_scale,'simulation_kind':'native_dynamics' if os.getenv('P2_NAV_NATIVE_EXEC') else 'planar',

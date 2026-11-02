@@ -13,6 +13,8 @@ ControlManager.register('transport',exposed=EXPOSED)
 
 class GaitTransportProcess:
     def __init__(self,path,trace_path=None):
+        from native_operator_snapshot import NativeSnapshotReader
+        self.native_snapshot=NativeSnapshotReader(path+'.operator.snapshot');self.native_instance=0
         self.directory=tempfile.TemporaryDirectory(prefix='p2-gait-control-')
         ipc=str(Path(self.directory.name)/'control.sock');key=secrets.token_bytes(32)
         kr,kw=os.pipe();rr,rw=os.pipe();lr,self.lifeline=os.pipe()
@@ -60,11 +62,22 @@ class GaitTransportProcess:
         except OSError:return None
     def operator_authority(self):
         for _ in range(2):
+            if self.native_instance:
+                sample=self.native_snapshot.sample(self.native_instance)
+                if sample:
+                    from native_operator_snapshot import operator_authority
+                    return operator_authority(sample)
             try:result=self._call('operator_authority')
             except OSError:return None
             if not result:return None
+            if result.get('verified')and result.get('source'):
+                self.native_instance=result['source'];sample=self.native_snapshot.sample(self.native_instance)
+                if sample:
+                    from native_operator_snapshot import operator_authority
+                    return operator_authority(sample)
             now=time.monotonic()
-            if -.005<=now-result['reply_stamp']<=.08:return result
+            stamp=result['stamp']if result.get('source_transport')=='native_packet_snapshot'else result['reply_stamp']
+            if -.005<=now-stamp<=.08:return result
             # Query a new actual snapshot after UI GIL starvation. Never relabel
             # the old reply or repeat ARM/velocity to recover a stale read.
         return result
@@ -84,6 +97,7 @@ class GaitTransportProcess:
         try:self.process.wait(timeout=3)
         except subprocess.TimeoutExpired:self.process.terminate();self.process.wait(timeout=3)
         self.directory.cleanup()
+        self.native_snapshot.close()
 
 
 def worker(args):

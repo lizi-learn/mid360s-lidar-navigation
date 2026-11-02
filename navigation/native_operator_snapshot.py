@@ -4,7 +4,7 @@ The snapshot lives beside the owned Unix socket in tmpfs. POSIX record locks
 prevent torn reads across processes. No timestamp, identity or mode is created
 by a reader, and a missing/stale/different source cannot refresh authority.
 """
-import fcntl,math,os,stat,time
+import fcntl,math,os,stat,time,threading
 from native_operator_source import NATIVE
 
 class NativeSnapshotWriter:
@@ -27,8 +27,10 @@ class NativeSnapshotWriter:
     def close(self):os.close(self.fd)
 
 class NativeSnapshotReader:
-    def __init__(self,path):self.path=path;self.fd=None
+    def __init__(self,path):self.path=path;self.fd=None;self.lock=threading.RLock();self.last=None
     def sample(self,instance,now_ns=None):
+        with self.lock:return self._sample(instance,now_ns)
+    def _sample(self,instance,now_ns=None):
         if not instance:return None
         now=time.monotonic_ns()if now_ns is None else now_ns
         try:
@@ -38,7 +40,10 @@ class NativeSnapshotReader:
                 if not stat.S_ISREG(meta.st_mode)or meta.st_uid not in(0,os.geteuid())or meta.st_mode&0o077 or meta.st_size!=NATIVE.size:
                     os.close(fd);return None
                 self.fd=fd
-            fcntl.lockf(self.fd,fcntl.LOCK_SH|fcntl.LOCK_NB)
+            try:fcntl.lockf(self.fd,fcntl.LOCK_SH|fcntl.LOCK_NB)
+            except BlockingIOError:
+                old=self.last
+                return old if old and old['source']==instance and -5_000_000<=now-old['stamp_ns']<=100_000_000 else None
             try:data=os.pread(self.fd,NATIVE.size,0)
             finally:fcntl.lockf(self.fd,fcntl.LOCK_UN)
             if len(data)!=NATIVE.size:return None
@@ -46,7 +51,16 @@ class NativeSnapshotReader:
             if (magic!=0x4e4f5031 or version!=1 or source!=instance or not sequence or not stamp or
                     not -5_000_000<=now-stamp<=100_000_000 or mode not in(1,2,3)or
                     flags&3!=3 or flags&~15 or reserved or not all(math.isfinite(v)and abs(v)<=1. for v in(x,y,yaw))):return None
-            return dict(source=source,sequence=sequence,stamp_ns=stamp)
+            self.last=dict(source=source,sequence=sequence,stamp_ns=stamp,mode=mode,flags=flags)
+            return dict(self.last)
         except OSError:return None
     def close(self):
-        if self.fd is not None:os.close(self.fd);self.fd=None
+        with self.lock:
+            if self.fd is not None:os.close(self.fd);self.fd=None
+
+def operator_authority(sample):
+    """Original receiver observation; it is explicitly not a controller reply."""
+    return dict(mode={1:'navigation_allowed',2:'paused',3:'manual'}[sample['mode']],
+        verified=True,connected=True,activity=bool(sample['flags']&4),
+        source=sample['source'],sequence=sample['sequence'],stamp=sample['stamp_ns']/1e9,
+        reply_stamp=None,source_transport='native_packet_snapshot')

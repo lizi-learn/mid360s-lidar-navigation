@@ -51,6 +51,22 @@ A current-map complete far-goal search still fails. A continuous reference route
 The shared two-worker candidate was NOT deployed: exact CI41471400317 exposed a260.6ms forwarding gap in the corrected test. The revised implementation assigns the health-only subscriber its own Node and SingleThreadedExecutor/thread; the ordinary Console keeps its original serial executor. Both use the same original source stamps and unchanged100ms contract. The failed CI and ARM-vs-CI discrepancy remain recorded; no physical walking result is inferred.
 # Native transport process isolation (November 3)
 
+An actual left-turn recovery advanced about 139 degrees before a separate UI
+stop. A focused regression reproduces a time-snapshot bug: a status RPC waits
+25 ms while an observer supplies a new original switch sample; using the time
+from before that wait misclassifies the sample as being from the future and
+publishes pause. The Console now samples time again after blocking work and
+uses one consistent current intent for its armed/paused pair.
+
+UI switch observation also reads the exact native packet locally after learning
+the source identity from the real controller. It reports an original receiver
+observation explicitly, with no fabricated controller-reply timestamp. Controller
+readiness remains separately checked by the native contract. Actual E modes,
+stick activity, original 100 ms expiry and source changes are retained. A test
+delays the read-only RPC path by 250 ms while the actual source remains current;
+local observation must stay within the original deadline. A contended snapshot
+can retain only its original sample and still expires at 100 ms.
+
 The reply-only refresh candidate passed the initial x86 case but failed the ARM
 65 ms control-delay test and its CI job; it was not installed. The source path
 now optionally mirrors the exact 64-byte native operator packet after a

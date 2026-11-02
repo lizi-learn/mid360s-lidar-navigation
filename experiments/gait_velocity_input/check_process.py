@@ -67,6 +67,17 @@ def scenario(args):
             else:transport=GaitTransportProcess(path,trace_path=trace)
             wait(transport.ready,4.);transport.arm(1)
             wait(lambda:(transport.status().get('speed_tracking')or{}).get('policy_input_x',0)>.599,3.)
+            if not args.legacy:
+                authority=transport.operator_authority();assert authority['source_transport']=='native_packet_snapshot'
+                proxy=transport.proxy
+                class SlowAuthorityProxy:
+                    def __getattr__(self,name):return getattr(proxy,name)
+                    def operator_authority(self):
+                        reply=proxy.operator_authority();ctypes.PyDLL(None).usleep(250000);return reply
+                transport.proxy=SlowAuthorityProxy();begin=time.monotonic();authority=transport.operator_authority()
+                assert time.monotonic()-begin<.1 and -.005<=time.monotonic()-authority['stamp']<=.1
+                assert authority['reply_stamp']is None
+                result['original_switch_observation_independent_of_delayed_rpc']=True
             # ctypes.PyDLL holds the current process GIL. time.sleep would
             # release it and would miss the actual UI starvation failure.
             sleep=ctypes.PyDLL(None).usleep;sleep.argtypes=[ctypes.c_uint];sleep.restype=ctypes.c_int

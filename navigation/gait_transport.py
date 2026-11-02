@@ -174,11 +174,15 @@ class GaitTransport:
         with self.lock:
             r=self.feedback
             if not r:return None
+            sample=self.native_snapshot.sample(r.native_instance)
+            if sample and sample['stamp_ns']>=r.native_stamp:
+                from native_operator_snapshot import operator_authority
+                return operator_authority(sample)
             return {'mode':{1:'navigation_allowed',2:'paused',3:'manual'}.get(r.operator_mode,'unknown'),
                 'verified':bool(r.operator_verified and r.readiness&128),
                 'connected':bool(r.operator_verified and r.readiness&128),
                 'activity':bool(r.manual_activity),'source':r.native_instance,'sequence':r.native_sequence,
-                'stamp':r.native_stamp/1e9,'reply_stamp':r.monotonic_ns/1e9}
+                'stamp':r.native_stamp/1e9,'reply_stamp':r.monotonic_ns/1e9,'source_transport':'gait_reply'}
     def status(self):
         with self.lock:
             r=self.feedback
