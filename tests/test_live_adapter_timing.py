@@ -9,6 +9,7 @@ import numpy as np
 from scipy.spatial.transform import Rotation
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'navigation'))
 from odometry_velocity import PlanarVelocity
+from pose_history import PoseHistory
 from navigation_reference import reference_status
 
 def vector():return NS(x=0.,y=0.,z=0.)
@@ -30,7 +31,7 @@ exec(compile(ast.Module(body=[cls],type_ignores=[]),str(p),'exec'),scope)
 
 class AdapterTimingTests(unittest.TestCase):
     def fixture(self):
-        n=scope['Adapter'].__new__(scope['Adapter']);n.lock=threading.Lock();n.body_reference=None;n.reference_fault='';n.previous=None
+        n=scope['Adapter'].__new__(scope['Adapter']);n.lock=threading.Lock();n.odom=None;n.pose_history=PoseHistory();n.body_reference=None;n.reference_fault='';n.previous=None
         n.rotation=np.eye(3);n.initial_height=0.;n.velocity=PlanarVelocity();n.published_odom_stamp=None
         n.alignment_mtime=1;n.alignment_path=NS(stat=lambda:NS(st_mtime_ns=1));n.now=1.01
         n.navigation_reference='lidar_projection';n.references=[];n.reference_pub=NS(publish=n.references.append)

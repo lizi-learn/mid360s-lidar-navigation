@@ -2,6 +2,14 @@
 
 The supervised office run exposed repeated planning stops, a large unintended right turn during an intended straight segment, and a return that needed manually dispatched short goals. The requested two round trips did not complete. This candidate is software and isolated planar validation, not a new physical robot acceptance.
 
+## Sensor projection correction
+
+The adapter previously converted a registered cloud using the latest odometry pose, while retaining the older cloud stamp. Downstream TF therefore transformed polar returns using a different pose. The fix interpolates only measured, original-stamped poses at the cloud time, waits for a real bracket without extrapolation, and publishes a cloud-stamped `laser_projection` frame. Latest odometry output remains independent. The existing source expiry and unknown-ray rules remain unchanged.
+
+Angular projection now uses the nearest circular bin at 720 bins rather than always rounding downward at 360 bins. This removes a systematic clockwise bias and bounds angular quantization to a quarter degree (about 4.8 cm at 11 m).
+
+A real two-domain ROS adapter/TF regression with a fixed synthetic reflector, 100 ms cloud delay, 0.4 m/s translation and 0.8 rad/s yaw reproduced a mean displacement of 45.6 cm in the old adapter versus 1.47 cm corrected (maximum 2.35 cm). All output scans retained original cloud stamps. This proves the software defect; the original field cloud/pose pair was not preserved and its precise contribution to that field turn remains unproven.
+
 ## Changes
 
 - Honor an explicit leading in-place pivot in the reference before translating. Pure pursuit otherwise looks through repeated-position rotation poses and can start driving while a delayed turn is still developing. Ordinary curved references retain forward/yaw tracking and zero lateral input. New goals and lifecycle transitions reset this phase.
@@ -12,13 +20,15 @@ The supervised office run exposed repeated planning stops, a large unintended ri
 
 ## Validation
 
-- 337 local tests; real gzip round-trip, byte identity, bounded queue, rotation and I/O failure coverage for the recorder.
+- 344 local tests; real gzip round-trip, byte identity, bounded queue, rotation and I/O failure coverage for the recorder.
 - On a private frozen field costmap, the original long return failed while short exit and later return plans separately succeeded. The candidate produces one complete approximately 41 m path. Independent filled-square SAT sampling at 1 cm / 0.01 rad found zero body intersections using the unchanged 0.55 m square. Inflation values were reconstructed from OccupancyGrid and are quantized; lethal and unknown cells are preserved.
 - Actual RPP/planner/progress/goal-checker planar replay with unchanged native input ramp: gain 0.7, delay 0.2 s completed in 93.15 s versus 134.7 s before leading-pivot handling; cross-track RMS 0.164 versus 0.289 m. Delay 0.5 s, previously stuck and timed out, completed in 137.3 s. Both completed with zero body intrusions. These plant gains/delays are experiment parameters, not calibrated biped dynamics.
 - Delayed corner and gentle-S component cases completed with zero body intrusions.
 - Actual isolated ROS/Nav2 workflow passed continuous transit, observed door reopening, dynamic obstacle detour, directed arrival, middle-switch pause/resume and manual cancellation without automatic restart. The obstacle produced 23 finite ray returns and the model reported zero body collisions.
 
 ## Retained limits
+
+Additional frozen post-stop-map control replay still stalls near the endpoint. Forward-reference, moving low-input and larger-radius prototypes failed their full-goal checks and were not adopted. These failures remain separate from the passing return/synthetic cohorts.
 
 The field right turn is proven to have been commanded by navigation while forward input remained nonzero. Full paths for its initiating revisions were not retained, so the exact reference/obstacle trigger is unproven. Later costmaps cannot identify that earlier obstacle or prove it was a moving support frame. The new private recorder addresses this evidence gap.
 
