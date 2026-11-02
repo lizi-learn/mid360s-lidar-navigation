@@ -293,7 +293,7 @@ class Console(Node):
             # instead of waiting for a separate session timer and RPC cycle.
             gait=getattr(self,'gait',None)
             if gait:
-                status=self.session_state()
+                status=self.session_state(refresh=False)
                 gait.update(self.gate,self.session.phase=='executing' and not status['force_navigation_zero'])
     def health_ready(self):
         g=self.gate
@@ -316,10 +316,10 @@ class Console(Node):
             if d['source']==self.session.source and d['sequence']<=self.session.sequence:return
             self.session.operator(d['mode'],d['verified'],d['connected'],d['activity'],
                 d['source'],d['sequence'],d['stamp'],now)
-    def session_state(self,poll=False):
+    def session_state(self,poll=False,refresh=True):
         # A UI RPC or path callback may delay this decision past its earlier
         # read-only observation. Consume the latest ORIGINAL packet first.
-        if getattr(self,'gait',None):self.poll_gait_authority(time.monotonic())
+        if refresh and getattr(self,'gait',None):self.poll_gait_authority(time.monotonic())
         # Evaluate after acquiring the same lock as the native observer.
         # A caller timestamp taken before waiting can predate a fresh packet.
         with self.session.lock:
