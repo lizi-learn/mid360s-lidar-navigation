@@ -92,6 +92,7 @@ class PositionOnlyLattice : public nav2_smac_planner::SmacPlannerLattice {
     std::function<bool(size_t)> visit=[&](size_t from) {
       if(std::chrono::steady_clock::now()>deadline)return false;
       for(size_t to=points.size()-1;to>from;--to){
+        if(std::chrono::steady_clock::now()>deadline)return false;
         if(failed[to])continue;
         const auto &q=points[to];const auto pose=out.back();const double a=std::atan2(q[1]-pose[1],q[0]-pose[0]);
         auto leg=terminal_path(pose,{q[0],q[1],a},std::numeric_limits<double>::infinity());
@@ -148,16 +149,16 @@ class PositionOnlyLattice : public nav2_smac_planner::SmacPlannerLattice {
       const double yaw=tf2::getYaw(start.pose.orientation),pi=std::acos(-1.);
       const double error=std::remainder(std::atan2(gy-y,gx-x)-yaw,2*pi);
       const double side=error>=0.?1.:-1.;
-      const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(5);
+      const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(2);
       for(double distance:{3.,1.5})for(double offset:{side*pi/4.,-side*pi/4.}) {
         if(std::chrono::steady_clock::now()>deadline)break;
         auto via=goal;via.pose.position.x=x+distance*std::cos(yaw+offset);
         via.pose.position.y=y+distance*std::sin(yaw+offset);
         stable_path_=saved_path;stable_goal_=saved_goal;
         try {
-          auto joined=plan_once(start,via);
+          auto joined=plan_once(start,via,true,deadline);
           if(joined.poses.empty())continue;
-          auto tail=plan_once(joined.poses.back(),goal);
+          auto tail=plan_once(joined.poses.back(),goal,true,deadline);
           if(tail.poses.empty())continue;
           joined.poses.insert(joined.poses.end(),tail.poses.begin()+1,tail.poses.end());
           std::vector<std::array<double,3>> samples;
@@ -176,7 +177,8 @@ class PositionOnlyLattice : public nav2_smac_planner::SmacPlannerLattice {
   }
  private:
   nav_msgs::msg::Path plan_once(const geometry_msgs::msg::PoseStamped &start,
-                                const geometry_msgs::msg::PoseStamped &goal) {
+                                const geometry_msgs::msg::PoseStamped &goal,bool visibility_only=false,
+                                std::chrono::steady_clock::time_point deadline=std::chrono::steady_clock::time_point::max()) {
     if(start.header.frame_id!=goal.header.frame_id)throw nav2_core::PlannerException("Position goal frame mismatch");
     const double yaw=tf2::getYaw(start.pose.orientation),x=start.pose.position.x,y=start.pose.position.y;
     const double gx=goal.pose.position.x,gy=goal.pose.position.y;
@@ -224,8 +226,9 @@ class PositionOnlyLattice : public nav2_smac_planner::SmacPlannerLattice {
       // original full footprint. One shared bound covers all preferences. A visibility shortcut must
       // also prefer tracking room, otherwise it can undo the wider point guide
       // and graze the end of a virtual line after ordinary localization error.
-      const auto visibility_deadline=std::chrono::steady_clock::now()+std::chrono::milliseconds(900);
+      const auto visibility_deadline=std::min(deadline,std::chrono::steady_clock::now()+std::chrono::milliseconds(900));
       for(double centre_clearance:{.64,.48,.40,.28,0.}) {
+        if(std::chrono::steady_clock::now()>visibility_deadline)break;
         auto candidate=position_guide(_costmap->getCharMap(),_costmap->getSizeInCellsX(),_costmap->getSizeInCellsY(),_costmap->getResolution(),_costmap->getOriginX(),_costmap->getOriginY(),{x,y},{gx,gy},centre_clearance);
         if(centre_clearance==0.)guide=candidate;
         for(double margin:{.16,.08,.04,0.}) {
@@ -233,6 +236,9 @@ class PositionOnlyLattice : public nav2_smac_planner::SmacPlannerLattice {
           if(!connected.empty())return remember(message(connected,goal.header),goal);
         }
       }
+      // Recovery references share one budget; they do not recursively start
+      // another expensive lattice repair for every possible local anchor.
+      if(visibility_only)throw nav2_core::PlannerException("No complete visibility connection within recovery budget");
       if(guide.size()>1) {
         requested.pose.orientation=nav2_util::geometry_utils::orientationAroundZAxis(heading(gx,gy,guide_heading(guide,true)));
         const double initial=heading(x,y,guide_heading(guide,false));
