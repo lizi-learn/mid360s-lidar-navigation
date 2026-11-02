@@ -17,3 +17,8 @@ add_executable(tracking_replay tracking_replay.cpp)
 target_compile_features(tracking_replay PUBLIC cxx_std_17)
 target_include_directories(tracking_replay PRIVATE ../../navigation)
 ament_target_dependencies(tracking_replay nav2_core nav2_costmap_2d pluginlib)
+
+add_executable(native_pivot native_pivot.cpp)
+target_compile_features(native_pivot PUBLIC cxx_std_17)
+target_include_directories(native_pivot PRIVATE ../../navigation)
+ament_target_dependencies(native_pivot nav2_core nav2_costmap_2d pluginlib)

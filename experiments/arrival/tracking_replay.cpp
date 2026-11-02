@@ -17,6 +17,8 @@
 #include <limits>
 #include "nav2_core/global_planner.hpp"
 #include "rclcpp/rclcpp.hpp"
+#include "rcl/time.h"
+#include "nav2_core/progress_checker.hpp"
 #include "rclcpp_lifecycle/lifecycle_node.hpp"
 #include "pluginlib/class_loader.hpp"
 #include "nav2_core/controller.hpp"
@@ -57,6 +59,7 @@ int main(int argc,char **argv){
  int result=0;
  try{
  auto parent=std::make_shared<rclcpp_lifecycle::LifecycleNode>("preview_controller");
+ if(rcl_enable_ros_time_override(parent->get_clock()->get_clock_handle())!=RCL_RET_OK||rcl_set_ros_time_override(parent->get_clock()->get_clock_handle(),1000000000LL)!=RCL_RET_OK)throw std::runtime_error("Fixture clock setup failed");
  auto cm=std::make_shared<nav2_costmap_2d::Costmap2DROS>("preview_costmap");
  cm->set_parameters({rclcpp::Parameter("global_frame","fixture_world"),rclcpp::Parameter("robot_base_frame","fixture_base"),rclcpp::Parameter("plugins",std::vector<std::string>{}),rclcpp::Parameter("footprint","[[0.275,0.275],[0.275,-0.275],[-0.275,-0.275],[-0.275,0.275]]"),rclcpp::Parameter("footprint_padding",0.),rclcpp::Parameter("resolution",.05),rclcpp::Parameter("width",40),rclcpp::Parameter("height",40)});
  if(cm->on_configure(rclcpp_lifecycle::State())!=nav2_util::CallbackReturn::SUCCESS)throw std::runtime_error("costmap configure failed");
@@ -86,7 +89,8 @@ int main(int argc,char **argv){
  if(position_only&&!std::getenv("P2_TEST_REPLAY_CSV"))path.poses.back().pose.orientation=nav2_util::geometry_utils::orientationAroundZAxis(pi);
  control->setPlan(path);
  const auto requested_goal=path.poses.back();
- double last_progress_time=0.,last_progress_x=path.poses.front().pose.position.x,last_progress_y=path.poses.front().pose.position.y;
+ pluginlib::ClassLoader<nav2_core::ProgressChecker> progress_loader("nav2_core","nav2_core::ProgressChecker");
+ auto actual_progress=progress_loader.createSharedInstance("nav2_controller::SimpleProgressChecker");actual_progress->initialize(parent,"progress_checker");
  pluginlib::ClassLoader<nav2_core::GlobalPlanner> planner_loader("nav2_core","nav2_core::GlobalPlanner");
  auto planner=planner_loader.createSharedInstance("p2_nav_controller::PositionOnlyLattice");planner->configure(parent,"GridBased",tf,cm);planner->activate();
  bool planning_failed=false;int planning_failures=0,replans=0;std::map<std::string,int> plan_errors,control_errors;std::ofstream diagnostics(prefix+".diagnostics.log");
@@ -96,11 +100,9 @@ int main(int argc,char **argv){
  std::ofstream trace(prefix+".csv");trace<<"t,x,y,yaw,raw_x,raw_z,input_x,input_z,measured_x,measured_z,reference_error,collision_stop,obstacle\n";
  for(int step=0;step<2400;++step){
   time=step*dt;
-  // The deployed SimpleProgressChecker already uses0.1m/20s. Bound this
-  // functional fixture identically instead of retrying a stationary pose for120s.
-  if(std::hypot(x-last_progress_x,y-last_progress_y)>=.1){last_progress_x=x;last_progress_y=y;last_progress_time=time;}
-  if(time-last_progress_time>20.){std::cout<<"Existing20s progress allowance exceeded\n";break;}
+  if(rcl_set_ros_time_override(parent->get_clock()->get_clock_handle(),static_cast<int64_t>((time+1.)*1e9))!=RCL_RET_OK)throw std::runtime_error("Fixture clock tick failed");
   geometry_msgs::msg::PoseStamped pose;pose.header.frame_id="fixture_world";pose.header.stamp=parent->now();pose.pose.position.x=x;pose.pose.position.y=y;pose.pose.orientation=nav2_util::geometry_utils::orientationAroundZAxis(yaw);
+  if(!actual_progress->check(pose)){std::cout<<"Actual configured progress allowance exceeded\n";break;}
   geometry_msgs::msg::TransformStamped tr;tr.header=pose.header;tr.child_frame_id="fixture_base";tr.transform.translation.x=x;tr.transform.translation.y=y;tr.transform.rotation=pose.pose.orientation;if(!tf->setTransform(tr,"synthetic_planar_fixture"))throw std::runtime_error("fixture TF rejected");
   geometry_msgs::msg::Twist measured;measured.linear.x=v;measured.angular.z=w;
   if(step%20==0){try{auto fresh=planner->createPlan(pose,requested_goal);if(fresh.poses.empty())throw std::runtime_error("Empty replan");control->setPlan(fresh);planning_failed=false;++replans;}catch(const std::exception &e){planning_failed=true;++planning_failures;if(++plan_errors[e.what()]==1)diagnostics<<"plan t="<<time<<" "<<e.what()<<std::endl;}}
@@ -134,7 +136,7 @@ int main(int argc,char **argv){
  std::ofstream out(prefix+".json");out<<std::boolalpha<<"{\"actual_plugin\":\"p2_nav_controller::SettledGoalRPP\",\"scope\":\"Synthetic planar lag/gain model, no biped dynamics or hardware\",\"seed\":0,\"kind\":\""<<kind<<"\",\"gain\":"<<gain<<",\"delay_s\":"<<delay<<",\"dt_s\":"<<dt<<",\"duration_s\":"<<time<<",\"goal_reached\":"<<reached<<",\"goal_error_m\":"<<error<<",\"goal_yaw_error_rad\":"<<yaw_error<<",\"cross_track_rms_m\":"<<std::sqrt(rms/std::max(1,counted))<<",\"cross_track_max_m\":"<<max_error<<",\"yaw_reversals\":"<<reversals<<",\"body_intrusions\":"<<collisions<<",\"controller_collision_stops\":"<<stops<<",\"obstacle_injected\":"<<triggered<<",\"obstacle_verified_in_costmap\":"<<verified_obstacle<<",\"obstacle_cleared_after_two_seconds\":"<<cleared<<",\"progress_x\":"<<progress<<"}\n";
  std::cout<<kind<<" reached="<<reached<<" error="<<error<<" intrusions="<<collisions<<" reversals="<<reversals<<'\n';
  std::cout<<"replans="<<replans<<" failed="<<planning_failures<<"\n";planner->deactivate();planner->cleanup();planner.reset();
- control->deactivate();control->cleanup();control.reset();checker.reset();cm->on_cleanup(rclcpp_lifecycle::State());cm.reset();parent.reset();
+ control->deactivate();control->cleanup();control.reset();actual_progress.reset();checker.reset();cm->on_cleanup(rclcpp_lifecycle::State());cm.reset();parent.reset();
  }catch(const std::exception &e){std::cerr<<e.what()<<'\n';result=1;}
  rclcpp::shutdown();return result;
 }

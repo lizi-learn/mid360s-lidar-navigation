@@ -4,6 +4,8 @@
 
 **当前导航冻结为 [Baseline V1](https://github.com/lizi-learn/mid360s-lidar-navigation/releases/tag/baseline-v1)。** P2-1006已有现场监护下的办公室往返与真人障碍绕行记录。最新终点/途中规划修订完成实际路径预览和零输出核验，仍有保留的回放失败，尚未完成这个修订的新一轮真机运动复测。公开项目包含导航与通用步态速度协议；厂商私有驱动、全身策略和模型不随仓库分发。
 
+纯转向和带朝向到点的后续候选改进见 [停稳转向说明](docs/SETTLED_PIVOT.md)，包含实际 Nav2 接口对比与保留的回程失败；不移动 Baseline V1。
+
 - [基线功能、证据与已知边界](docs/BASELINE_V1.md)
 - [下一步产品功能建议](docs/NAVIGATION_ROADMAP.md)
 - [机身平和语音与音量设置](docs/NAVIGATION_AUDIO.md)

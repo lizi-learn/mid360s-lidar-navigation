@@ -1,0 +1,413 @@
+{
+  "stage": "Native ROS2 component and actual action/mission regression complete; not physical gait acceptance",
+  "hardware_commands": 0,
+  "footprint_total_side_m": 0.55,
+  "policy_inputs": {
+    "forward": 0.75,
+    "yaw": 1.0,
+    "curved_forward": 0.6,
+    "lateral": 0.0
+  },
+  "source_sha256": {
+    "navigation/configure.py": "f0639ccd80279f54f745d7ddac59f21b1178b7cd5ee83ae7c66c7058da6b63ad",
+    "navigation/p2_nav_controller/src/settled_goal_rpp.cpp": "9a2b537f0b1bb1d8b80c967cd7f2a292f5ac03ee6dd5ee60b0b04454747fbb2f",
+    "navigation/p2_nav_controller/src/settled_heading_goal_checker.cpp": "f754036828ee042b08c1ec00aea6474119196b02a45d9a7fd7fd45fd239bbf1a",
+    "navigation/p2_nav_controller/include/p2_nav_controller/settled_pivot.hpp": "1a2cdd78edccaf6555b468439ec3960b2ca7c9e38a8397826c3cdb7d436f25c0",
+    "navigation/p2_nav_controller/include/p2_nav_controller/settled_arrival.hpp": "a72de111b652343cd3c5df137d15aa3392d5a6753173e167d811974edb552b3a"
+  },
+  "native_goal_stop_semantics": "On actual selected goal checker success, stop issuing commands immediately; retain transport queue and verify settled residual, do not continue corrections after goal acceptance.",
+  "native": {
+    "0-original_large": {
+      "cases": 12,
+      "failed": 6,
+      "maximum_duration_s": 44.95
+    },
+    "0-half_scale": {
+      "cases": 48,
+      "failed": 46,
+      "maximum_duration_s": 44.95
+    },
+    "0-sweep_a": {
+      "cases": 72,
+      "failed": 56,
+      "maximum_duration_s": 44.95
+    },
+    "0-sweep_b": {
+      "cases": 72,
+      "failed": 54,
+      "maximum_duration_s": 44.95
+    },
+    "1-original_large": {
+      "cases": 12,
+      "failed": 0,
+      "maximum_duration_s": 14
+    },
+    "1-half_scale": {
+      "cases": 48,
+      "failed": 0,
+      "maximum_duration_s": 41
+    },
+    "1-sweep_a": {
+      "cases": 72,
+      "failed": 0,
+      "maximum_duration_s": 31.9
+    },
+    "1-sweep_b": {
+      "cases": 72,
+      "failed": 0,
+      "maximum_duration_s": 27.25
+    }
+  },
+  "component_obstacle_and_deactivation": [
+    {
+      "cohort": "blocked",
+      "candidate": false,
+      "kind": "blocked",
+      "returncode": 0,
+      "goal_reached": false,
+      "error_rad": 0.8,
+      "duration_s": 8,
+      "goal_accepted": false,
+      "goal_checker": "nav2_controller::SimpleGoalChecker",
+      "progress_failed": false,
+      "body_intrusions": 0,
+      "obstacle_verified": true,
+      "collision_stops": 161,
+      "cancelled": false,
+      "post_cancel_nonzero": false,
+      "final_measured_rate": 0,
+      "operator_scale": 1,
+      "max_policy_input": 0,
+      "settled_pivot_response": false,
+      "movement_time_allowance": 40,
+      "actual_footprint": [
+        [
+          0.27500000596,
+          0.27500000596
+        ],
+        [
+          0.27500000596,
+          -0.27500000596
+        ],
+        [
+          -0.27500000596,
+          -0.27500000596
+        ],
+        [
+          -0.27500000596,
+          0.27500000596
+        ]
+      ],
+      "passed": true
+    },
+    {
+      "cohort": "cancel",
+      "candidate": false,
+      "kind": "cancel",
+      "returncode": 0,
+      "goal_reached": false,
+      "error_rad": 0.474092612719,
+      "duration_s": 8,
+      "goal_accepted": true,
+      "goal_checker": "nav2_controller::SimpleGoalChecker",
+      "progress_failed": false,
+      "body_intrusions": 0,
+      "obstacle_verified": false,
+      "collision_stops": 0,
+      "cancelled": true,
+      "post_cancel_nonzero": false,
+      "final_measured_rate": 1.76670826197e-13,
+      "operator_scale": 1,
+      "max_policy_input": 0.64,
+      "settled_pivot_response": false,
+      "movement_time_allowance": 40,
+      "actual_footprint": [
+        [
+          0.27500000596,
+          0.27500000596
+        ],
+        [
+          0.27500000596,
+          -0.27500000596
+        ],
+        [
+          -0.27500000596,
+          -0.27500000596
+        ],
+        [
+          -0.27500000596,
+          0.27500000596
+        ]
+      ],
+      "passed": true
+    },
+    {
+      "cohort": "blocked",
+      "candidate": true,
+      "kind": "blocked",
+      "returncode": 0,
+      "goal_reached": false,
+      "error_rad": 0.5615,
+      "duration_s": 8,
+      "goal_accepted": false,
+      "goal_checker": "p2_nav_controller::SettledHeadingGoalChecker",
+      "progress_failed": false,
+      "body_intrusions": 0,
+      "obstacle_verified": true,
+      "collision_stops": 98,
+      "cancelled": false,
+      "post_cancel_nonzero": false,
+      "final_measured_rate": 8.79053259536e-18,
+      "operator_scale": 1,
+      "max_policy_input": 0.5,
+      "settled_pivot_response": true,
+      "movement_time_allowance": 40,
+      "actual_footprint": [
+        [
+          0.27500000596,
+          0.27500000596
+        ],
+        [
+          0.27500000596,
+          -0.27500000596
+        ],
+        [
+          -0.27500000596,
+          -0.27500000596
+        ],
+        [
+          -0.27500000596,
+          0.27500000596
+        ]
+      ],
+      "passed": true
+    },
+    {
+      "cohort": "cancel",
+      "candidate": true,
+      "kind": "cancel",
+      "returncode": 0,
+      "goal_reached": false,
+      "error_rad": 0.5615,
+      "duration_s": 8,
+      "goal_accepted": false,
+      "goal_checker": "p2_nav_controller::SettledHeadingGoalChecker",
+      "progress_failed": false,
+      "body_intrusions": 0,
+      "obstacle_verified": false,
+      "collision_stops": 0,
+      "cancelled": true,
+      "post_cancel_nonzero": false,
+      "final_measured_rate": 8.79053259536e-18,
+      "operator_scale": 1,
+      "max_policy_input": 0.5,
+      "settled_pivot_response": true,
+      "movement_time_allowance": 40,
+      "actual_footprint": [
+        [
+          0.27500000596,
+          0.27500000596
+        ],
+        [
+          0.27500000596,
+          -0.27500000596
+        ],
+        [
+          -0.27500000596,
+          -0.27500000596
+        ],
+        [
+          -0.27500000596,
+          0.27500000596
+        ]
+      ],
+      "passed": true
+    }
+  ],
+  "unit_tests": {
+    "collected": 321,
+    "environment_skipped": 2,
+    "failures": 0
+  },
+  "retained_boundary": "Optional private frozen-office reverse replay still fails. Raster-veto removal hypothesis did not solve it and was not adopted. Old failed records and intermediate first-entry/component-only test limitations retained.",
+  "physical_validation_of_this_revision": false,
+  "actual_action_cases": [
+    {
+      "case": "continuous_native_transit",
+      "passed": true,
+      "windows": {
+        "2.8": {
+          "samples": 5,
+          "minimum_forward": 0.375
+        },
+        "3.6": {
+          "samples": 6,
+          "minimum_forward": 0.375
+        }
+      }
+    },
+    {
+      "case": "observed_closed_door_reopens_and_live_shortcut",
+      "passed": true,
+      "evidence": {
+        "source": "projected_scan",
+        "state": "observing",
+        "frames": 13,
+        "source_ns": 1793578756029121126,
+        "processing_ms": 0.6524929776787758,
+        "doors": [
+          {
+            "door_id": "front_door",
+            "state": "open",
+            "source_monotonic": 1461031.461959868,
+            "coverage_bins": 24,
+            "total_bins": 24,
+            "blocking_returns": 0,
+            "scope": "finite projected scan rays, not full 3D clearance",
+            "source_sequence": 13,
+            "source_ros_ns": 1793578756029121126
+          }
+        ]
+      },
+      "overlay": {
+        "changed_cells": 96,
+        "door_states": {
+          "front_door": "open"
+        },
+        "original_map_modified": false,
+        "last_full_open_observation": {
+          "front_door": {
+            "state": "open",
+            "source_monotonic": 1461031.461959868,
+            "source_sequence": 13
+          }
+        },
+        "unknown_cells_promoted": 0,
+        "keepout_cells": 0
+      },
+      "decisions": [
+        {
+          "points": [
+            "start",
+            "north_a",
+            "north_b",
+            "goal"
+          ],
+          "edges": [
+            "0",
+            "1",
+            "2"
+          ],
+          "cost": 13.710826689865591
+        },
+        {
+          "kind": "live_update",
+          "reason": "\u53d1\u73b0\u66f4\u77ed\u7684\u5f00\u653e\u901a\u9053",
+          "old_cost": 13.728545412339274,
+          "new_cost": 4.1516742923889485
+        }
+      ]
+    },
+    {
+      "case": "actual_dynamic_obstacle_and_complete",
+      "passed": true,
+      "ray_returns": 22,
+      "circle": [
+        9.753522946783892,
+        2.4989131664657394,
+        0.28
+      ]
+    },
+    {
+      "case": "actual_directed_goal_settled_action_completion",
+      "passed": true,
+      "requested_yaw": -0.3329230186563754,
+      "actual_yaw": -0.4069581557829019,
+      "error_rad": 0.07403513712652648
+    },
+    {
+      "case": "middle_pause_then_explicit_resume_native",
+      "passed": true
+    },
+    {
+      "case": "manual_cancel_no_auto_resume_and_durable_receipts",
+      "passed": true,
+      "history_events": 33
+    }
+  ],
+  "actual_action_full_body_collision_attempts": 0,
+  "forward_tracking_cases": [
+    {
+      "kind": "straight",
+      "cohort": "nominal",
+      "passed": true,
+      "goal_error_m": 0.133361,
+      "body_intrusions": 0,
+      "obstacle_verified_in_costmap": false,
+      "controller_collision_stops": 0
+    },
+    {
+      "kind": "gentle_s",
+      "cohort": "nominal",
+      "passed": true,
+      "goal_error_m": 0.133361,
+      "body_intrusions": 0,
+      "obstacle_verified_in_costmap": false,
+      "controller_collision_stops": 0
+    },
+    {
+      "kind": "corner",
+      "cohort": "nominal",
+      "passed": true,
+      "goal_error_m": 0.128334,
+      "body_intrusions": 0,
+      "obstacle_verified_in_costmap": false,
+      "controller_collision_stops": 0
+    },
+    {
+      "kind": "obstacle",
+      "cohort": "nominal",
+      "passed": true,
+      "goal_error_m": 0.121696,
+      "body_intrusions": 0,
+      "obstacle_verified_in_costmap": true,
+      "controller_collision_stops": 1
+    },
+    {
+      "kind": "straight",
+      "cohort": "heldout",
+      "passed": true,
+      "goal_error_m": 0.117752,
+      "body_intrusions": 0,
+      "obstacle_verified_in_costmap": false,
+      "controller_collision_stops": 0
+    },
+    {
+      "kind": "gentle_s",
+      "cohort": "heldout",
+      "passed": true,
+      "goal_error_m": 0.117752,
+      "body_intrusions": 0,
+      "obstacle_verified_in_costmap": false,
+      "controller_collision_stops": 0
+    },
+    {
+      "kind": "corner",
+      "cohort": "heldout",
+      "passed": true,
+      "goal_error_m": 0.146478,
+      "body_intrusions": 0,
+      "obstacle_verified_in_costmap": false,
+      "controller_collision_stops": 0
+    },
+    {
+      "kind": "obstacle",
+      "cohort": "heldout",
+      "passed": true,
+      "goal_error_m": 0.145085,
+      "body_intrusions": 0,
+      "obstacle_verified_in_costmap": true,
+      "controller_collision_stops": 17
+    }
+  ]
+}

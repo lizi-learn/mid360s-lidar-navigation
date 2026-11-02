@@ -53,7 +53,7 @@ def config(controller='rpp', tree=None, minimum_speed=.03, footprint_vertices=No
             lookahead_time=2.0,rotate_to_heading_angular_vel=1.0,rotate_to_heading_min_angle=1.2,cost_scaling_dist=1.0,
             max_angular_accel=20.,regulated_linear_scaling_min_radius=1.25,
             regulated_linear_scaling_min_speed=max(.6,minimum_speed),corner_preview=True,
-            use_cost_regulated_linear_velocity_scaling=False,minimum_pivot_input=.5,collision_lookahead_floor=.55)
+            use_cost_regulated_linear_velocity_scaling=False,minimum_pivot_input=.5,collision_lookahead_floor=.55,settled_pivot_response=True)
     mppi=dict(plugin='nav2_mppi_controller::MPPIController',time_steps=48,model_dt=.05,batch_size=1000,
         iteration_count=1,vx_std=.10,vy_std=0.,wz_std=.20,vx_max=.30,vx_min=0.,vy_max=0.,wz_max=.35,
         ax_max=.15,ax_min=-.30,az_max=.5,prune_distance=1.8,transform_tolerance=.15,
@@ -153,6 +153,7 @@ def config(controller='rpp', tree=None, minimum_speed=.03, footprint_vertices=No
         result['planner_server']['ros__parameters']['GridBased']['plugin']='p2_nav_controller::ExactHeadingLattice'
         for costmap in ('local_costmap','global_costmap'):result[costmap][costmap]['ros__parameters']['inflation_layer']['inflation_radius']=1.2
         result['controller_server']['ros__parameters']['progress_checker']['movement_time_allowance']=40.
+        result['controller_server']['ros__parameters']['goal_checker']['plugin']='p2_nav_controller::SettledHeadingGoalChecker'
         result['velocity_smoother']['ros__parameters']['max_velocity'][0]=.8
         result['velocity_smoother']['ros__parameters']['max_accel'][0]=.4
         result['velocity_smoother']['ros__parameters']['max_decel'][0]=-.8

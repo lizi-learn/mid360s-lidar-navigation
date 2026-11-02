@@ -146,7 +146,15 @@ def main():
             assert max(abs(p[1]-circle[1])for p in witnessed)>.45,'no lateral detour observed'
             events.append({'case':'actual_dynamic_obstacle_and_complete','passed':True,'ray_returns':rays,'circle':circle})
         if args.scenario=='all':
-            doc['points']=[point('finish',10.5,4.25,'visit')];doc=save(doc)
+            # The actual action must finish with the requested yaw before the
+            # receptionist marks arrival; this is not just a direct plugin call.
+            before=status()['pose'];pose=before[2]
+            orient=point('oriented',before[0],before[1],'visit');orient['yaw']=math.remainder(pose+1.,2*math.pi)
+            doc['points']=[orient];doc['routes']=[dict(id='tour',name='directed arrival',mode='showcase',loops=1,description='',steps=[dict(point_id='oriented',speak=False)])];doc=save(doc);start(doc);d=complete()
+            actual_yaw=d['pose'][2];yaw_error=abs(math.remainder(actual_yaw-orient['yaw'],2*math.pi))
+            assert yaw_error<.15,(actual_yaw,orient['yaw'])
+            events.append({'case':'actual_directed_goal_settled_action_completion','passed':True,'requested_yaw':orient['yaw'],'actual_yaw':actual_yaw,'error_rad':yaw_error})
+            doc['points']=[point('finish',10.5,4.25,'visit')];doc['routes'][0]['steps']=[dict(point_id='finish',speak=False)];doc=save(doc)
             start(doc);wait(lambda d:d['reception']['mission']['phase']=='navigating',10)
             call('/api/sim_operator',{'mode':'paused'})
             paused=wait(lambda d:d['reception']['mission']['phase']=='paused'and not d['session']['cancel_pending']and max(map(abs,d['truth']['command']))<1e-6,8)
