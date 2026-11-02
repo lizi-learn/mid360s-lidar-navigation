@@ -169,6 +169,13 @@ class Mission:
                     'event_sequence': self.event_seq, 'events': copy.deepcopy(self.events[-12:])}
 
 class MissionService:
+    def session_snapshot(self):
+        # Console owns the current original-source observation and its clock.
+        # Background task management must not re-evaluate an older UI view.
+        read = getattr(self.node, 'session_state', None)
+        if callable(read):
+            return read()
+        return self.node.session.status(time.monotonic())
     """One worker, at most one dispatch. ROS/control threads never wait on TTS."""
     def __init__(self, node, catalog):
         self.node = node; self.catalog = catalog
@@ -195,7 +202,7 @@ class MissionService:
             with self.node.lock:
                 doc = self.catalog.read(self.map_id())
                 if data.get('revision') != doc['revision']: raise ValueError('路线已更新，请刷新任务列表')
-                state = self.node.session.status(time.monotonic())
+                state = self.session_snapshot()
                 if not state['navigation_permitted']: raise ValueError('当前 E 档位或摇杆未允许导航')
                 if self.node.session.phase in ('starting', 'executing', 'replanning'): raise ValueError('已有导航正在执行')
                 if self.future is not None and not self.future.done(): raise ValueError('上一任务正在退出，请稍候')
@@ -225,7 +232,7 @@ class MissionService:
         elif command=='resume':
             with self.node.lock:
                 if data.get('epoch')!=self.engine.epoch:raise ValueError('任务已更新，请刷新后继续')
-                if not self.node.session.status(time.monotonic())['navigation_permitted']:raise ValueError('当前 E 档位或摇杆未允许导航')
+                if not self.session_snapshot()['navigation_permitted']:raise ValueError('当前 E 档位或摇杆未允许导航')
                 if not self.engine.document or self.engine.document['map_id']!=self.map_id():raise ValueError('当前地图已切换，请重新开始任务')
                 if self.future is not None and not self.future.done():raise ValueError('上一导航正在退出，请稍候')
                 self.engine.resume(time.monotonic());self.live_router.reset()
@@ -235,7 +242,7 @@ class MissionService:
                 self.engine.cancel('paused' if command == 'pause' else 'cancelled'); self.node.stop()
         elif command in ('continue', 'skip'):
             if data.get('epoch')!=self.engine.epoch:raise ValueError('讲解任务已更新，请刷新后继续')
-            state = self.node.session.status(time.monotonic())
+            state = self.session_snapshot()
             if not state['navigation_permitted']: raise ValueError('当前已交回人工，请重新开始任务')
             if command == 'continue': self.engine.continue_visit(time.monotonic())
             else: self.engine.skip(time.monotonic())
@@ -272,7 +279,7 @@ class MissionService:
             while ((hasattr(self.node,'health_ready') and not self.node.health_ready()) or
                    (hasattr(self.node,'execution_ready') and not self.node.execution_ready())):
                 if not self.engine.valid(epoch):return
-                state=self.node.session.status(time.monotonic())
+                state=self.session_snapshot()
                 if not state['navigation_permitted'] or state['generation']!=result['generation']:return
                 if time.monotonic()>=deadline:
                     gait=getattr(self.node,'gait',None)
@@ -303,7 +310,7 @@ class MissionService:
     def run(self):
         while not self.closed.wait(.1):
             try:
-                state = self.node.session.status(time.monotonic())
+                state = self.session_snapshot()
                 # Speech acknowledgements are local, bounded files; no cloud here.
                 speech = self.node.reception_speech_result()
                 snapshot=self.engine.status()
@@ -319,6 +326,11 @@ class MissionService:
                             speech={'key':snapshot['speech_key'],'result':'failed'}
                 if not state.get('navigation_permitted') and snapshot['phase'] in BUSY:self.capture_resume()
                 command = self.engine.tick(state, time.monotonic(), speech)
+                current = self.engine.status()
+                if snapshot['phase'] in BUSY and current['phase'] in ('manual', 'paused'):
+                    # E pause and manual takeover end physical navigation too;
+                    # a task banner alone is not a stop receipt.
+                    self.node.stop()
                 if command and (self.future is None or self.future.done()): self.future = self.executor.submit(self.dispatch, command)
                 self.update_live_route()
             except Exception as error: self.engine.failed(self.engine.epoch, error)

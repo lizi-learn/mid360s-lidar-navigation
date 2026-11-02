@@ -13,6 +13,15 @@ namespace p2_nav_controller {
 // P2 can pivot; every interpolated terminal orientation must fit the planning
 // clearance footprint. The lattice endpoint position and all prior path remain.
 class ExactHeadingLattice : public nav2_smac_planner::SmacPlannerLattice {
+  nav_msgs::msg::Path completed(nav_msgs::msg::Path path) {
+    // The new collision-checked plan has its own production time. Its input
+    // goal can be minutes old. Relays retain this time; sensor times are intact.
+    const auto node=_node.lock();
+    if(!node)throw nav2_core::PlannerException("Planner node expired");
+    path.header.stamp=node->now();
+    for(auto &pose:path.poses)pose.header=path.header;
+    return path;
+  }
  public:
   nav_msgs::msg::Path createPlan(const geometry_msgs::msg::PoseStamped &start,
                                 const geometry_msgs::msg::PoseStamped &goal) override {
@@ -41,7 +50,7 @@ class ExactHeadingLattice : public nav2_smac_planner::SmacPlannerLattice {
             pose.pose.orientation=nav2_util::geometry_utils::orientationAroundZAxis(p[2]);
             short_path.poses.push_back(pose);
           }
-          return short_path;
+          return completed(std::move(short_path));
         }
       }
     }
@@ -68,7 +77,7 @@ class ExactHeadingLattice : public nav2_smac_planner::SmacPlannerLattice {
     for (int i=1;i<=steps;++i) {
       auto pose=end;pose.pose.orientation=nav2_util::geometry_utils::orientationAroundZAxis(yaw+delta*static_cast<double>(i)/steps);path.poses.push_back(pose);
     }
-    return path;
+    return completed(std::move(path));
   }
 };
 }

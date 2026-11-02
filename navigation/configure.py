@@ -151,6 +151,7 @@ def config(controller='rpp', tree=None, minimum_speed=.03, footprint_vertices=No
         # SlowZone compounded into sub-actuation inputs (0.39*0.4*0.5).
         result['collision_monitor']['ros__parameters']['polygons']=['StopZone']
         result['planner_server']['ros__parameters']['GridBased']['plugin']='p2_nav_controller::ExactHeadingLattice'
+        result['planner_server']['ros__parameters']['GridBased']['smooth_path']=False
         for costmap in ('local_costmap','global_costmap'):result[costmap][costmap]['ros__parameters']['inflation_layer']['inflation_radius']=1.2
         result['controller_server']['ros__parameters']['progress_checker']['movement_time_allowance']=40.
         result['controller_server']['ros__parameters']['goal_checker']['plugin']='p2_nav_controller::SettledHeadingGoalChecker'

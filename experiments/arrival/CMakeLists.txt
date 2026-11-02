@@ -22,3 +22,8 @@ add_executable(native_pivot native_pivot.cpp)
 target_compile_features(native_pivot PUBLIC cxx_std_17)
 target_include_directories(native_pivot PRIVATE ../../navigation)
 ament_target_dependencies(native_pivot nav2_core nav2_costmap_2d pluginlib)
+
+add_executable(settled_reset settled_reset.cpp)
+target_compile_features(settled_reset PUBLIC cxx_std_17)
+target_include_directories(settled_reset PRIVATE ../../navigation/p2_nav_controller/include)
+ament_target_dependencies(settled_reset nav2_core nav2_costmap_2d pluginlib)

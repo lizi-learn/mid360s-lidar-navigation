@@ -10,6 +10,7 @@
 #include "p2_nav_controller/terminal_velocity.hpp"
 #include "p2_nav_controller/pivot_breakaway.hpp"
 #include "p2_nav_controller/settled_pivot.hpp"
+#include "p2_nav_controller/reference_goal.hpp"
 #include "p2_nav_controller/curved_forward.hpp"
 
 namespace p2_nav_controller {
@@ -68,6 +69,7 @@ class SettledGoalRPP : public nav2_regulated_pure_pursuit_controller::RegulatedP
     geometry_msgs::msg::Pose tolerance; geometry_msgs::msg::Twist velocity_tolerance;
     if (!checker || !checker->getTolerances(tolerance,velocity_tolerance))
       throw nav2_core::PlannerException("Terminal goal tolerance unavailable");
+    if(auto *reference=dynamic_cast<ReferenceGoal*>(checker))reference->reference_goal(goal_);
     auto goal=goal_; goal.header.stamp=pose.header.stamp;
     geometry_msgs::msg::PoseStamped transformed;
     if (!transformPose(pose.header.frame_id,goal,transformed))
