@@ -39,3 +39,11 @@ The field right turn is proven to have been commanded by navigation while forwar
 Earlier failed planner alternatives, mixed-kernel ABI failures, the 120 s incomplete replay and the long-delay timeout are preserved privately. The successful candidate has not yet been deployed to the physical robot. Static planar replay does not establish full-height clearance, dynamic obstacle handling on the field map, or physical gait stability. MID-360S unsynchronized device time still means ROS sensor headers represent host reception time.
 
 E-left permission, E-middle pause with explicit resume, E-right/joystick takeover, cancellation and obstacle stopping remain unchanged. No footprint reduction or new operator confirmation/acceptance-file workflow is introduced. Private maps, office trajectories, recordings, vendor code and credentials are excluded from this repository.
+
+## Follow-up: health forwarding during path/map callbacks
+
+A subsequent physical Start was accepted, then revoked before effective stepping: the unchanged health flags were120 but their original evaluation was109ms old at the native reply, beyond the existing100ms contract. A separate actual ARM ROS observer measured301 producer samples, maximum26.4ms source gap and6.2ms delivery during a planning-only request. These observations identify a forwarding timing failure; they do not establish which individual Console callback caused the historical delay.
+
+The Console previously serialized all ROS callbacks on one thread. Health now has a dedicated mutually exclusive callback group, a two-thread executor and a depth-one subscription to the latest original evaluation. This does not renew timestamps, loosen expiry or bypass missing health. An actual Console isolation test on ARM blocks unrelated callbacks for250ms: forwarding gaps were253.1ms with the old executor versus33.8ms corrected. Both preserve source stamps. The receipt fixture has no gait socket or actuator access; this is not a physical walking result.
+
+A current-map complete far-goal search still fails. A continuous reference route can be planned when intermediate poses carry travel headings rather than all-zero headings; the subsequent Start exposed the forwarding fault above. Do not classify that route preview or Start acceptance as a completed physical trip.

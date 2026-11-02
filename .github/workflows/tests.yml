@@ -129,6 +129,13 @@ jobs:
           name: projection-time-evidence
           path: /tmp/projection-time
           if-no-files-found: ignore
+      - name: Forward original health while non-control Console callbacks are blocked
+        shell: bash
+        run: |
+          source /opt/ros/humble/setup.bash
+          export OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 ROS_DOMAIN_ID=225 ROS_LOCALHOST_ONLY=1
+          python3 experiments/console_health/check.py --legacy
+          python3 experiments/console_health/check.py
       - name: Reject missing, stale, unknown and untransformable obstacle observations
         shell: bash
         env:

@@ -5,7 +5,8 @@ from pathlib import Path
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 import rclpy
 from rclpy.node import Node
-from rclpy.executors import SingleThreadedExecutor
+from rclpy.executors import MultiThreadedExecutor
+from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 from rclpy.action import ActionClient
 from rclpy.qos import QoSProfile,DurabilityPolicy,ReliabilityPolicy,qos_profile_sensor_data
 from geometry_msgs.msg import PoseStamped,PoseWithCovarianceStamped,Twist
@@ -51,6 +52,9 @@ class Console(Node):
         from flight_recorder import FlightRecorder
         self.flight=FlightRecorder(runtime/'planning-evidence.private.jsonl.gz')
         self.flight_costmap_at=0.
+        # Health forwarding must run while non-control ROS callbacks process
+        # paths/maps. Keep only the latest ORIGINAL evaluation, never renew it.
+        self.control_callbacks=MutuallyExclusiveCallbackGroup()
         self.navigation_grid=None;self.overlay_revision=0;self.overlay_report={};self._overlay_key=None;self._overlay_lock=threading.Lock()
         self.speed_value=.8 if gait_profile=='p2-flat-model' else min(.20,self.maximum_speed)
         self.velocity_scale=.5 if gait_profile=='p2-flat-model' else 1.
@@ -66,7 +70,7 @@ class Console(Node):
         self.create_subscription(CollisionMonitorState,'/p2_nav/collision_state',self.on_collision,10)
         self.create_subscription(BehaviorTreeLog,'/behavior_tree_log',self.on_bt_log,10)
         self.create_subscription(String,'/p2_nav/operator_authority',self.on_authority,10)
-        self.create_subscription(String,'/p2_nav/gate_status',self.on_gate,10)
+        self.create_subscription(String,'/p2_nav/gate_status',self.on_gate,1,callback_group=self.control_callbacks)
         self.create_subscription(String,'/p2_nav/sim_truth',lambda m:setattr(self,'truth',json.loads(m.data)),10)
         self.operator=self.create_publisher(String,'/p2_nav/operator',10)
         self.limiter=self.create_publisher(SpeedLimit,'/speed_limit',10)
@@ -792,6 +796,12 @@ class Console(Node):
             'reception':self.reception_status(),'control_recovery':self.bt_recovery_report,'path_source':self.path_source_report,'planning_evidence':self.flight.status(),
             'scope':'平面导航仿真' if self.simulation else ('雷达中心坐标导航；定位、传感器和步态状态见实时数据' if self.gate.get('navigation_reference')=='lidar_projection' else ('实机步态接口已连接；坐标与控制状态见实时数据' if self.gait else '实机导航预演'))}
 
+def console_executor(node):
+    executor=MultiThreadedExecutor(num_threads=2)
+    executor.add_node(node)
+    return executor
+
+
 def main():
     parser=argparse.ArgumentParser();parser.add_argument('--simulation',action='store_true');parser.add_argument('--port',type=int,default=8930)
     parser.add_argument('--minimum-speed',type=float,default=.03)
@@ -834,7 +844,7 @@ def main():
         if data.get('hardware_verified') is True:
             from robot_profile import check_calibration
             check_calibration(profile,data)
-    rclpy.init();node=Console(runtime,args.simulation,args.minimum_speed,vertices,args.odometry_model,args.gait_profile,args.gait_socket);node.robot_name=profile['name'] if selected else None;node.robot_identity=identity(profile) if selected else None;executor=SingleThreadedExecutor();executor.add_node(node)
+    rclpy.init();node=Console(runtime,args.simulation,args.minimum_speed,vertices,args.odometry_model,args.gait_profile,args.gait_socket);node.robot_name=profile['name'] if selected else None;node.robot_identity=identity(profile) if selected else None;executor=console_executor(node)
     thread=threading.Thread(target=executor.spin,daemon=True);thread.start()
     from audio_feedback import save_resource
     class Handler(BaseHTTPRequestHandler):
