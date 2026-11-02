@@ -307,11 +307,11 @@ class Console(Node):
         with self.session.lock:
             if not d or not (-.005<=now-d['stamp']<=.1 and -.005<=now-d['reply_stamp']<=.1):
                 self.session.operator('unknown',False,False,False,0,0,0.,now);return
-            key=(d['source'],d['sequence'])
-            # Cached replies cannot renew source time. Fresh replies are also
-            # observed by the ordinary RPC thread, independent of ROS timers.
-            if getattr(self,'gait_authority_key',None)==key:return
-            self.gait_authority_key=key
+            # Observer and UI timers may finish their read-only requests in a
+            # different order. Never feed an older cached telemetry reply back
+            # into the raw-source replay detector or renew its original time.
+            # Native packets retain their independent strict sequence checks.
+            if d['source']==self.session.source and d['sequence']<=self.session.sequence:return
             self.session.operator(d['mode'],d['verified'],d['connected'],d['activity'],
                 d['source'],d['sequence'],d['stamp'],now)
     def poll_session(self):

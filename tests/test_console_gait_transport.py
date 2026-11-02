@@ -35,6 +35,19 @@ class ConsoleGaitTests(unittest.TestCase):
     def test_alternative_ros_source_cannot_override_attached_gait(self):
         c,g=self.setup_console();source=c.session.source
         c.on_authority(object());self.assertEqual(c.session.source,source)
+    def test_out_of_order_read_only_native_snapshots_do_not_cancel(self):
+        c,g=self.setup_console();now=time.monotonic()
+        c.session.source=77;c.session.sequence=100;c.session.source_time=now-.04
+        newer={'mode':'navigation_allowed','verified':True,'connected':True,'activity':False,
+            'source':77,'sequence':102,'stamp':now,'reply_stamp':now}
+        c.gait.operator_authority=lambda:newer;c.poll_gait_authority(now)
+        c.gait.operator_authority=lambda:{**newer,'sequence':101,'stamp':now-.02,'reply_stamp':now-.01}
+        c.poll_gait_authority(now+.01)
+        self.assertEqual(c.session.sequence,102);self.assertEqual(c.session.source_time,now)
+        self.assertEqual(c.session.phase,'ready');self.assertFalse(c.session.cancel_pending)
+        c.gait.operator_authority=lambda:{**newer,'sequence':103,'activity':True,'stamp':now+.02,'reply_stamp':now+.02}
+        c.poll_gait_authority(now+.02)
+        self.assertEqual(c.session.phase,'manual');self.assertTrue(c.session.cancel_pending)
     def test_gait_source_restart_cancels_prepared_goal(self):
         c,g=self.setup_console();now=time.monotonic()
         d={'mode':'navigation_allowed','verified':True,'connected':True,'activity':False,

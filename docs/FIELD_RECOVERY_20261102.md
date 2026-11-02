@@ -51,6 +51,16 @@ A current-map complete far-goal search still fails. A continuous reference route
 The shared two-worker candidate was NOT deployed: exact CI41471400317 exposed a260.6ms forwarding gap in the corrected test. The revised implementation assigns the health-only subscriber its own Node and SingleThreadedExecutor/thread; the ordinary Console keeps its original serial executor. Both use the same original source stamps and unchanged100ms contract. The failed CI and ARM-vs-CI discrepancy remain recorded; no physical walking result is inferred.
 # Native transport process isolation (November 3)
 
+A real full-route preview after deployment exposed an additional Console
+ordering fault: two readers could deliver an older native telemetry snapshot
+after a newer snapshot, causing a false raw-source replay cancellation. The
+Console now discards duplicate or older snapshots from the same native source
+under the session lock. It never renews their original time. Raw operator packet
+sequence validation, identity changes, expiry and newer manual takeover remain
+unchanged. A regression first reproduces the old cancellation, then verifies
+that the corrected reader retains the prepared goal and still accepts a newer
+stick takeover. No physical office leg had completed when this was identified.
+
 The independent health callback was insufficient: a subsequent field Start
 was accepted and then revoked, with no effective stepping observed. A final
 sent health sample was only about 10 ms old, but that asynchronous receipt does
