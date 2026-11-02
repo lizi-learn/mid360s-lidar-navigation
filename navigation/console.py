@@ -70,6 +70,7 @@ class Console(Node):
         self.collision_stop=False;self.path_revision=0;self.obstacle_path_revision=0
         self.bt_goal_source_ns=0;self.bt_recovery_report={}
         self.virtual_operator=None;self.virtual_sequence=0;self.virtual_source=secrets.randbits(63)+1
+        self.virtual_stop=threading.Event();self.virtual_thread=None
         self.request_token=secrets.token_urlsafe(24)
         from flight_recorder import FlightRecorder
         self.flight=FlightRecorder(runtime/'planning-evidence.private.jsonl.gz')
@@ -131,6 +132,23 @@ class Console(Node):
         self.pending_reception_scan=None;self.door_scan_rejections={}
         self.create_subscription(LaserScan,'/scan',self.on_reception_scan,qos_profile_sensor_data)
         self.create_timer(.05,self.process_reception_scan)
+        if self.simulation:
+            self.virtual_thread=threading.Thread(target=self.produce_simulation_operator,daemon=True,name='simulation_operator_source')
+            self.virtual_thread.start()
+    def produce_simulation_operator(self):
+        # The simulated receiver is a producer, not a status-read timestamp.
+        # Its cadence must not depend on UI/ROS work holding Console.lock.
+        while not self.virtual_stop.wait(.02):
+            v=self.virtual_operator
+            if v is None:continue
+            with self.session.lock:
+                now=time.monotonic();self.virtual_sequence+=1
+                self.session.operator(v['mode'],True,v['connected'],v['activity'],
+                    self.virtual_source,self.virtual_sequence,now,now)
+    def destroy_node(self):
+        self.virtual_stop.set()
+        if self.virtual_thread:self.virtual_thread.join(timeout=3.)
+        return super().destroy_node()
     def record_source_path(self,msg):
         if self.session.phase not in ('planning','ready','starting','executing','replanning'):return
         try:
@@ -332,9 +350,6 @@ class Console(Node):
             now=time.monotonic()
             if getattr(self,'gait',None) is not None:self.poll_gait_authority(now)
             now=time.monotonic()
-            if self.simulation and self.virtual_operator:
-                v=self.virtual_operator;self.virtual_sequence+=1
-                self.session.operator(v['mode'],True,v['connected'],v['activity'],self.virtual_source,self.virtual_sequence,now,now)
             status=self.session_state(poll=True)
             gait=getattr(self,'gait',None)
             if gait:

@@ -205,5 +205,54 @@
     "new_accepted_at_s": 2,
     "changed_goal_motion_and_gap_reset": true,
     "original_hold_seconds": 2
+  },
+  "subsequent_full_CI": {
+    "run": 41517455554,
+    "commit": "0ad2b0e",
+    "conclusion": "failure",
+    "stage": "adaptive door route second leg paused",
+    "deployed": false,
+    "historical_source_cause_proven": false
+  },
+  "simulation_authority_source": {
+    "actual_Console_old_lost_samples": 47,
+    "corrected_lost_samples": 0,
+    "UI_lock_stalls": 3,
+    "UI_lock_stall_seconds": 0.25,
+    "stopped_source_expiry_preserved": true,
+    "manual_pause_disconnect_negatives_pass": true,
+    "hardware_commands": 0
+  },
+  "authority_joint": {
+    "passed": true,
+    "cases": [
+      {
+        "case": "continuous_native_transit",
+        "passed": true
+      },
+      {
+        "case": "observed_closed_door_reopens_and_live_shortcut",
+        "passed": true
+      },
+      {
+        "case": "actual_dynamic_obstacle_and_complete",
+        "passed": true
+      },
+      {
+        "case": "actual_directed_goal_settled_action_completion",
+        "passed": true
+      },
+      {
+        "case": "middle_pause_then_explicit_resume_native",
+        "passed": true
+      },
+      {
+        "case": "manual_cancel_no_auto_resume_and_durable_receipts",
+        "passed": true
+      }
+    ],
+    "elapsed_s": 96.23734751087613,
+    "collision_attempts": 0,
+    "hardware_commands": 0
   }
 }
