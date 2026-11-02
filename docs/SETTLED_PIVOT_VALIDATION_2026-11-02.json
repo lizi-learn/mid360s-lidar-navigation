@@ -409,5 +409,106 @@
       "obstacle_verified_in_costmap": true,
       "controller_collision_stops": 17
     }
-  ]
+  ],
+  "legacy_preview_comparison": {
+    "cases": 16,
+    "candidate_checks_passed": true,
+    "summary": [
+      {
+        "cohort": "nominal",
+        "kind": "straight",
+        "candidate_case_passed": true,
+        "rms_before_m": 0.284513,
+        "rms_candidate_m": 0.0028648,
+        "reversals_before": 21,
+        "reversals_candidate": 0,
+        "baseline_goal_reached": false,
+        "baseline_body_intrusions": 0
+      },
+      {
+        "cohort": "nominal",
+        "kind": "gentle_s",
+        "candidate_case_passed": true,
+        "rms_before_m": 0.21718,
+        "rms_candidate_m": 0.0286292,
+        "reversals_before": 21,
+        "reversals_candidate": 1,
+        "baseline_goal_reached": false,
+        "baseline_body_intrusions": 0
+      },
+      {
+        "cohort": "nominal",
+        "kind": "corner",
+        "candidate_case_passed": true,
+        "rms_before_m": 0.347953,
+        "rms_candidate_m": 0.0445214,
+        "reversals_before": 3,
+        "reversals_candidate": 0,
+        "baseline_goal_reached": false,
+        "baseline_body_intrusions": 0
+      },
+      {
+        "cohort": "nominal",
+        "kind": "obstacle",
+        "candidate_case_passed": true,
+        "rms_before_m": 0.284513,
+        "rms_candidate_m": 0.00270071,
+        "reversals_before": 21,
+        "reversals_candidate": 0,
+        "baseline_goal_reached": false,
+        "baseline_body_intrusions": 0
+      },
+      {
+        "cohort": "heldout",
+        "kind": "straight",
+        "candidate_case_passed": true,
+        "rms_before_m": 0.333827,
+        "rms_candidate_m": 0.0124924,
+        "reversals_before": 17,
+        "reversals_candidate": 0,
+        "baseline_goal_reached": false,
+        "baseline_body_intrusions": 0
+      },
+      {
+        "cohort": "heldout",
+        "kind": "gentle_s",
+        "candidate_case_passed": true,
+        "rms_before_m": 0.332478,
+        "rms_candidate_m": 0.0285384,
+        "reversals_before": 17,
+        "reversals_candidate": 4,
+        "baseline_goal_reached": false,
+        "baseline_body_intrusions": 0
+      },
+      {
+        "cohort": "heldout",
+        "kind": "corner",
+        "candidate_case_passed": true,
+        "rms_before_m": 0.303611,
+        "rms_candidate_m": 0.0507066,
+        "reversals_before": 2,
+        "reversals_candidate": 1,
+        "baseline_goal_reached": false,
+        "baseline_body_intrusions": 0
+      },
+      {
+        "cohort": "heldout",
+        "kind": "obstacle",
+        "candidate_case_passed": true,
+        "rms_before_m": 0.333827,
+        "rms_candidate_m": 0.0120587,
+        "reversals_before": 17,
+        "reversals_candidate": 0,
+        "baseline_goal_reached": false,
+        "baseline_body_intrusions": 0
+      }
+    ],
+    "isolation": "Both profiles explicitly disable the new pivot response, so the old preview comparison varies preview distance only. Combined new-pivot behavior is checked separately by native pivot, actual replanning tracking and full reception actions. Fixture ROS time follows model ticks."
+  },
+  "preserved_ci_failure": {
+    "commit": "9c7b9e954be41282770a04e628041f8cf6dd537f",
+    "run": 41366756202,
+    "url": "https://github.com/lizi-learn/mid360s-lidar-navigation/actions/runs/41366756202",
+    "cause": "Old wave fixture implicitly enabled new pivot timing but ran a fast planar loop using wall time. Isolate preview parameters and use controlled simulation time; original success/collision/improvement thresholds unchanged."
+  }
 }

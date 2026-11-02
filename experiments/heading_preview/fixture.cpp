@@ -13,6 +13,7 @@
 #include <vector>
 #include <cstdlib>
 #include "rclcpp/rclcpp.hpp"
+#include "rcl/time.h"
 #include "rclcpp_lifecycle/lifecycle_node.hpp"
 #include "pluginlib/class_loader.hpp"
 #include "nav2_core/controller.hpp"
@@ -52,6 +53,7 @@ int main(int argc,char **argv){
  int result=0;
  try{
  auto parent=std::make_shared<rclcpp_lifecycle::LifecycleNode>("preview_controller");
+ if(rcl_enable_ros_time_override(parent->get_clock()->get_clock_handle())!=RCL_RET_OK||rcl_set_ros_time_override(parent->get_clock()->get_clock_handle(),1000000000LL)!=RCL_RET_OK)throw std::runtime_error("Fixture clock setup failed");
  auto cm=std::make_shared<nav2_costmap_2d::Costmap2DROS>("preview_costmap");
  cm->set_parameters({rclcpp::Parameter("global_frame","fixture_world"),rclcpp::Parameter("robot_base_frame","fixture_base"),rclcpp::Parameter("plugins",std::vector<std::string>{}),rclcpp::Parameter("footprint","[[0.275,0.275],[0.275,-0.275],[-0.275,-0.275],[-0.275,0.275]]"),rclcpp::Parameter("footprint_padding",0.),rclcpp::Parameter("resolution",.05),rclcpp::Parameter("width",40),rclcpp::Parameter("height",40)});
  if(cm->on_configure(rclcpp_lifecycle::State())!=nav2_util::CallbackReturn::SUCCESS)throw std::runtime_error("costmap configure failed");
@@ -69,7 +71,7 @@ int main(int argc,char **argv){
  pluginlib::ClassLoader<nav2_core::Controller> loader("nav2_core","nav2_core::Controller");
  auto control=loader.createSharedInstance("p2_nav_controller::SettledGoalRPP");control->configure(parent,"FollowPath",tf,cm);control->activate();
  std::ofstream actual(prefix+".actual-parameters.json");actual<<"{";
- const std::vector<std::string> names={"min_lookahead_dist","max_lookahead_dist","lookahead_time","rotate_to_heading_angular_vel","rotate_to_heading_min_angle","regulated_linear_scaling_min_speed","use_collision_detection","allow_reversing"};
+ const std::vector<std::string> names={"min_lookahead_dist","max_lookahead_dist","lookahead_time","rotate_to_heading_angular_vel","rotate_to_heading_min_angle","regulated_linear_scaling_min_speed","use_collision_detection","allow_reversing","settled_pivot_response"};
  for(size_t i=0;i<names.size();++i){if(i)actual<<",";actual<<"\""<<names[i]<<"\":"<<parent->get_parameter("FollowPath."+names[i]).value_to_string();}
  actual<<",\"actual_footprint\":[";auto footprint=cm->getRobotFootprint();for(size_t i=0;i<footprint.size();++i){if(i)actual<<",";actual<<"["<<footprint[i].x<<","<<footprint[i].y<<"]";}actual<<"]}";actual.close();
  pluginlib::ClassLoader<nav2_core::GoalChecker> goals("nav2_core","nav2_core::GoalChecker");
@@ -84,6 +86,7 @@ int main(int argc,char **argv){
  std::ofstream trace(prefix+".csv");trace<<"t,x,y,yaw,raw_x,raw_z,input_x,input_z,measured_x,measured_z,reference_error,collision_stop,obstacle\n";
  for(int step=0;step<2400;++step){
   time=step*dt;
+  if(rcl_set_ros_time_override(parent->get_clock()->get_clock_handle(),static_cast<int64_t>((1.+time)*1e9))!=RCL_RET_OK)throw std::runtime_error("Fixture clock tick failed");
   geometry_msgs::msg::PoseStamped pose;pose.header.frame_id="fixture_world";pose.header.stamp=parent->now();pose.pose.position.x=x;pose.pose.position.y=y;pose.pose.orientation=nav2_util::geometry_utils::orientationAroundZAxis(yaw);
   geometry_msgs::msg::TransformStamped tr;tr.header=pose.header;tr.child_frame_id="fixture_base";tr.transform.translation.x=x;tr.transform.translation.y=y;tr.transform.rotation=pose.pose.orientation;if(!tf->setTransform(tr,"synthetic_planar_fixture"))throw std::runtime_error("fixture TF rejected");
   geometry_msgs::msg::Twist measured;measured.linear.x=v;measured.angular.z=w;

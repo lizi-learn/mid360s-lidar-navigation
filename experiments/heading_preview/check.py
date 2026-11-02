@@ -18,7 +18,9 @@ def main():
      rows.append({**cached,'reused_prior_receipt':str(Path(a.baseline_results).resolve())});continue
     prefix=out.parent/f'{cohort}-{kind}-{name}'
     params=config(gait_profile='p2-flat-model',footprint_vertices=[[.275,.275],[.275,-.275],[-.275,-.275],[-.275,.275]],footprint_padding=0.)
-    controller=params['controller_server']['ros__parameters'];controller['FollowPath'].update(min_lookahead_dist=lo,max_lookahead_dist=hi)
+    controller=params['controller_server']['ros__parameters'];controller['FollowPath'].update(min_lookahead_dist=lo,max_lookahead_dist=hi,settled_pivot_response=False)
+    # Isolate preview distance here. The combined settled-pivot profile is
+    # covered by arrival/check_tracking.py and check_pivot_native.py.
     if name=='before':controller['FollowPath'].update(collision_lookahead_floor=0.,minimum_pivot_input=0.)
     paramfile=prefix.with_suffix('.params.yaml');paramfile.write_text(yaml.safe_dump({'preview_controller':{'ros__parameters':controller}}))
     cmd=[a.binary,str(prefix),kind,str(gain),str(delay),'--ros-args','--params-file',str(paramfile),'--log-level','error']
@@ -30,6 +32,7 @@ def main():
      row={'cohort':cohort,'kind':kind,'profile':name,'returncode':result.returncode,'error':result.stderr[-2000:]};rows.append(row)
      out.write_text(json.dumps({'complete':False,'cases':rows},indent=2));raise RuntimeError(row)
     row=json.loads(prefix.with_suffix('.json').read_text());actual=json.loads(prefix.with_suffix('.actual-parameters.json').read_text())
+    assert actual['settled_pivot_response'] is False,actual
     assert actual['min_lookahead_dist']==lo and actual['max_lookahead_dist']==hi,actual
     assert actual['rotate_to_heading_angular_vel']==1. and actual['regulated_linear_scaling_min_speed']==.6 and actual['use_collision_detection'] and not actual['allow_reversing'],actual
     assert len(actual['actual_footprint'])==4 and all(abs(abs(value)-.275)<1e-9 for point in actual['actual_footprint'] for value in point),actual
