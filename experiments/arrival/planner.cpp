@@ -8,6 +8,7 @@
 #include "rclcpp_lifecycle/lifecycle_node.hpp"
 #include "pluginlib/class_loader.hpp"
 #include "nav2_core/global_planner.hpp"
+#include "nav2_core/exceptions.hpp"
 #include "nav2_costmap_2d/costmap_2d_ros.hpp"
 #include "tf2_ros/buffer.h"
 #include "nav2_util/geometry_utils.hpp"
@@ -37,6 +38,19 @@ int main(int argc,char **argv){
    for(const auto &p:path.poses)out<<std::setprecision(12)<<p.pose.position.x<<','<<p.pose.position.y<<','<<tf2::getYaw(p.pose.orientation)<<'\n';
    std::ofstream(std::string(argv[2])+".json")<<std::setprecision(17)<<"{\"planned\":"<<(!path.poses.empty()?"true":"false")<<",\"points\":"<<path.poses.size()<<",\"input_goal_stamp_s\":"<<rclcpp::Time(goal.header.stamp).seconds()<<",\"path_stamp_s\":"<<rclcpp::Time(path.header.stamp).seconds()<<",\"path_age_at_result_s\":"<<(parent->now()-rclcpp::Time(path.header.stamp)).seconds()<<",\"seconds\":"<<std::chrono::duration<double>(std::chrono::steady_clock::now()-began).count()<<"}";
   }catch(const std::exception &e){std::string err=e.what();for(auto &c:err)if(c=='\"'||c=='\\'||c=='\n')c=' ';std::ofstream(std::string(argv[2])+".json")<<std::setprecision(17)<<"{\"planned\":false,\"error\":\""<<err<<"\",\"seconds\":"<<std::chrono::duration<double>(std::chrono::steady_clock::now()-began).count()<<"}";}
+  if(std::getenv("P2_ARRIVAL_REUSE_NARROW")) {
+    auto from=start;from.pose.position.x+=.2;from.pose.position.y+=.005;
+    auto reused=planner->createPlan(from,goal);
+    if(reused.poses.empty())throw std::runtime_error("Original footprint route was not reused");
+    std::ofstream narrow(std::string(argv[2])+"-reused.csv");narrow<<"x,y,yaw\n";
+    for(const auto &p:reused.poses)narrow<<std::setprecision(12)<<p.pose.position.x<<','<<p.pose.position.y<<','<<tf2::getYaw(p.pose.orientation)<<'\n';
+    narrow.close();unsigned marked=0;
+    for(unsigned y=0;y<height;++y)for(unsigned x=0;x<width;++x){double wx,wy;map->mapToWorld(x,y,wx,wy);if(std::abs(wx-4.)<.08&&wy>1.2&&wy<1.8){map->setCost(x,y,254);++marked;}}
+    bool rejected=false;
+    try{auto blocked=planner->createPlan(from,goal);rejected=blocked.poses.empty();}catch(const nav2_core::PlannerException &){rejected=true;}
+    if(!marked||!rejected)throw std::runtime_error("New corridor obstacle was not rejected");
+    std::ofstream(std::string(argv[2])+"-blocked.json")<<"{\"rejected\":"<<(rejected?"true":"false")<<",\"marked_cells\":"<<marked<<"}";
+  }
   if(std::getenv("P2_ARRIVAL_REPLAN_SEQUENCE")) {
     auto save_path=[&](const std::string &label,const geometry_msgs::msg::PoseStamped &from,const geometry_msgs::msg::PoseStamped &to){
       auto path=planner->createPlan(from,to);if(path.poses.empty())throw std::runtime_error("Replan empty: "+label);

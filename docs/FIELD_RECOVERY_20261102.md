@@ -10,6 +10,10 @@ Angular projection now uses the nearest circular bin at 720 bins rather than alw
 
 A real two-domain ROS adapter/TF regression with a fixed synthetic reflector, 100 ms cloud delay, 0.4 m/s translation and 0.8 rad/s yaw reproduced a mean displacement of 45.6 cm in the old adapter versus 1.47 cm corrected (maximum 2.35 cm). All output scans retained original cloud stamps. This proves the software defect; the original field cloud/pose pair was not preserved and its precise contribution to that field turn remains unproven.
 
+## Path reuse consistency
+
+The reuse branch previously required an extra4cm margin even though fresh planning could accept the unchanged original body at zero extra margin. It now tries the preferred margin and then revalidates the entire original filled/swept footprint. Occupied and unknown cells remain rejected; body size and obstacle stopping do not change. This is a route preference fallback, not a smaller footprint or a new operator workflow. A dedicated native60cm-corridor test actually exercised the original-body reuse branch, completed the whole reference with zero body intersections, then inserted48 real costmap obstacle cells and verified the route was rejected. The separate passing41m return models did not exercise this branch and are not cited as proof of the reuse fix.
+
 ## Changes
 
 - Honor an explicit leading in-place pivot in the reference before translating. Pure pursuit otherwise looks through repeated-position rotation poses and can start driving while a delayed turn is still developing. Ordinary curved references retain forward/yaw tracking and zero lateral input. New goals and lifecycle transitions reset this phase.

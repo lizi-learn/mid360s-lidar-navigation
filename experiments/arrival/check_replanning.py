@@ -30,6 +30,20 @@ def main():
   end=[2.2,5.5]if k=='newgoal'else[5.2,2.5];assert math.dist(path[-1][:2],end)<.15
   rows.append(dict(case=k,points=len(path),body_intrusions=hits))
  assert max(abs(q[1]-2.48)for q in paths['opened'])<.04,'new direct shortcut not used'
+ # In this60cm corridor, the original55cm body fits while an extra4cm
+ # margin does not. Small source-pose changes must not discard the valid tail.
+ narrow=np.full((80,200),254,dtype=int);yy,xx=np.mgrid[:80,:200];wy=(yy+.5)*r
+ narrow[(wy>1.2)&(wy<1.8)]=0
+ narrow_map=out.parent/'narrow-map.txt';narrow_map.write_text('200 80 .05 0 0\n'+' '.join(map(str,narrow.ravel())))
+ narrow_prefix=out.parent/'narrow';narrow_env=dict(os.environ,P2_ARRIVAL_REUSE_NARROW='1')
+ process=subprocess.run([a.binary,str(narrow_map),str(narrow_prefix),'p2_nav_controller::PositionOnlyLattice','1','1.5','0','7.5','1.5','0','--ros-args','--params-file',str(pp),'--log-level','info'],env=narrow_env,capture_output=True,text=True,timeout=25)
+ (out.parent/'narrow.log').write_text(process.stdout+process.stderr);assert process.returncode==0,process.stderr[-3000:]
+ reused=[[float(z[c])for c in ('x','y','yaw')]for z in csv.DictReader(Path(str(narrow_prefix)+'-reused.csv').open())]
+ assert intrusions(narrow,r,(0.,0.),reused)==0,'Original body touched obstacle/unknown cells'
+ assert math.dist(reused[-1][:2],[7.5,1.5])<.01
+ blocked=json.loads(Path(str(narrow_prefix)+'-blocked.json').read_text());assert blocked['rejected']and blocked['marked_cells']>0
+ receipts=(process.stdout+process.stderr).count('Reusing complete route with original footprint');assert receipts>0,'Original-body fallback was not exercised'
+ rows.append(dict(case='same_body_narrow_reuse_and_new_blocked_goal',points=len(reused),body_intrusions=0,reuse_receipts=receipts,actual_obstacle_cells=blocked['marked_cells'],blocked_rejected=True))
  result=dict(passed=True,cases=rows,small_pose_update_keeps_side=True,new_obstacle_changes_side=True,new_opening_uses_direct=True,new_goal_invalidates_route=True,hardware_commands=0,fixture_seed=0,scope='Actual own Nav2 planner, same-goal synthetic replans; no perception, control tracking or physical walking acceptance')
  out.write_text(json.dumps(result,indent=2));print(json.dumps(result))
 if __name__=='__main__':main()

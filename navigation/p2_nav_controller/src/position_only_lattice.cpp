@@ -213,7 +213,14 @@ class PositionOnlyLattice : public nav2_smac_planner::SmacPlannerLattice {
             auto joined=terminal_path({x,y,yaw},{p.position.x,p.position.y,tf2::getYaw(p.orientation)},1.);
             if(joined.empty())continue;
             for(size_t j=i+1;j<stable_path_.poses.size();++j){const auto &q=stable_path_.poses[j].pose;joined.push_back({q.position.x,q.position.y,tf2::getYaw(q.orientation)});}
-            if(swept_clear(joined,.04))return remember(message(joined,goal.header),goal);
+            // The4cm clearance is a preference, not an extra robot footprint.
+            // Reuse still checks the entire original filled/swept body, including
+            // unknown cells. This matches fresh-route acceptance on the same map.
+            const bool preferred=swept_clear(joined,.04);
+            if(preferred||swept_clear(joined,0.)) {
+              if(!preferred)RCLCPP_INFO(_logger,"Reusing complete route with original footprint; preferred margin unavailable");
+              return remember(message(joined,goal.header),goal);
+            }
           }
         }
       }
