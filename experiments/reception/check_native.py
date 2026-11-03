@@ -8,7 +8,8 @@ from pathlib import Path
 ROOT=Path(__file__).resolve().parents[2];NAV=ROOT/'navigation';sys.path.insert(0,str(NAV))
 
 def main():
-    ap=argparse.ArgumentParser();ap.add_argument('--output',required=True);ap.add_argument('--setup',required=True);ap.add_argument('--port',type=int,default=8947);ap.add_argument('--domain',type=int,default=208);ap.add_argument('--stop-profile',choices=['baseline-directional','legacy-rectangle'],default='baseline-directional');ap.add_argument('--scenario',choices=['transit','all','obstacle','tools','maps','blockage','followthrough'],default='all');ap.add_argument('--block-case',choices=['persistent','transient','takeover'],default='persistent');ap.add_argument('--obstacle-offset',type=float,default=0.);args=ap.parse_args()
+    ap=argparse.ArgumentParser();ap.add_argument('--output',required=True);ap.add_argument('--setup',required=True);ap.add_argument('--port',type=int,default=8947);ap.add_argument('--domain',type=int,default=208);ap.add_argument('--stop-profile',choices=['baseline-directional','legacy-rectangle'],default='baseline-directional');ap.add_argument('--scenario',choices=['transit','all','obstacle','tools','maps','blockage','followthrough'],default='all');ap.add_argument('--block-case',choices=['persistent','transient','takeover'],default='persistent');ap.add_argument('--obstacle-offset',type=float,default=0.);ap.add_argument('--source-gap-ms',type=float,default=0.);args=ap.parse_args()
+    if not 0<=args.source_gap_ms<=1500:raise ValueError('Invalid bounded source gap')
     if not math.isfinite(args.obstacle_offset):raise ValueError('Invalid synthetic obstacle offset')
     out=Path(args.output).resolve().parent
     if out.exists()and any(out.iterdir()):raise ValueError('Use a new output directory; old failures are retained')
@@ -169,6 +170,24 @@ def main():
             home=point('home',2.,2.5,'home')
             doc['points']=[point('via',2.4,2.5),a,b,home];doc['routes']=[dict(id='tour',name='Heading, product, guest wait, dwell, return',mode='showcase',loops=1,description='',steps=[dict(point_id=p['id'],speak=True)for p in doc['points']])]
             doc=save(doc);start(doc)
+            if args.source_gap_ms:
+                ros=ScenarioROS()
+                moving=wait(lambda d:d['truth']['travelled_m']>.2 and d['session']['phase']=='executing',20)
+                original_generation=moving['session']['generation'];witness=[]
+                until=time.monotonic()+args.source_gap_ms/1000.
+                while time.monotonic()<until:
+                    ros.control(dict(drop_scan=True,control_id='reception-source-gap'))
+                    observed=status();witness.append(dict(controls=observed['truth']['controls'],gate=observed['gate'],session=observed['session'],command=observed['truth']['command']))
+                    if observed['reception']['mission']['phase']=='failed':raise RuntimeError(observed['reception']['mission']['error'])
+                    time.sleep(.04)
+                assert any(s['controls']['drop_scan']for s in witness)
+                assert any(s['gate'].get('collision_source_valid')is False for s in witness),'No actual source fault observed'
+                assert any(max(map(abs,s['command']))<1e-6 for s in witness),'No stopped output observed'
+                for _ in range(5):ros.control(dict(drop_scan=False,control_id='reception-source-restored'));time.sleep(.04)
+                resumed=wait(lambda d:d['session']['generation']>original_generation and d['session']['phase']=='executing'and d['gate'].get('armed')is True,25)
+                assert resumed['gate']['arm_generation']>max(s['gate'].get('collision_fault_generation',-1)for s in witness)
+                events.append(dict(case='actual_scan_gap_cancel_receipt_replan_reauthorize_same_task',passed=True,original_generation=original_generation,new_generation=resumed['session']['generation'],gap_ms=args.source_gap_ms,
+                    observed_fault_samples=sum(s['gate'].get('collision_source_valid')is False for s in witness),stopped_samples=sum(max(map(abs,s['command']))<1e-6 for s in witness),user_start_requests=1))
             parked=wait(lambda d:d['reception']['mission']['phase']=='guest_wait',45)
             assert parked['reception']['mission']['index']==1
             error=abs(math.remainder(parked['pose'][2]-a['yaw'],2*math.pi));assert error<.15,error

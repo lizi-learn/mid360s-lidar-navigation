@@ -142,7 +142,7 @@ class CuePolicy:
         self.obstacle_announced = False
         self.last_obstacle = -math.inf
         self.last_now = None
-        self.reception_run=None;self.reception_announced=False;self.reception_wait=None
+        self.reception_run=None;self.reception_announced=False;self.reception_wait=None;self.reception_phase=None
         self.epoch += 1
 
     def disconnected(self):
@@ -204,10 +204,13 @@ class CuePolicy:
     def reception_filter(self,kind,data,now):
         mission=(data.get('reception')or{}).get('mission')or{}
         phase=mission.get('phase');run=mission.get('run_id')
-        active=phase in {'dispatching','navigating','rerouting','waiting_route','presenting','guest_wait','dwell','paused'}
+        active=phase in {'dispatching','navigating','rerouting','waiting_route','presenting','guest_wait','dwell','paused','failed'}
         if not run or not active:return kind
         if run!=self.reception_run:
-            self.reception_run=run;self.reception_announced=False;self.reception_wait=None
+            self.reception_run=run;self.reception_announced=False;self.reception_wait=None;self.reception_phase=None
+        previous=self.reception_phase;self.reception_phase=phase
+        if phase=='failed' and previous!='failed' and (data.get('session')or{}).get('phase')not in ('manual','paused'):
+            kind='failed'
         # Internal leg cancellation is part of the same task, not a user stop.
         if phase in ('dispatching','rerouting','waiting_route')and kind in ('started','stopped'):kind=None
         if kind=='started':
@@ -236,4 +239,5 @@ class CuePolicy:
         }
         return (cue.epoch == self.epoch and cue.generation == generation and
                 0 <= now - cue.created and (max_age is None or now - cue.created <= max_age) and
-                (cue.kind == 'test' or phase in allowed[cue.kind] or cue.kind=='obstacle' and reception_phase=='waiting_route'))
+                (cue.kind == 'test' or phase in allowed[cue.kind] or cue.kind=='obstacle' and reception_phase=='waiting_route' or
+                 cue.kind=='failed' and reception_phase=='failed' and phase not in ('manual','paused','stopped')))

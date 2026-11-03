@@ -304,13 +304,26 @@ class Console(Node):
     def execution_ready(self):
         gait=getattr(self,'gait',None)
         return self.simulation or bool(gait and gait.ready())
+    def source_recovery_eligible(self):
+        # Last evidence only selects a stopped wait. It does not make stale
+        # ground/localization valid; health_ready still requires fresh inputs.
+        return (self.gate.get('ground_evidence',self.gate.get('ground_ok')) is True and
+                self.gate.get('localization_evidence_ok',self.gate.get('localized')) is True)
     def on_gate(self,msg):
         with self.lock:
             try:self.gate=json.loads(msg.data)
             except (ValueError,TypeError):self.gate={}
-            if self.gate.get('collision_source_valid') is not True and self.session.phase in ('starting','executing','replanning'):
+            fault=self.gate.get('collision_fault_generation',-1)
+            revoked=type(fault)is int and fault>=self.session.generation
+            if (self.gate.get('collision_source_valid') is not True or revoked) and self.session.phase in ('starting','executing','replanning'):
+                # The gate's revocation persists even when a brief invalid
+                # status was dropped by DDS. Never show executing/zero forever.
+                recover=getattr(getattr(self,'reception',None),'source_fault',None)
+                eligible=self.source_recovery_eligible()
+                scheduled=bool(eligible and recover and recover('避障观测暂时中断'))
+                self.source_revoked_generation=self.session.generation
                 self.session.cancel();self.stop_actions()
-                self.session._notice('避障观测失效，导航已停止；恢复后请重新确认目标')
+                self.session._notice('观测暂时中断：已停车，等待原任务重新规划'if scheduled else '避障观测失效，导航已停止')
             # Forward this original health evaluation as soon as it arrives,
             # instead of waiting for a separate session timer and RPC cycle.
             gait=getattr(self,'gait',None)
@@ -348,7 +361,11 @@ class Console(Node):
         # A caller timestamp taken before waiting can predate a fresh packet.
         with self.session.lock:
             now=time.monotonic()
-            return self.session.poll(now)if poll else self.session.status(now)
+            result=self.session.poll(now)if poll else self.session.status(now)
+            reception=getattr(self,'reception',None)
+            if (reception and getattr(reception,'source_recovery_active',False) and result['navigation_permitted'] and result['phase']=='cancelled'):
+                result=dict(result,source_recovery=True,notice='观测暂时中断：已停车，等待原任务重新规划')
+            return result
     def poll_session(self):
         with self.lock:
             now=time.monotonic()
@@ -359,7 +376,12 @@ class Console(Node):
             if gait:
                 state=gait.status()
                 if (state['cancel_pending'] or state['phase'] in ('failed','disconnected')) and self.session.phase in ('starting','executing','replanning'):
-                    self.session.cancel();self.session._notice('步态已撤销导航控制，请重新确认目标')
+                    recover=getattr(getattr(self,'reception',None),'source_fault',None)
+                    eligible=(state.get('native_reason')=='navigation_health_not_ready' and
+                              self.source_recovery_eligible())
+                    scheduled=bool(eligible and recover and recover('原始导航健康数据间断'))
+                    if scheduled:self.source_revoked_generation=self.session.generation
+                    self.session.cancel();self.session._notice('观测暂时中断：已停车，等待原任务重新规划'if scheduled else '步态已撤销导航控制')
                 gait.update(self.gate,self.session.phase=='executing' and not status['force_navigation_zero'])
                 if self.session.phase in ('manual','paused','stopped','cancelled','blocked','arrived') and gait.phase not in ('stopped','idle','disconnected'):
                     gait.stop()
@@ -369,7 +391,12 @@ class Console(Node):
                 self.stop_actions()
             if self.session.phase=='replanning':self.session.reroute(time.monotonic(),False,not self.collision_stop and self.health_ready())
             if self.session.phase in ('starting','executing','replanning'):
-                if not self.health_ready():self.session.cancel();self.session._notice('地面、定位或传感器未就绪，导航已停止')
+                if not self.health_ready():
+                    recover=getattr(getattr(self,'reception',None),'source_fault',None)
+                    eligible=self.source_recovery_eligible()
+                    scheduled=bool(eligible and recover and recover('定位/雷达观测时间间断'))
+                    self.source_revoked_generation=self.session.generation
+                    self.session.cancel();self.session._notice('观测暂时中断：已停车，等待原任务重新规划'if scheduled else '地面、定位或传感器未就绪，导航已停止')
                 current=self.session_state()
                 self.op(armed=not current['force_navigation_zero'],paused=current['force_navigation_zero'],arm_generation=self.session.generation)
     def stop_actions(self):
@@ -595,6 +622,9 @@ class Console(Node):
         response=self.wait_future(self.route_parameters.call_async(request),2.)
         if not response.result.successful:raise ValueError('路线终点参数未应用：'+response.result.reason)
     def set_goal(self,data):
+        reception=getattr(self,'reception',None)
+        if (reception and getattr(reception,'source_recovery_active',False) and data.get('_mission_epoch')!=reception.engine.epoch):
+            reception.engine.cancel('cancelled');reception.pending_source_command=None;reception.source_recovery_active=False
         # Serialize goal-specific planner parameters with their preview request;
         # stop/manual callbacks do not acquire this planning lock.
         with self.goal_request_lock:return self._set_goal(data)
@@ -610,6 +640,10 @@ class Console(Node):
         if heading_mode=='position' and self.gait_profile!='p2-flat-model':raise ValueError('当前配置不支持位置目标规划')
         if not self.gate.get('localized'):raise ValueError('定位尚未就绪，请先设置初始位置')
         with self.lock:
+            # A recovered source needs a genuinely newer gate authorization,
+            # including when its persistent revocation status was received late.
+            fault=self.gate.get('collision_fault_generation',-1)
+            if type(fault)is int:self.session.generation=max(self.session.generation,fault)
             generation=self.session.prepare(data,time.monotonic());self.path=[];self.goal=None;self.feedback={}
             self.goal_heading_mode=heading_mode;self.goal_route=route_poses
             self.pending_plan_accept=True

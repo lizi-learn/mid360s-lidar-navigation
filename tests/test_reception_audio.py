@@ -20,6 +20,12 @@ class ReceptionCueTests(unittest.TestCase):
         cue=p.observe(self.data('cancelled',mission='waiting_route'),2.6)
         self.assertEqual(cue.kind,'obstacle');self.assertTrue(p.valid(cue,self.data('cancelled',mission='waiting_route'),2.6))
         self.assertFalse(p.valid(cue,self.data('manual',mission='manual'),2.7))
+    def test_task_source_timeout_announces_failure_once_and_manual_interrupts(self):
+        p=CuePolicy();p.observe(self.data('cancelled',mission='rerouting'),0)
+        cue=p.observe(self.data('cancelled',mission='failed'),1)
+        self.assertEqual(cue.kind,'failed');self.assertTrue(p.valid(cue,self.data('cancelled',mission='failed'),1.1))
+        self.assertIsNone(p.observe(self.data('cancelled',mission='failed'),1.2))
+        self.assertFalse(p.valid(cue,self.data('manual',mission='failed'),1.3,max_age=None))
     def test_single_goal_without_reception_keeps_old_cues(self):
         p=CuePolicy();a=dict(request_token='plain',session=dict(phase='ready',generation=1))
         p.observe(a,0);a['session']['phase']='executing'

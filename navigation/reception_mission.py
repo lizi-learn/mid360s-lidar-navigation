@@ -217,6 +217,7 @@ class MissionService:
         from reception_live_routes import LiveRouter
         self.live_router=LiveRouter();self.active_command=None;self.resume_command=None
         self.decisions=RouteDecisions(); self.route_report=[]
+        self.pending_source_command=None;self.source_recovery_active=False
         self.future = None; self.closed = threading.Event()
         self.thread = threading.Thread(target=self.run, daemon=True, name='reception-task'); self.thread.start()
     def map_id(self):
@@ -259,7 +260,7 @@ class MissionService:
                 doc,self.route_report=self.decisions.expand(doc,route_id,time.monotonic())
                 self.node.session.configure_obstruction(doc['policy'])
                 self.engine.start(doc, route_id, time.monotonic())
-                self.active_command=None;self.resume_command=None;self.live_router.reset()
+                self.active_command=None;self.resume_command=None;self.pending_source_command=None;self.source_recovery_active=False;self.live_router.reset()
         elif command=='resume':
             with self.node.lock:
                 if data.get('epoch')!=self.engine.epoch:raise ValueError('任务已更新，请刷新后继续')
@@ -269,6 +270,7 @@ class MissionService:
                 self.engine.resume(time.monotonic());self.live_router.reset()
         elif command in ('cancel', 'pause'):
             with self.node.lock:
+                self.pending_source_command=None;self.source_recovery_active=False
                 if command=='pause':self.capture_resume()
                 self.engine.cancel('paused' if command == 'pause' else 'cancelled'); self.node.stop()
         elif command in ('continue', 'skip'):
@@ -287,23 +289,74 @@ class MissionService:
         if type(remaining)is int and 0<remaining<=len(command['points']):command['points']=command['points'][-remaining:]
         command.pop('reroute',None);command.pop('wait',None)
         self.resume_command=command
+    def source_fault(self,reason):
+        """Recover an authorized task through real cancel, plan and arm receipts.
+
+        Manual/cancel invalidates the same mission epoch. Recovery changes the
+        navigation goal generation, never the sensor/source timestamps.
+        """
+        with self.engine.lock:
+            if self.source_recovery_active and self.engine.phase=='rerouting':return True
+            if self.engine.phase=='navigating':
+                end=self.engine.batch_end if self.engine.batch_end is not None else self.engine.index
+                command=copy.deepcopy(self.active_command)if self.active_command else dict(epoch=self.engine.epoch,point=self.engine.steps[end]['point'],points=[x['point']for x in self.engine.steps[self.engine.index:end+1]],end_index=end)
+                feedback=getattr(self.node,'feedback',{})
+                remaining=feedback.get('poses_remaining')if feedback.get('generation')==self.engine.goal_generation else None
+                if type(remaining)is int and 0<=remaining<=len(command['points']):
+                    remaining=max(1,remaining)
+                    passed=command['points'][:-remaining]
+                    for p in passed:self.engine.event('transit_segment_completed',point=p['id'],receipt='native_poses_remaining_before_source_recovery')
+                    command['points']=command['points'][-remaining:]
+            elif self.engine.phase not in BUSY and self.node.session.phase in ('starting','executing','replanning'):
+                # Legacy single-point navigation was already explicitly started.
+                # Adopt that exact target in RAM; do not save a new catalog route.
+                doc=copy.deepcopy(self.catalog.read(self.map_id()));g=self.node.session.goal
+                if not g:return False
+                point=dict(id='source_recovery',name='继续原目的地',x=g['x'],y=g['y'],yaw=None if getattr(self.node,'goal_heading_mode','pose')=='position'else g['yaw'],kind='visit',product_id='',script='',dwell=0.,guest_wait=False)
+                via=[];raw=getattr(self.node,'goal_route',[])
+                if raw:
+                    remaining=getattr(self.node,'feedback',{}).get('poses_remaining')
+                    if type(remaining)is int and 0<=remaining<=len(raw):raw=raw[-max(1,remaining):]
+                    via=[dict(point,id='source_via_'+str(i),name='原路线途经点',x=q.pose.position.x,y=q.pose.position.y,yaw=None,kind='transit')for i,q in enumerate(raw[:-1])]
+                doc['edges']=[]
+                doc['points']=via+[point];doc['routes']=[dict(id='source_recovery',name='原导航观测恢复',mode='showcase',loops=1,description='',steps=[dict(point_id=q['id'],speak=False)for q in doc['points']])]
+                doc['policy']['max_wait']=self.node.session.replan_timeout
+                epoch=self.engine.start(doc,'source_recovery',time.monotonic());self.engine.dispatched(epoch,self.node.session.generation,len(via))
+                command=dict(epoch=epoch,point=point,points=doc['points'],end_index=len(via))
+                self.engine.event('adopted_authorized_goal',generation=self.node.session.generation)
+            else:return False
+            self.engine.begin_reroute(reason)
+            command.update(epoch=self.engine.epoch,reroute=True,source_recovery=True,reason=reason,
+                           source_deadline=time.monotonic()+self.node.session.replan_timeout)
+            self.pending_source_command=command;self.source_recovery_active=True
+            self.engine.event('source_recovery_wait',generation=self.node.session.generation,reason=reason)
+            return True
     def dispatch(self, command):
         epoch = command['epoch']
         if self.resume_command and not command.get('reroute'):
             command=dict(self.resume_command,epoch=epoch);self.resume_command=None
-        p = command['point']
+        p = command['point'];starting_generation=None
         try:
             if not self.engine.valid(epoch): return
             if command.get('reroute'):
                 if not self.node.cancel_reception_leg(epoch):return
                 if command.get('wait'):
                     self.engine.wait_route(epoch,time.monotonic(),command['reason']);return
+            if command.get('source_recovery'):
+                if time.monotonic()>=command['source_deadline']:raise ValueError('观测未在本次等待时间内恢复，已结束任务')
+                while not self.node.health_ready() or not self.node.execution_ready():
+                    if not self.engine.valid(epoch):return
+                    state=self.session_snapshot()
+                    if not state['navigation_permitted']:return
+                    if time.monotonic()>=command['source_deadline']:raise ValueError('观测未在本次等待时间内恢复，已结束任务')
+                    time.sleep(.05)
             points=command.get('points',[p])
             read_pose=getattr(self.node,'reception_pose',None)
             poses=route_poses(points,read_pose() if callable(read_pose) else None)
-            data=dict(poses[-1],heading_mode='position' if p['yaw'] is None else 'pose')
+            data=dict(poses[-1],_mission_epoch=epoch,heading_mode='position' if p['yaw'] is None else 'pose')
             if len(points)>1:
                 data['_route_goals']=poses
+            starting_generation=self.node.session.generation if command.get('source_recovery')else None
             result = self.node.set_goal(data)
             # Allow the existing observations/lifecycle to finish initializing.
             # Do not change freshness requirements or resume after takeover.
@@ -321,8 +374,19 @@ class MissionService:
             if not self.engine.valid(epoch): return
             self.node.confirm_goal({'generation': result['generation'], '_mission_epoch': epoch})
             if self.engine.dispatched(epoch, result['generation'],command.get('end_index'),[q['id']for q in points[:-1]]):
+                self.source_recovery_active=False
+                if command.get('source_recovery'):self.engine.event('source_recovery_resumed',generation=result['generation'])
                 self.active_command=copy.deepcopy(command)
-        except Exception as error: self.engine.failed(epoch, error)
+                self.active_command.pop('source_recovery',None);self.active_command.pop('source_deadline',None)
+        except Exception as error:
+            if not self.engine.valid(epoch):return
+            if (command.get('source_recovery') and self.engine.valid(epoch) and
+                    time.monotonic()<command['source_deadline'] and
+                    (not self.node.health_ready() or starting_generation is not None and self.node.session.generation>starting_generation and getattr(self.node,'source_revoked_generation',None)==self.node.session.generation)):
+                self.pending_source_command=command
+                self.engine.event('source_recovery_retry',reason=str(error))
+            else:
+                self.source_recovery_active=False;self.engine.failed(epoch,error)
     def update_live_route(self):
         snapshot=self.engine.status()
         if snapshot['route_mode']!='adaptive' or snapshot['phase']not in ('navigating','waiting_route') or not self.active_command:return
@@ -362,7 +426,10 @@ class MissionService:
                 if snapshot['phase'] in BUSY and current['phase'] in ('manual', 'paused'):
                     # E pause and manual takeover end physical navigation too;
                     # a task banner alone is not a stop receipt.
+                    self.source_recovery_active=False;self.pending_source_command=None
                     self.node.stop()
+                if (self.future is None or self.future.done()) and getattr(self,'pending_source_command',None) is not None:
+                    command=self.pending_source_command;self.pending_source_command=None
                 if command and (self.future is None or self.future.done()): self.future = self.executor.submit(self.dispatch, command)
                 self.update_live_route()
             except Exception as error: self.engine.failed(self.engine.epoch, error)
