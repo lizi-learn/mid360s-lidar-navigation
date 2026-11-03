@@ -46,3 +46,29 @@ binaries caused a reproducible double destruction during teardown, diagnosed
 with AddressSanitizer. Normal process teardown is exercised by the fixture.
 
 The optional closed-loop map replay uses the actual planner, controller and goal checker with a planar lag/gain response. Replanning pauses simulated time; it does not establish real-time or biped stability. A frozen reverse-start return still fails after replan and is retained as a failure. A trial preferring retained paths was rejected after a replay body intrusion; it is not part of this controller.
+
+
+The retained-route rejoin now searches and constructs the same 2 m connection
+(`route_rejoin_distance`), beyond the normal 1.2–1.6 m pursuit preview. The old
+65 cm rejoin generated a short inward leg and an immediate opposite bend after
+small tracking offsets. Each new connection and the complete remaining suffix
+still get the original filled/swept-body check. A blocked or unknown suffix is
+rejected; this changes connection geometry, not occupied cells or the footprint.
+`check_rejoin.py` verifies the generated offset/rejoin and blocked-tail cases.
+
+The controller additionally checks the continuing measured-yaw arc when its
+requested yaw has changed. Forward projection uses at least the already
+requested forward value, since the body can still be accelerating through an
+earlier queued command. If this arc intersects the current map, forward input
+becomes zero while the corrective yaw and current navigation action remain
+active. Clear-space forward corrections are unchanged. This uses the existing
+projection horizon and policy-input convention, not a newly calibrated P2
+physical-speed or stopping model.
+
+`check_turn_response.py` reproduces a wall intersection with the prior RPP in a
+generated delayed-response case, then requires actual goal completion and zero
+filled-body intersections with the new controller. The replay now lets queued
+plant responses drain after zero input instead of erasing them. Eight ordinary
+straight/curve/corner/observed-obstacle cases remain regression checks. Optional
+fixed-reference and measured/native initial-state inputs isolate failures in
+local private replay; they do not change production source timestamps.

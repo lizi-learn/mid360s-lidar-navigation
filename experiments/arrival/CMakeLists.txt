@@ -15,7 +15,7 @@ target_include_directories(pivot_model PRIVATE ../../navigation ../../navigation
 
 add_executable(tracking_replay tracking_replay.cpp)
 target_compile_features(tracking_replay PUBLIC cxx_std_17)
-target_include_directories(tracking_replay PRIVATE ../../navigation)
+target_include_directories(tracking_replay PRIVATE ../../navigation ../../navigation/p2_nav_controller/include)
 ament_target_dependencies(tracking_replay nav2_core nav2_costmap_2d pluginlib)
 
 add_executable(native_pivot native_pivot.cpp)
@@ -36,3 +36,8 @@ add_executable(filled_footprint filled_footprint.cpp)
 target_compile_features(filled_footprint PUBLIC cxx_std_17)
 target_include_directories(filled_footprint PRIVATE ../../navigation/p2_nav_controller/include)
 ament_target_dependencies(filled_footprint nav2_costmap_2d)
+
+add_executable(route_rejoin_replay route_rejoin_replay.cpp)
+target_compile_features(route_rejoin_replay PUBLIC cxx_std_17)
+target_include_directories(route_rejoin_replay PRIVATE ../../navigation/p2_nav_controller/include)
+ament_target_dependencies(route_rejoin_replay nav2_costmap_2d)

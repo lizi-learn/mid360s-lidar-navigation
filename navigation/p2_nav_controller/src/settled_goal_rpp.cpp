@@ -158,6 +158,7 @@ class SettledGoalRPP : public nav2_regulated_pure_pursuit_controller::RegulatedP
           if(use_collision_detection_&&isCollisionImminent(pose,out.twist.linear.x,bounded,distance))
             throw nav2_core::PlannerException("Forward tracking arc collision ahead");}
         out.twist.angular.z=bounded;
+        follow_measured_turn(pose,speed,distance,out);
         if(std::abs(bounded)>.35)RCLCPP_INFO_THROTTLE(costmap_ros_->get_logger(),*clock_,500,
           "Pursuit evidence: source=%ld preview=%.3f attempt=%zu x=%.3f y=%.3f yaw=%.3f measured_yaw=%.3f forward=%.3f turn=%.3f",
           static_cast<long>(plan_source_ns_),i?previews[i]:preview,i,pose.pose.position.x,pose.pose.position.y,tf2::getYaw(pose.pose.orientation),speed.angular.z,out.twist.linear.x,bounded);
@@ -190,10 +191,34 @@ class SettledGoalRPP : public nav2_regulated_pure_pursuit_controller::RegulatedP
         RCLCPP_INFO_THROTTLE(costmap_ros_->get_logger(),*clock_,500,
           "Velocity window evidence: source=%ld angle=%.3f forward=%.3f turn=%.3f measured_yaw=%.3f",
           static_cast<long>(plan_source_ns_),angle,best_v,best_w,speed.angular.z);
-        geometry_msgs::msg::TwistStamped out;out.header=pose.header;out.twist.linear.x=best_v;out.twist.angular.z=best_w;return out;}
+        geometry_msgs::msg::TwistStamped out;out.header=pose.header;out.twist.linear.x=best_v;out.twist.angular.z=best_w;
+        follow_measured_turn(pose,speed,distance,out,false);return out;}
     }
 
     throw nav2_core::PlannerException(last);
+  }
+  void follow_measured_turn(const geometry_msgs::msg::PoseStamped &pose,
+      const geometry_msgs::msg::Twist &speed,double distance,geometry_msgs::msg::TwistStamped &out,
+      bool acquire_map=true) {
+    // A changed yaw request does not instantly change the native input ramp
+    // or body motion. Check the continuing MEASURED yaw as well as the
+    // requested arc. Only withdraw translation when that ongoing arc intersects
+    // the map; retain the corrective yaw and active task, without a plan retry.
+    // Keep the already-requested forward projection: a low measured speed can
+    // precede an acceleration that is still queued downstream. This uses the
+    // existing controller projection, not a calibrated physical-speed model.
+    // In open space the ordinary continuous forward correction is unchanged.
+    if(!use_collision_detection_||out.twist.linear.x<=0.||speed.linear.x<=.03||
+        std::abs(speed.angular.z-out.twist.angular.z)<=.06)return;
+    auto *map=costmap_ros_->getCostmap();
+    std::unique_lock<nav2_costmap_2d::Costmap2D::mutex_t> map_lock(*map->getMutex(),std::defer_lock);
+    if(acquire_map)map_lock.lock();
+    if(isCollisionImminent(pose,std::max(speed.linear.x,out.twist.linear.x),speed.angular.z,distance)) {
+      RCLCPP_INFO_THROTTLE(costmap_ros_->get_logger(),*clock_,1000,
+        "Ongoing turn intersects map: measured_x=%.3f measured_yaw=%.3f corrective_yaw=%.3f; translation zero while correction remains active",
+        speed.linear.x,speed.angular.z,out.twist.angular.z);
+      out.twist.linear.x=0.;
+    }
   }
   bool reference_pivot_=false;geometry_msgs::msg::PoseStamped reference_target_;
   int64_t plan_source_ns_=0;

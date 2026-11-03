@@ -12,9 +12,11 @@
 #include "nav2_util/geometry_utils.hpp"
 #include "p2_nav_controller/terminal_path.hpp"
 #include "p2_nav_controller/position_guide.hpp"
+#include "p2_nav_controller/route_rejoin.hpp"
 namespace p2_nav_controller {
 class PositionOnlyLattice : public nav2_smac_planner::SmacPlannerLattice {
   std::vector<unsigned> occupied_;
+  double route_rejoin_distance_=2.;
   std::mutex stable_mutex_;
   nav_msgs::msg::Path stable_path_;
   geometry_msgs::msg::PoseStamped stable_goal_;
@@ -152,6 +154,13 @@ class PositionOnlyLattice : public nav2_smac_planner::SmacPlannerLattice {
     for(const auto &p:samples){geometry_msgs::msg::PoseStamped pose;pose.header=header;pose.pose.position.x=p[0];pose.pose.position.y=p[1];pose.pose.orientation=nav2_util::geometry_utils::orientationAroundZAxis(p[2]);out.poses.push_back(pose);}return completed(std::move(out));
   }
  public:
+  void configure(const rclcpp_lifecycle::LifecycleNode::WeakPtr &parent,std::string name,
+      std::shared_ptr<tf2_ros::Buffer> tf,std::shared_ptr<nav2_costmap_2d::Costmap2DROS> cm) override {
+    SmacPlannerLattice::configure(parent,name,tf,cm);auto node=parent.lock();
+    nav2_util::declare_parameter_if_not_declared(node,name+".route_rejoin_distance",rclcpp::ParameterValue(2.));
+    node->get_parameter(name+".route_rejoin_distance",route_rejoin_distance_);
+    if(!std::isfinite(route_rejoin_distance_)||route_rejoin_distance_<=0.)throw nav2_core::PlannerException("Invalid route rejoin distance");
+  }
   void cleanup() override {
     std::lock_guard<std::mutex> stable_lock(stable_mutex_);
     route_memory_.clear();reference_memory_.clear();stable_path_={};stable_goal_={};
@@ -317,33 +326,21 @@ class PositionOnlyLattice : public nav2_smac_planner::SmacPlannerLattice {
       // never reuse occupied/unknown cells or a stale source timestamp.
       if(!stable_path_.poses.empty()&&stable_goal_.header.frame_id==goal.header.frame_id&&
           std::hypot(stable_goal_.pose.position.x-gx,stable_goal_.pose.position.y-gy)<1e-6) {
-        size_t nearest=0;double best=1e30;
-        for(size_t i=0;i<stable_path_.poses.size();++i){const auto &p=stable_path_.poses[i].pose;
-          double d=std::hypot(p.position.x-x,p.position.y-y);
-          if(d<best){best=d;nearest=i;}}
-        if(best<.5) {
-          // A bounded forward rejoin permits small tracking errors without
-          // sending the robot back to a passed waypoint.
-          size_t end=nearest;
-          while(end+1<stable_path_.poses.size()&&std::hypot(stable_path_.poses[end+1].pose.position.x-x,stable_path_.poses[end+1].pose.position.y-y)<.65)++end;
-          const auto rejoin_deadline=std::chrono::steady_clock::now()+std::chrono::milliseconds(100);
-          for(size_t n=end+1;n>nearest;--n) {
-            if(std::chrono::steady_clock::now()>rejoin_deadline)break;
-            const size_t i=n-1;const auto &p=stable_path_.poses[i].pose;
-            auto joined=terminal_path({x,y,yaw},{p.position.x,p.position.y,tf2::getYaw(p.orientation)},1.);
-            if(joined.empty())continue;
-            for(size_t j=i+1;j<stable_path_.poses.size();++j){const auto &q=stable_path_.poses[j].pose;joined.push_back({q.position.x,q.position.y,tf2::getYaw(q.orientation)});}
-            // The4cm clearance is a preference, not an extra robot footprint.
-            // Reuse still checks the entire original filled/swept body, including
-            // unknown cells. This matches fresh-route acceptance on the same map.
-            const bool preferred=swept_clear(joined,.04);
-            if(preferred||swept_clear(joined,0.)) {
-              if(!preferred)RCLCPP_INFO(_logger,"Reusing complete route with original footprint; preferred margin unavailable");
-              return remember(message(joined,goal.header),goal);
-            }
-          }
-        }
+        std::vector<std::array<double,3>> stored;
+        for(const auto &p:stable_path_.poses)stored.push_back({p.pose.position.x,p.pose.position.y,tf2::getYaw(p.pose.orientation)});
+        const auto rejoin_deadline=std::min(deadline,std::chrono::steady_clock::now()+std::chrono::milliseconds(100));
+        auto joined=route_rejoin({x,y,yaw},stored,route_rejoin_distance_,[&](const auto &samples){
+          // Four centimetres remains a preference; the original complete body
+          // and unknown-cell checks are identical to fresh route acceptance.
+          const bool preferred=swept_clear(samples,.04);
+          if(preferred)return true;
+          if(!swept_clear(samples,0.))return false;
+          RCLCPP_INFO(_logger,"Reusing complete route with original footprint; preferred margin unavailable");
+          return true;
+        },rejoin_deadline);
+        if(!joined.empty())return remember(message(joined,goal.header),goal);
       }
+
       // Point targets need no terminal heading. Checked pivot/straight
       // visibility connections also avoid a car-like turnaround search. Joints
       // are places where the unchanged body can pivot; narrow straight gaps
