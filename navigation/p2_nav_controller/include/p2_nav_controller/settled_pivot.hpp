@@ -13,6 +13,13 @@ class SettledPivot {
  public:
   void reset(){*this=SettledPivot();}
   bool pending()const{return active_||coasting_;}
+  // A tracking correction can become clear before its bounded pulse ends.
+  // Withdraw the request, then observe the same measured coast-down before
+  // releasing translation. Do not erase the response still queued downstream.
+  void settle(double now) {
+    if(!std::isfinite(now))throw std::invalid_argument("Invalid pivot stop time");
+    if(active_){active_=false;coasting_=true;end_=now;quiet_=0.;}
+  }
   double step(double error,double yaw,double rate,double now,double tolerance=.15) {
     if(!std::isfinite(error)||!std::isfinite(yaw)||!std::isfinite(rate)||!std::isfinite(now)||!std::isfinite(tolerance)||tolerance<=0.)
       throw std::invalid_argument("Invalid measured pivot state");

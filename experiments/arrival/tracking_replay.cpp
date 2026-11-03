@@ -55,6 +55,8 @@ bool cell_overlap(double x,double y,double yaw,double cx,double cy,double h){
 int main(int argc,char **argv){
  if(argc<5){std::cerr<<"usage: fixture output-prefix path-kind gain delay [--ros-args ...]\n";return 2;}
  const std::string prefix=argv[1],kind=argv[2];const double gain=std::stod(argv[3]),delay=std::stod(argv[4]);
+ const double yaw_deadzone=std::getenv("P2_TEST_YAW_DEADZONE")?std::stod(std::getenv("P2_TEST_YAW_DEADZONE")):0.;
+ if(!std::isfinite(yaw_deadzone)||yaw_deadzone<0.||yaw_deadzone>=1.)throw std::runtime_error("Invalid synthetic yaw deadzone");
  rclcpp::init(argc,argv);
  int result=0;
  try{
@@ -124,7 +126,8 @@ int main(int argc,char **argv){
   // Already queued physical response drains after a stop. Erasing it hid the
   // overshoot being measured by this delayed-plant regression.
   latency.push_back({input.policy_x,input.policy_yaw});auto applied=latency.front();latency.pop_front();
-  v+=(.95*applied[0]-v)*(1-std::exp(-dt/.2));w+=(gain*applied[1]-w)*(1-std::exp(-dt/.15));
+  const double response_yaw=std::abs(applied[1])<yaw_deadzone?0.:gain*applied[1];
+  v+=(.95*applied[0]-v)*(1-std::exp(-dt/.2));w+=(response_yaw-w)*(1-std::exp(-dt/.15));
   const double old_x=x,old_y=y,old_yaw=yaw;
   x+=v*dt*std::cos(yaw+w*dt/2);y+=v*dt*std::sin(yaw+w*dt/2);yaw=wrap(yaw+w*dt);
   double best=1e30;size_t nearest=0;for(size_t j=0;j+1<points.size();++j){auto a=points[j],b=points[j+1];double dx=b.x-a.x,dy=b.y-a.y;if(dx*dx+dy*dy<1e-15)continue;double f=std::clamp(((x-a.x)*dx+(y-a.y)*dy)/(dx*dx+dy*dy),0.,1.);double dist=std::hypot(x-a.x-f*dx,y-a.y-f*dy);if(dist<best){best=dist;nearest=j;}}
@@ -141,7 +144,7 @@ int main(int argc,char **argv){
   if(intrusion)break;
  }
  double error=std::hypot(x-points.back().x,y-points.back().y),yaw_error=std::abs(wrap(yaw-tf2::getYaw(path.poses.back().pose.orientation)));
- std::ofstream out(prefix+".json");out<<std::boolalpha<<"{\"actual_plugin\":\"p2_nav_controller::SettledGoalRPP\",\"scope\":\"Synthetic planar lag/gain model, no biped dynamics or hardware\",\"seed\":0,\"kind\":\""<<kind<<"\",\"gain\":"<<gain<<",\"delay_s\":"<<delay<<",\"dt_s\":"<<dt<<",\"duration_s\":"<<time<<",\"goal_reached\":"<<reached<<",\"goal_error_m\":"<<error<<",\"goal_yaw_error_rad\":"<<yaw_error<<",\"cross_track_rms_m\":"<<std::sqrt(rms/std::max(1,counted))<<",\"cross_track_max_m\":"<<max_error<<",\"yaw_reversals\":"<<reversals<<",\"body_intrusions\":"<<collisions<<",\"controller_collision_stops\":"<<stops<<",\"obstacle_injected\":"<<triggered<<",\"obstacle_verified_in_costmap\":"<<verified_obstacle<<",\"obstacle_cleared_after_two_seconds\":"<<cleared<<",\"progress_x\":"<<progress<<"}\n";
+ std::ofstream out(prefix+".json");out<<std::boolalpha<<"{\"actual_plugin\":\"p2_nav_controller::SettledGoalRPP\",\"scope\":\"Synthetic planar lag/gain model, no biped dynamics or hardware\",\"seed\":0,\"kind\":\""<<kind<<"\",\"gain\":"<<gain<<",\"delay_s\":"<<delay<<",\"yaw_deadzone\":"<<yaw_deadzone<<",\"dt_s\":"<<dt<<",\"duration_s\":"<<time<<",\"goal_reached\":"<<reached<<",\"goal_error_m\":"<<error<<",\"goal_yaw_error_rad\":"<<yaw_error<<",\"cross_track_rms_m\":"<<std::sqrt(rms/std::max(1,counted))<<",\"cross_track_max_m\":"<<max_error<<",\"yaw_reversals\":"<<reversals<<",\"body_intrusions\":"<<collisions<<",\"controller_collision_stops\":"<<stops<<",\"obstacle_injected\":"<<triggered<<",\"obstacle_verified_in_costmap\":"<<verified_obstacle<<",\"obstacle_cleared_after_two_seconds\":"<<cleared<<",\"progress_x\":"<<progress<<"}\n";
  std::cout<<kind<<" reached="<<reached<<" error="<<error<<" intrusions="<<collisions<<" reversals="<<reversals<<'\n';
  std::cout<<"replans="<<replans<<" failed="<<planning_failures<<"\n";planner->deactivate();planner->cleanup();planner.reset();
  control->deactivate();control->cleanup();control.reset();actual_progress.reset();checker.reset();cm->on_cleanup(rclcpp_lifecycle::State());cm.reset();parent.reset();

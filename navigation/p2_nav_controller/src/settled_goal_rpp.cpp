@@ -47,7 +47,7 @@ class SettledGoalRPP : public nav2_regulated_pure_pursuit_controller::RegulatedP
     if (!std::isfinite(norm) || norm<.8 || norm>1.2) { reference_pivot_=false; phase_.reset(); settled_pivot_.reset(); throw nav2_core::PlannerException("Invalid terminal quaternion"); }
     if(!have_goal_||goal.header.frame_id!=goal_.header.frame_id||
       std::hypot(goal.pose.position.x-goal_.pose.position.x,goal.pose.position.y-goal_.pose.position.y)>1e-4||
-      (!position_only_goal_&&std::abs(std::remainder(tf2::getYaw(q)-tf2::getYaw(goal_.pose.orientation),2*std::acos(-1.)))>1e-4)){reference_pivot_=false;response_braking_=false;breakaway_.reset();settled_pivot_.reset();}
+      (!position_only_goal_&&std::abs(std::remainder(tf2::getYaw(q)-tf2::getYaw(goal_.pose.orientation),2*std::acos(-1.)))>1e-4)){reference_pivot_=false;response_braking_=false;response_pivot_.reset();breakaway_.reset();settled_pivot_.reset();}
     have_goal_=true;
     phase_.set_goal(goal.pose.position.x,goal.pose.position.y,tf2::getYaw(q),goal.header.frame_id);
     // Pure-pursuit skips repeated-XY poses and can therefore drive forward
@@ -61,8 +61,8 @@ class SettledGoalRPP : public nav2_regulated_pure_pursuit_controller::RegulatedP
     else reference_pivot_=false;
     goal_=goal; plan_source_ns_=rclcpp::Time(path.header.stamp).nanoseconds(); Base::setPlan(path);
   }
-  void activate() override { response_braking_=false; reference_pivot_=false; phase_.reset(); breakaway_.reset(); settled_pivot_.reset(); Base::activate(); }
-  void deactivate() override { response_braking_=false; reference_pivot_=false; phase_.reset(); breakaway_.reset(); settled_pivot_.reset(); Base::deactivate(); }
+  void activate() override { response_braking_=false; response_pivot_.reset(); reference_pivot_=false; phase_.reset(); breakaway_.reset(); settled_pivot_.reset(); Base::activate(); }
+  void deactivate() override { response_braking_=false; response_pivot_.reset(); reference_pivot_=false; phase_.reset(); breakaway_.reset(); settled_pivot_.reset(); Base::deactivate(); }
   geometry_msgs::msg::TwistStamped computeVelocityCommands(
       const geometry_msgs::msg::PoseStamped &pose,const geometry_msgs::msg::Twist &speed,
       nav2_core::GoalChecker *checker) override {
@@ -276,7 +276,7 @@ class SettledGoalRPP : public nav2_regulated_pure_pursuit_controller::RegulatedP
     // existing controller projection, not a calibrated physical-speed model.
     // In open space the ordinary continuous forward correction is unchanged.
     if(!use_collision_detection_||out.twist.linear.x<=0.)return;
-    if(!response_braking_&&std::abs(speed.angular.z-out.twist.angular.z)<=.06)return;
+    if(!response_braking_&&!response_pivot_.pending()&&std::abs(speed.angular.z-out.twist.angular.z)<=.06)return;
     auto *map=costmap_ros_->getCostmap();
     std::unique_lock<nav2_costmap_2d::Costmap2D::mutex_t> map_lock(*map->getMutex(),std::defer_lock);
     if(acquire_map)map_lock.lock();
@@ -286,20 +286,44 @@ class SettledGoalRPP : public nav2_regulated_pure_pursuit_controller::RegulatedP
     // dipped near zero alternated forward/pivot on every acceleration and kept
     // resetting the downstream turn ramp. The normal handoff settles yaw before
     // resuming forward, so that zero-yaw continuation must also fit at release.
-    const bool settling_arc_blocked=response_braking_&&body_arc_collision(pose,forward,0.,distance);
+    const bool settling_arc_blocked=(response_braking_||response_pivot_.pending())&&body_arc_collision(pose,forward,0.,distance);
     response_braking_=continuing_arc_blocked||settling_arc_blocked;
     if(response_braking_) {
       RCLCPP_INFO_THROTTLE(costmap_ros_->get_logger(),*clock_,1000,
         "Ongoing turn intersects map: measured_x=%.3f measured_yaw=%.3f corrective_yaw=%.3f; translation zero while correction remains active",
         speed.linear.x,speed.angular.z,out.twist.angular.z);
       out.twist.linear.x=0.;
+      if(settled_pivot_response_) {
+        auto reference=transformGlobalPlan(pose);
+        auto carrot=getLookAheadPoint(min_lookahead_dist_,reference);
+        const double angle=std::atan2(carrot.pose.position.y,carrot.pose.position.x);
+        // This pivot is created AFTER the ordinary RPP/pivot handling. Keep a
+        // separate response phase so a forward RPP proposal cannot reset it on
+        // every tick. Small raw steering values may not start the D policy.
+        const double turn=response_pivot_.step(angle,tf2::getYaw(pose.pose.orientation),
+          speed.angular.z,clock_->now().seconds(),.03);
+        if(pivot_collision(pose,turn,angle,speed.angular.z,distance)) {
+          response_pivot_.reset();throw nav2_core::PlannerException("Measured-turn correction pivot collision ahead");
+        }
+        if(turn==0.&&!response_pivot_.pending())
+          throw nav2_core::PlannerException("Aligned reference has no forward collision-free arc");
+        out.twist.angular.z=turn;
+        RCLCPP_INFO_THROTTLE(costmap_ros_->get_logger(),*clock_,1000,
+          "Measured-turn pivot response: error=%.3f requested=%.3f measured=%.3f pending=%d",
+          angle,turn,speed.angular.z,response_pivot_.pending());
+      }
+    }else if(response_pivot_.pending()) {
+      const double now=clock_->now().seconds();response_pivot_.settle(now);
+      out.twist.angular.z=response_pivot_.step(0.,tf2::getYaw(pose.pose.orientation),speed.angular.z,now,.03);
+      if(response_pivot_.pending())out.twist.linear.x=0.;
+      else response_pivot_.reset();
     }
   }
   bool response_braking_=false;
   bool reference_pivot_=false;geometry_msgs::msg::PoseStamped reference_target_;
   int64_t plan_source_ns_=0;
   std::mutex phase_mutex_; TerminalHeading phase_; geometry_msgs::msg::PoseStamped goal_;
-  SettledPivot settled_pivot_;bool settled_pivot_response_=false,position_only_goal_=false;
+  SettledPivot settled_pivot_,response_pivot_;bool settled_pivot_response_=false,position_only_goal_=false;
   PivotBreakaway breakaway_;double curved_forward_input_=0.,minimum_pivot_=0.,collision_lookahead_floor_=0.;bool have_goal_=false,corner_preview_=false;
 };
 }
