@@ -72,3 +72,10 @@ plant responses drain after zero input instead of erasing them. Eight ordinary
 straight/curve/corner/observed-obstacle cases remain regression checks. Optional
 fixed-reference and measured/native initial-state inputs isolate failures in
 local private replay; they do not change production source timestamps.
+
+The response correction remains latched through low measured translation. It
+releases after both the continuing measured-yaw projection and the zero-yaw
+continuation used by the normal forward handoff are clear. This prevents a
+low-speed threshold from alternating forward/pivot and repeatedly resetting the
+turn ramp. The full Console reception obstacle scenario exercises that handoff;
+the initial unlatched candidate failed this scenario and was not deployed.

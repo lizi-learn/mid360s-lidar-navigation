@@ -45,7 +45,7 @@ class SettledGoalRPP : public nav2_regulated_pure_pursuit_controller::RegulatedP
     if (!std::isfinite(norm) || norm<.8 || norm>1.2) { reference_pivot_=false; phase_.reset(); settled_pivot_.reset(); throw nav2_core::PlannerException("Invalid terminal quaternion"); }
     if(!have_goal_||goal.header.frame_id!=goal_.header.frame_id||
       std::hypot(goal.pose.position.x-goal_.pose.position.x,goal.pose.position.y-goal_.pose.position.y)>1e-4||
-      (!position_only_goal_&&std::abs(std::remainder(tf2::getYaw(q)-tf2::getYaw(goal_.pose.orientation),2*std::acos(-1.)))>1e-4)){reference_pivot_=false;breakaway_.reset();settled_pivot_.reset();}
+      (!position_only_goal_&&std::abs(std::remainder(tf2::getYaw(q)-tf2::getYaw(goal_.pose.orientation),2*std::acos(-1.)))>1e-4)){reference_pivot_=false;response_braking_=false;breakaway_.reset();settled_pivot_.reset();}
     have_goal_=true;
     phase_.set_goal(goal.pose.position.x,goal.pose.position.y,tf2::getYaw(q),goal.header.frame_id);
     // Pure-pursuit skips repeated-XY poses and can therefore drive forward
@@ -59,8 +59,8 @@ class SettledGoalRPP : public nav2_regulated_pure_pursuit_controller::RegulatedP
     else if(pivot_end==0)reference_pivot_=false;
     goal_=goal; plan_source_ns_=rclcpp::Time(path.header.stamp).nanoseconds(); Base::setPlan(path);
   }
-  void activate() override { reference_pivot_=false; phase_.reset(); breakaway_.reset(); settled_pivot_.reset(); Base::activate(); }
-  void deactivate() override { reference_pivot_=false; phase_.reset(); breakaway_.reset(); settled_pivot_.reset(); Base::deactivate(); }
+  void activate() override { response_braking_=false; reference_pivot_=false; phase_.reset(); breakaway_.reset(); settled_pivot_.reset(); Base::activate(); }
+  void deactivate() override { response_braking_=false; reference_pivot_=false; phase_.reset(); breakaway_.reset(); settled_pivot_.reset(); Base::deactivate(); }
   geometry_msgs::msg::TwistStamped computeVelocityCommands(
       const geometry_msgs::msg::PoseStamped &pose,const geometry_msgs::msg::Twist &speed,
       nav2_core::GoalChecker *checker) override {
@@ -208,18 +208,27 @@ class SettledGoalRPP : public nav2_regulated_pure_pursuit_controller::RegulatedP
     // precede an acceleration that is still queued downstream. This uses the
     // existing controller projection, not a calibrated physical-speed model.
     // In open space the ordinary continuous forward correction is unchanged.
-    if(!use_collision_detection_||out.twist.linear.x<=0.||speed.linear.x<=.03||
-        std::abs(speed.angular.z-out.twist.angular.z)<=.06)return;
+    if(!use_collision_detection_||out.twist.linear.x<=0.)return;
+    if(!response_braking_&&std::abs(speed.angular.z-out.twist.angular.z)<=.06)return;
     auto *map=costmap_ros_->getCostmap();
     std::unique_lock<nav2_costmap_2d::Costmap2D::mutex_t> map_lock(*map->getMutex(),std::defer_lock);
     if(acquire_map)map_lock.lock();
-    if(isCollisionImminent(pose,std::max(speed.linear.x,out.twist.linear.x),speed.angular.z,distance)) {
+    const double forward=std::max(speed.linear.x,out.twist.linear.x);
+    const bool continuing_arc_blocked=isCollisionImminent(pose,forward,speed.angular.z,distance);
+    // Keep one correction phase. Releasing merely because measured translation
+    // dipped near zero alternated forward/pivot on every acceleration and kept
+    // resetting the downstream turn ramp. The normal handoff settles yaw before
+    // resuming forward, so that zero-yaw continuation must also fit at release.
+    const bool settling_arc_blocked=response_braking_&&isCollisionImminent(pose,forward,0.,distance);
+    response_braking_=continuing_arc_blocked||settling_arc_blocked;
+    if(response_braking_) {
       RCLCPP_INFO_THROTTLE(costmap_ros_->get_logger(),*clock_,1000,
         "Ongoing turn intersects map: measured_x=%.3f measured_yaw=%.3f corrective_yaw=%.3f; translation zero while correction remains active",
         speed.linear.x,speed.angular.z,out.twist.angular.z);
       out.twist.linear.x=0.;
     }
   }
+  bool response_braking_=false;
   bool reference_pivot_=false;geometry_msgs::msg::PoseStamped reference_target_;
   int64_t plan_source_ns_=0;
   std::mutex phase_mutex_; TerminalHeading phase_; geometry_msgs::msg::PoseStamped goal_;
