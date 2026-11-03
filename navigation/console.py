@@ -711,7 +711,10 @@ class Console(Node):
         try:result=self.wait_future(self.action_results[('plan',generation)],10)
         except TimeoutError:self.session.cancel();self.stop_actions();raise
         path=[[p.pose.position.x,p.pose.position.y] for p in result.result.path.poses] if result.status==4 else []
-        if not self.session.planned(generation,len(path),time.monotonic()):raise ValueError('路径未完成或已取消，请重新选择目标')
+        if not self.session.planned(generation,len(path),time.monotonic()):
+            with self.session.lock:
+                if self.session.generation==generation and self.session.phase=='blocked':raise ValueError(self.session.message)
+            raise ValueError('规划已取消或目标已更新，请重新选择目标')
         self.path=path;self.goal=[data['x'],data['y']];self.last_action='路径已预览；确认开始前不会行走'
         return {'planned':True,'generation':generation,'path_points':len(path),'hardware_execution_enabled':False}
     def confirm_goal(self,data):

@@ -351,7 +351,11 @@ class PositionOnlyLattice : public nav2_smac_planner::SmacPlannerLattice {
       // also prefer tracking room, otherwise it can undo the wider point guide
       // and graze the end of a virtual line after ordinary localization error.
       const auto visibility_deadline=std::min(deadline,std::chrono::steady_clock::now()+std::chrono::milliseconds(900));
-      for(double centre_clearance:{.64,.48,.40,.28,0.}) {
+      // Do not jump from a wide preference straight to a zero-clearance point
+      // guide. In ordinary corridors intermediate guides can fit even though
+      // the wider preferences are disconnected; the shortest point-only guide
+      // may instead enter a slit which no complete body path can follow.
+      for(double centre_clearance:{.64,.48,.40,.28,.20,.12,.06,0.}) {
         if(std::chrono::steady_clock::now()>visibility_deadline)break;
         auto candidate=position_guide(_costmap->getCharMap(),_costmap->getSizeInCellsX(),_costmap->getSizeInCellsY(),_costmap->getResolution(),_costmap->getOriginX(),_costmap->getOriginY(),{x,y},{gx,gy},centre_clearance);
         if(centre_clearance==0.)guide=candidate;
