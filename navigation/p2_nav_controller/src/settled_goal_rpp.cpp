@@ -98,7 +98,7 @@ class SettledGoalRPP : public nav2_regulated_pure_pursuit_controller::RegulatedP
     const double w=std::clamp(requested_w,-rotate_to_heading_angular_vel_,rotate_to_heading_angular_vel_);
     auto *costmap=costmap_ros_->getCostmap();
     std::unique_lock<nav2_costmap_2d::Costmap2D::mutex_t> map_lock(*(costmap->getMutex()));
-    if (use_collision_detection_ && isCollisionImminent(pose,v,w,distance))
+    if (use_collision_detection_ && (v==0.?pivot_collision(pose,w,pivot_error,speed.angular.z,distance):isCollisionImminent(pose,v,w,distance)))
       {settled_pivot_.reset();throw nav2_core::PlannerException("Terminal rotation collision ahead");}
     geometry_msgs::msg::TwistStamped out; out.header=pose.header; out.twist.linear.x=v; out.twist.angular.z=w; return out;
   }
@@ -113,7 +113,7 @@ class SettledGoalRPP : public nav2_regulated_pure_pursuit_controller::RegulatedP
       const double error=std::remainder(tf2::getYaw(target.pose.orientation)-tf2::getYaw(pose.pose.orientation),2.*std::acos(-1.));
       const double w=settled_pivot_.step(error,tf2::getYaw(pose.pose.orientation),speed.angular.z,clock_->now().seconds(),.15);
       {auto *map=costmap_ros_->getCostmap();std::unique_lock<nav2_costmap_2d::Costmap2D::mutex_t> map_lock(*map->getMutex());
-        if(use_collision_detection_&&isCollisionImminent(pose,0.,w,distance))throw nav2_core::PlannerException("Reference pivot collision ahead");}
+        if(use_collision_detection_&&pivot_collision(pose,w,error,speed.angular.z,distance))throw nav2_core::PlannerException("Reference pivot collision ahead");}
       if(std::abs(error)<.15&&!settled_pivot_.pending())reference_pivot_=false;
       geometry_msgs::msg::TwistStamped out;out.header=pose.header;out.twist.angular.z=w;return out;
     }
@@ -196,6 +196,20 @@ class SettledGoalRPP : public nav2_regulated_pure_pursuit_controller::RegulatedP
     }
 
     throw nav2_core::PlannerException(last);
+  }
+  bool pivot_collision(const geometry_msgs::msg::PoseStamped &pose,double requested,
+      double remaining_error,double measured,double distance) {
+    const double horizon=max_allowed_time_to_collision_up_to_carrot_;
+    struct Restore {double &value;double previous;~Restore(){value=previous;}} restore{max_allowed_time_to_collision_up_to_carrot_,horizon};
+    // The reference/final pivot ends at its target yaw. A constant command
+    // projected past that target can collide with a line corner even when the
+    // complete requested turn fits. Keep the measured ongoing rotation check
+    // over the original horizon; do not assume zero response or instant stop.
+    if(requested*remaining_error>0.&&std::abs(requested)>1e-6)
+      max_allowed_time_to_collision_up_to_carrot_=std::min(horizon,std::abs(remaining_error/requested));
+    if(isCollisionImminent(pose,0.,requested,distance))return true;
+    max_allowed_time_to_collision_up_to_carrot_=horizon;
+    return std::abs(measured)>1e-6&&isCollisionImminent(pose,0.,measured,distance);
   }
   void follow_measured_turn(const geometry_msgs::msg::PoseStamped &pose,
       const geometry_msgs::msg::Twist &speed,double distance,geometry_msgs::msg::TwistStamped &out,

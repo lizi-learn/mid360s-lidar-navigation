@@ -29,12 +29,12 @@ for candidate in [False,True]:
    (out/'progress.json').write_text(json.dumps(rows,indent=2))
  # Obstacle response and explicit deactivation are both measured at the actual
  # plugin. The synthetic transport queue drains; it is never erased magically.
- for kind in ['blocked','cancel']:
-  prefix=out/f'{int(candidate)}-{kind}';cmd=[args.binary,str(prefix),'1.2','1.1','.35','.8',kind,'--ros-args','--params-file',str(pf),'--log-level','error']
+ for kind in ['blocked','cancel','endpoint']:
+  prefix=out/f'{int(candidate)}-{kind}';model=['.8','.1','0.','.25']if kind=='endpoint'else['1.2','1.1','.35','.8'];cmd=[args.binary,str(prefix),*model,kind,'--ros-args','--params-file',str(pf),'--log-level','error']
   r=subprocess.run(cmd,capture_output=True,text=True,timeout=12);prefix.with_suffix('.log').write_text(r.stdout+r.stderr)
   row={'cohort':kind,'candidate':candidate,'kind':kind,'returncode':r.returncode}
   if r.returncode==0:
-   row.update(json.loads(prefix.with_suffix('.json').read_text()));row['passed']=row['body_intrusions']==0 and ((kind=='blocked'and row['obstacle_verified']and row['collision_stops']>0)or(kind=='cancel'and row['cancelled']and not row['post_cancel_nonzero']and abs(row['final_measured_rate'])<.03))
+   row.update(json.loads(prefix.with_suffix('.json').read_text()));row['passed']=row['body_intrusions']==0 and ((kind=='blocked'and row['obstacle_verified']and row['collision_stops']>0)or(kind=='endpoint'and row['obstacle_verified']and row['goal_reached']and row['collision_stops']==0)or(kind=='cancel'and row['cancelled']and not row['post_cancel_nonzero']and abs(row['final_measured_rate'])<.03))
   else:row['passed']=False
   rows.append(row)
 summary={}

@@ -79,3 +79,10 @@ continuation used by the normal forward handoff are clear. This prevents a
 low-speed threshold from alternating forward/pivot and repeatedly resetting the
 turn ramp. The full Console reception obstacle scenario exercises that handoff;
 the initial unlatched candidate failed this scenario and was not deployed.
+
+Reference/final pure-turn projections end at their requested yaw instead of
+projecting the same command past that yaw. The ongoing measured yaw retains the
+original full projection horizon. A new occupied-cell endpoint case verifies
+that a clear short turn is allowed while a blocked requested turn remains
+rejected. The actual keepout-line tracking/SLAM-tools integration also covers
+the corner where the former overrun projection stalled.
