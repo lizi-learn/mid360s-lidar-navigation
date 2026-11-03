@@ -35,7 +35,7 @@ function renderStudioToolbar(){
     if(!enabled)return;
     $('pageTitle').textContent='地图编排 · 一张图安排整段导览';
     $('pageDescription').textContent='点地图放站点，右侧填写说什么、朝向哪里、停留多久；路线与通行限制也在这里。';
-    studioBar.innerHTML=`<button id="studioSelect">选择 / 拖动</button><button id="studioVisit">＋ 讲解点</button><button id="studioTransit">＋ 途经点</button><button id="studioKeepout">禁行线</button><button id="studioSpeed">减速区</button><button id="studioFinish">完成绘制</button><button id="studioUndo">撤回一笔</button><select id="studioRoute" aria-label="当前编排路线"><option value="">选择一条路线</option>${doc.routes.map(r=>`<option value="${esc(r.id)}" ${r.id===selectedRoute?'selected':''}>${esc(r.name)}</option>`).join('')}</select><button id="studioAddRoute">点选编入路线</button><button class="push preview-only" id="studioPreview">▶ 离线预演</button><button class="preview-only" id="studioStopPreview">停止预演</button>`;
+    studioBar.innerHTML=`<button id="studioSelect">选择 / 平移</button><button id="studioVisit">＋ 讲解点</button><button id="studioTransit">＋ 途经点</button><button id="studioKeepout">禁行线</button><button id="studioSpeed">减速区</button><button id="studioFinish">完成绘制</button><button id="studioUndo">撤回一笔</button><select id="studioRoute" aria-label="当前编排路线"><option value="">选择一条路线</option>${doc.routes.map(r=>`<option value="${esc(r.id)}" ${r.id===selectedRoute?'selected':''}>${esc(r.name)}</option>`).join('')}</select><button id="studioAddRoute">点选编入路线</button><button class="push preview-only" id="studioPreview">▶ 离线预演</button><button class="preview-only" id="studioStopPreview">停止预演</button>`;
     $('studioSelect').onclick=()=>{studioAction='';clearTool();mapEdit=null;renderStudioToolbar();};
     $('studioVisit').onclick=()=>studioActivate('visit');$('studioTransit').onclick=()=>studioActivate('transit');
     $('studioKeepout').onclick=()=>{studioAction='';studioPanel='limits';activateTool('keepout');renderInspector();renderStudioToolbar();};
@@ -45,7 +45,7 @@ function renderStudioToolbar(){
     $('studioAddRoute').onclick=()=>{if(!selectedRoute)return toast('先选择或新建一条路线');studioAction='route';studioPanel='route';clearTool();renderInspector();renderStudioToolbar();};
     $('studioPreview').onclick=studioStartPreview;$('studioStopPreview').onclick=()=>studioStopPreview();
     const active=tool==='keepout'?'studioKeepout':tool==='speed'?'studioSpeed':studioAction==='visit'?'studioVisit':studioAction==='transit'?'studioTransit':studioAction==='route'?'studioAddRoute':'studioSelect';$(active).classList.add('on');
-    studioNote.textContent=tool?'依次点击地图取顶点 → 完成绘制 → 保存更改。':studioAction==='route'?'按行走顺序点击地图上的点位；右侧可调整顺序、讲解与循环。':studioAction?'在地图上点一下放置新点；右侧设置介绍、停留时间和朝向。':'点站点即可编辑、拖动微调；虚线表示站点顺序，预演实线表示计算路径。';
+    studioNote.textContent=tool?'依次点击地图取顶点 → 完成绘制 → 保存更改。':studioAction==='route'?'按行走顺序点击地图上的点位；右侧可调整顺序、讲解与循环。':studioAction?'在地图上点一下放置新点；右侧设置介绍、停留时间和朝向。':'点击站点选中，先点编辑才可修改；虚线表示站点顺序，预演实线表示计算路径。';
 }
 function studioActivate(kind){studioStopPreview(true);studioAction=kind;studioPanel='point';clearTool();mapEdit=null;canvas.style.cursor='crosshair';renderInspector();renderStudioToolbar();}
 function studioCreateAt(x,y,kind){

@@ -62,3 +62,41 @@ canvas.onpointerup=e=>{
     return result;
 };
 renderQuickState(false);
+
+// Saved points are selected by default; edits need the user's explicit Edit.
+let savedPointDocument=null;
+const editingPointIds=new Set();
+function savedPoint(id){return savedPointDocument?.map_id===doc?.map_id?savedPointDocument.points.find(p=>p.id===id):null}
+function pointCanEdit(p){return !!p&&(!savedPoint(p.id)||editingPointIds.has(p.id))}
+function rememberSavedPoints(value,reset=false){
+    savedPointDocument=JSON.parse(JSON.stringify(value));
+    if(reset)editingPointIds.clear();
+    else for(const id of editingPointIds){const p=doc.points.find(p=>p.id===id),q=savedPoint(id);if(!p||q&&['name','x','y','yaw','product_id','script','dwell','guest_wait','kind'].every(k=>p[k]===q[k]))editingPointIds.delete(id);}
+}
+function beginPointEdit(p){editingPointIds.add(p.id);mapEdit=null;renderInspector();$('pName')?.focus();}
+function cancelPointEdit(p){
+    const original=savedPoint(p.id);if(!original)return;
+    doc.points[doc.points.findIndex(q=>q.id===p.id)]=JSON.parse(JSON.stringify(original));editingPointIds.delete(p.id);mapEdit=null;canvas.style.cursor='';
+    touch();dirty=JSON.stringify(doc)!==JSON.stringify(savedPointDocument);
+    $('saveButton').textContent=dirty?'保存更改 · 未保存':'保存更改';$('revisionBadge').textContent=(dirty?'草稿 · v':'已保存 · v')+doc.revision;
+    renderInspector();renderCards();draw();toast('已取消编辑，点位恢复为已保存的内容');
+}
+const editStyle=document.createElement('style');editStyle.textContent=`
+.point-locked input,.point-locked textarea,.point-locked select{background:#f5f7f4;color:#596e66}.point-edit-actions{display:flex;gap:8px;align-items:center;margin:12px 0 4px}.point-edit-actions button{flex:1}.point-edit-state{font-size:11px;color:#71847c;line-height:1.6;margin:6px 0}.point-edit-actions .primary{margin:0;width:auto}
+`;document.head.append(editStyle);
+const pointEditInspector=renderInspector;
+renderInspector=function(){
+    pointEditInspector();
+    if(operator||tab!=='points'||!$('pName'))return;
+    const p=doc.points.find(p=>p.id===$('inspector').dataset.pointId);if(!p)return;
+    const editable=pointCanEdit(p),persisted=!!savedPoint(p.id),pane=$('pName').closest('.pane');pane.classList.toggle('point-locked',!editable);
+    for(const id of ['pName','pX','pY','pYaw','pScript','pDwell'])$(id).readOnly=!editable;
+    for(const id of ['pKind','fixedYaw','pProduct','pWait'])$(id).disabled=!editable;
+    for(const id of ['applyPoint','deletePoint','currentPose','poseYaw','mapPosition','mapDirection'])$(id).classList.toggle('hidden',!editable);
+    const row=document.createElement('div');row.className='point-edit-actions';
+    if(!editable){const b=document.createElement('button');b.id='editPoint';b.className='primary';b.textContent='编辑点位';b.onclick=()=>beginPointEdit(p);row.append(b);}
+    else if(persisted){const b=document.createElement('button');b.id='cancelPointEdit';b.textContent='取消编辑';b.onclick=()=>cancelPointEdit(p);row.append(b);}
+    $('applyPoint').before(row);
+    const note=document.createElement('div');note.className='point-edit-state';note.id='pointEditState';note.textContent=editable?'编辑中 · 保存后重新锁定，可拖动该点微调位置。':'已保存 · 当前只读；拖动仅平移地图，修改或删除请先点编辑。';row.after(note);
+    if($('quickVisit'))$('quickVisit').nextElementSibling.textContent=editable?'前往测试会先保存当前编辑；右档、摇杆和取消可结束导航。':'直接前往已保存的位置，到点按设置讲解；无需进入编辑。';
+};
