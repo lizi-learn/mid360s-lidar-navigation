@@ -32,6 +32,14 @@ async function page(html,embedded=false,fixture=input.fixture){
  const results=[],payloads=[];
  for(const embedded of [false,true]){
   const variant=embedded?'embedded':'direct';
+  for(const button of ['saveButton','applyPoint']){
+   const q=await page(embedded?input.embedded:input.direct,embedded);
+   q.d.getElementById('addButton').click();q.field('pName','  旧点名  ',false);q.d.getElementById(button).click();for(let i=0;i<8;i++)await tick();
+   assert.equal(q.requests.length,0);assert.match(q.d.getElementById('toast').textContent,/第2个点位.*第1个点位重复/);assert.equal(q.d.activeElement.id,'pName');
+   q.field('pName','独立讲解点');await q.save(button);assert.equal(q.requests.at(-1).reception.document.points[1].name,'独立讲解点');payloads.push(q.requests.at(-1));results.push({variant,case:button+'_rejects_duplicate_and_saves_corrected_name',passed:true});q.close();
+  }
+  const gaps=structuredClone(input.fixture);gaps.points[0].name='点位 1';gaps.points.push({...gaps.points[0],id:'third',name:'点位 3'});
+  const generated=await page(embedded?input.embedded:input.direct,embedded,gaps);generated.d.getElementById('addButton').click();assert.equal(generated.d.getElementById('pName').value,'点位 2');await generated.save();payloads.push(generated.requests.at(-1));results.push({variant,case:'generated_name_skips_existing_names_after_deletion_gap',passed:true});generated.close();
   let p=await page(embedded?input.embedded:input.direct,embedded);
   p.field('pName','');p.field('pName','接待起点',false);await p.save();
   assert.equal(p.requests.at(-1).reception.document.points[0].name,'接待起点');assert.equal(p.d.getElementById('pName').value,'接待起点');payloads.push(p.requests.at(-1));results.push({variant,case:'top_save_flushes_visible_name_after_missing_final_input_event',passed:true});p.close();

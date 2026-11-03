@@ -49,7 +49,7 @@ function renderStudioToolbar(){
 }
 function studioActivate(kind){studioStopPreview(true);studioAction=kind;studioPanel='point';clearTool();mapEdit=null;canvas.style.cursor='crosshair';renderInspector();renderStudioToolbar();}
 function studioCreateAt(x,y,kind){
-    const p={id:uid('point'),name:(kind==='transit'?'途经点 ':'讲解点 ')+(doc.points.length+1),x:+x.toFixed(3),y:+y.toFixed(3),yaw:null,product_id:'',script:'',dwell:0,guest_wait:false,kind};
+    const p={id:uid('point'),name:uniquePointName(kind==='transit'?'途经点 ':'讲解点 '),x:+x.toFixed(3),y:+y.toFixed(3),yaw:null,product_id:'',script:'',dwell:0,guest_wait:false,kind};
     doc.points.push(p);selected=p.id;studioAction='';studioPanel='point';touch();render();return p;
 }
 renderInspector=function(){

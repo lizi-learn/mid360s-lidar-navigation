@@ -52,6 +52,31 @@ class CatalogTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'第2个点位名称不能为空'):validate(d)
         d=fixture();d['routes'][0]['steps']*=51
         with self.assertRaisesRegex(ValueError,'最多包含100'):validate(d)
+    def test_distinct_ids_cannot_save_equivalent_point_names(self):
+        for first,second in [('真人测试点位1','真人测试点位1'),('接待起点','  接待起点  '),('Test 1','ＴＥＳＴ １')]:
+            with self.subTest(first=first,second=second):
+                d=fixture();d['points'][0]['name']=first;d['points'][1]['name']=second
+                with self.assertRaisesRegex(ValueError,'第2个点位名称.*第1个点位重复'):validate(d)
+    def test_duplicate_save_does_not_change_revision_or_content(self):
+        with tempfile.TemporaryDirectory()as root:
+            store=Catalog(root);saved=store.save(fixture(),0);bad=copy.deepcopy(saved)
+            bad['points'][1]['name']=bad['points'][0]['name']
+            with self.assertRaisesRegex(ValueError,'重复'):store.save(bad,1)
+            self.assertEqual(store.read(saved['map_id']),saved)
+            bad['points'][1]['name']='接待起点';self.assertEqual(store.save(bad,1)['revision'],2)
+    def test_legacy_duplicates_can_be_read_and_renamed_but_not_restored(self):
+        with tempfile.TemporaryDirectory()as root:
+            store=Catalog(root);d=fixture();d['revision']=1;d['points'][1]['name']=d['points'][0]['name']
+            store.path(d['map_id']).write_text(json.dumps(d))
+            old=store.read(d['map_id']);fixed=copy.deepcopy(old);fixed['points'][1]['name']='修正点'
+            store.save(fixed,1);self.assertEqual(len(store.versions(d['map_id'])['versions']),1)
+            self.assertEqual(store.read_revision(d['map_id'],1)['points'][0]['name'],store.read_revision(d['map_id'],1)['points'][1]['name'])
+            with self.assertRaisesRegex(ValueError,'重复'):store.restore(d['map_id'],1,2)
+            self.assertEqual(store.read(d['map_id'])['revision'],2)
+    def test_point_names_are_scoped_to_map_and_same_point_can_keep_name(self):
+        with tempfile.TemporaryDirectory()as root:
+            store=Catalog(root);one=store.save(fixture(),0);self.assertEqual(store.save(one,1)['revision'],2)
+            other=fixture();other['map_id']='another_floor';self.assertEqual(store.save(other,0)['revision'],1)
     def test_path_traversal(self):
         with tempfile.TemporaryDirectory() as root:
             for s in ['../other','/tmp/a','x/abc','']:
