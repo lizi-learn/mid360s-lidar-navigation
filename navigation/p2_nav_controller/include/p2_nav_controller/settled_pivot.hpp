@@ -36,10 +36,10 @@ class SettledPivot {
         // rotation. Once the pulse has settled, use the observed heading
         // displacement to detect a motionless response. The existing full
         // input retry remains bounded by the normal pulse, ramp and checks.
-        if(near_delta_<.02){near_level_=1.;near_peak_=0.;near_duration_=1.1;}
+        if(near_delta_<.02){near_duration_=near_level_<1.?2.:std::clamp(duration_+.2,1.1,2.5);near_level_=1.;near_peak_=0.;}
       }else {far_delta_=std::abs(std::remainder(yaw-from_,2.*std::acos(-1.)));far_peak_=peak_;far_duration_=duration_;}
     }
-    if(!active_&&std::abs(error)<=tolerance&&std::abs(rate)<.03)return 0.;
+    if(!active_&&std::abs(error)<=tolerance)return 0.;
     if(!active_) {
       from_=yaw;start_=now;peak_=std::abs(rate);active_=true;
       const bool far=std::abs(error)>1.2;
@@ -48,7 +48,7 @@ class SettledPivot {
       duration_=far_peak_>.03?std::clamp(far_duration_+(far_desired-far_delta_)/far_peak_,1.4,3.):2.;
       if(!far) {
         const double desired=std::min(.5,std::max(.04,std::abs(error)-.07));
-        duration_=near_peak_>.03?std::clamp(near_duration_+(desired-near_delta_)/near_peak_,.95,2.5):1.1;
+        duration_=near_peak_>.03?std::clamp(near_duration_+(desired-near_delta_)/near_peak_,.95,2.5):near_duration_;
       }
     }
     peak_=std::max(peak_,std::abs(rate));

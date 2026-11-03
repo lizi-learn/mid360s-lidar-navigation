@@ -7,13 +7,13 @@ from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
 from nav2_msgs.msg import CollisionMonitorState
 from std_msgs.msg import String
-from motion_buffer import MotionBuffer
+from motion_buffer import MotionBuffer, MeasuredMotionMean
 from navigation_reference import reference_ready
 
 class MotionBufferNode(Node):
     def __init__(self):
-        super().__init__('gait_motion_buffer');self.buffer=MotionBuffer(accel=.4,decel=.8,angular_accel=1.0);self.target=(0.,0.,0.)
-        self.measured=(0.,0.,0.);self.command_time=0.;self.odom_stamp=0.
+        super().__init__('gait_motion_buffer');self.buffer=MotionBuffer(accel=.4,decel=.8,angular_accel=20.0);self.target=(0.,0.,0.)
+        self.motion_mean=MeasuredMotionMean();self.measured=(0.,0.,0.);self.command_time=0.;self.odom_stamp=0.
         self.armed=False;self.paused=True;self.collision=True;self.reference=False;self.reference_time=0.
         self.output=self.create_publisher(Twist,'/p2_nav/cmd_buffered',10)
         self.create_subscription(Twist,'/p2_nav/cmd_raw',self.command,10)
@@ -33,7 +33,7 @@ class MotionBufferNode(Node):
         self.command_time=time.monotonic()
     def odom(self,m):
         self.odom_stamp=m.header.stamp.sec+m.header.stamp.nanosec/1e9
-        self.measured=(m.twist.twist.linear.x,m.twist.twist.linear.y,m.twist.twist.angular.z)
+        self.measured=self.motion_mean.step((m.twist.twist.linear.x,m.twist.twist.linear.y,m.twist.twist.angular.z),self.odom_stamp)
     def operator(self,m):
         try:
             d=json.loads(m.data)

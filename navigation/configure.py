@@ -166,10 +166,11 @@ def config(controller='rpp', tree=None, minimum_speed=.03, footprint_vertices=No
         result['velocity_smoother']['ros__parameters']['max_velocity'][0]=.8
         result['velocity_smoother']['ros__parameters']['max_accel'][0]=.4
         result['velocity_smoother']['ros__parameters']['max_decel'][0]=-.8
-        # P2 commands use policy-input units. A1.1s pivot pulse must survive
-        # both upstream slew stages; the former0.5/s slope cut it below0.5.
-        result['velocity_smoother']['ros__parameters']['max_accel'][2]=1.
-        result['velocity_smoother']['ros__parameters']['max_decel'][2]=-1.
+        # P2 yaw is already slewed at0.5 input/s by the native handoff.
+        # Upstream shaping must pass its bounded pulse instead of adding two
+        # more slow ramps; these20/s values are internal input units.
+        result['velocity_smoother']['ros__parameters']['max_accel'][2]=20.
+        result['velocity_smoother']['ros__parameters']['max_decel'][2]=-20.
         result['velocity_smoother']['ros__parameters']['max_velocity'][2]=1.
         result['velocity_smoother']['ros__parameters']['min_velocity'][2]=-1.
         # Routes must fit the monitor's stop clearance, rather than repeatedly

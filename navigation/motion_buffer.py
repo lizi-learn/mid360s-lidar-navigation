@@ -67,3 +67,27 @@ class MotionBuffer:
         if self.phase=='normal_braking' and self.v==self.w==0 and self._settled(now,linear<=.06 and angular<=.06):
             self.phase='stopped'
         return (self.v,0.,self.w)
+
+
+class MeasuredMotionMean:
+    """Mean body velocity for phase transitions; retains the original source time.
+
+    Step-frequency ripple must not look like sustained opposite yaw. Collision,
+    operator and stale-source stops do not pass through this estimator.
+    """
+    def __init__(self, time_constant=.15):
+        if not math.isfinite(time_constant) or time_constant<=0:
+            raise ValueError('positive_finite_mean_time_required')
+        self.time_constant=time_constant;self.source=None;self.value=None
+    def step(self, measured, source):
+        measured=tuple(measured)
+        if len(measured)!=3 or not all(math.isfinite(v) for v in (*measured,source)):
+            self.source=None;self.value=None;return measured
+        if self.source is not None and source<=self.source:
+            return self.value
+        if self.source is None or source-self.source>.5:
+            self.value=measured
+        else:
+            dt=source-self.source;alpha=dt/(self.time_constant+dt)
+            self.value=tuple(a+alpha*(b-a) for a,b in zip(self.value,measured))
+        self.source=source;return self.value

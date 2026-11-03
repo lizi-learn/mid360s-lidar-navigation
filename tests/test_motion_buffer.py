@@ -2,15 +2,23 @@ import unittest,math
 import sys
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'navigation'))
-from motion_buffer import MotionBuffer
+from motion_buffer import MotionBuffer, MeasuredMotionMean
 
 class BufferTest(unittest.TestCase):
+    def test_motion_mean_rejects_brief_ripple_and_keeps_source_time(self):
+        mean=MeasuredMotionMean();self.assertEqual(mean.step((0,0,0),1.),(0,0,0))
+        v=mean.step((0,0,.08),1.1);self.assertLess(v[2],.06)
+        self.assertEqual(mean.step((0,0,1.),1.1),v)
+        self.assertEqual(mean.source,1.1)
+        self.assertGreater(mean.step((0,0,.3),1.2)[2],.06)
+        self.assertEqual(mean.step((.2,0,.3),2.),(.2,0,.3))
+
     def test_bounded_pivot_pulse_survives_both_input_ramps(self):
         from configure import config
         params=config(gait_profile='p2-flat-model')['velocity_smoother']['ros__parameters']
-        self.assertEqual(params['max_accel'][2],1.)
+        self.assertEqual(params['max_accel'][2],20.)
         for sign in [-1.,1.]:
-            b=MotionBuffer(accel=.4,decel=.8,angular_accel=1.)
+            b=MotionBuffer(accel=.4,decel=.8,angular_accel=20.)
             smoothed=0.;peak=0.
             for i in range(55):
                 out=b.step((0.,0.,sign),(0.,0.,0.),i*.02,.02,frame_verified=True)
