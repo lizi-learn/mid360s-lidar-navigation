@@ -112,6 +112,10 @@ def config(controller='rpp', tree=None, minimum_speed=.03, footprint_vertices=No
         planner['planner_plugins'].append('RouteDirected')
         planner['RouteDirected']=copy.deepcopy(planner['PositionOnly'])
         planner['RouteDirected']['plugin']='p2_nav_controller::RouteDirectedLattice'
+        for name,directed in [('GuidePosition',False),('GuideDirected',True)]:
+            planner['planner_plugins'].append(name)
+            planner[name]=copy.deepcopy(planner['PositionOnly'])
+            planner[name].update(plugin='p2_nav_controller::CorridorRouteLattice',reference_radius=.6,final_heading_required=directed)
         control=result['controller_server']['ros__parameters']
         control['goal_checker_plugins'].append('position_goal_checker')
         control['position_goal_checker']=dict(plugin='p2_nav_controller::PositionGoalChecker',xy_goal_tolerance=.15)

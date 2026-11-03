@@ -611,14 +611,14 @@ class Console(Node):
                 if self.session.finished(generation,status==4):
                     self.op(armed=False,paused=True);self.last_action=self.session.message
             self.acknowledge_if_quiet(generation)
-    def route_final_goal(self,data,final_pose):
+    def route_final_goal(self,data,final_pose,prefix="RouteDirected"):
         # Publish the actual final request coordinates atomically before either
         # preview or navigation replans; never encode task flags in pose stamps.
         if not self.route_parameters.wait_for_service(timeout_sec=2.):raise ValueError('路线规划参数服务尚未响应')
         request=SetParametersAtomically.Request()
-        request.parameters=[Parameter(name='RouteDirected.final_'+k,value=ParameterValue(type=ParameterType.PARAMETER_DOUBLE,double_value=float(data[k])))for k in ('x','y')]
+        request.parameters=[Parameter(name=prefix+'.final_'+k,value=ParameterValue(type=ParameterType.PARAMETER_DOUBLE,double_value=float(data[k])))for k in ('x','y')]
         stamp=final_pose.header.stamp
-        request.parameters.append(Parameter(name='RouteDirected.final_request_ns',value=ParameterValue(type=ParameterType.PARAMETER_INTEGER,integer_value=stamp.sec*10**9+stamp.nanosec)))
+        request.parameters.append(Parameter(name=prefix+'.final_request_ns',value=ParameterValue(type=ParameterType.PARAMETER_INTEGER,integer_value=stamp.sec*10**9+stamp.nanosec)))
         response=self.wait_future(self.route_parameters.call_async(request),2.)
         if not response.result.successful:raise ValueError('路线终点参数未应用：'+response.result.reason)
     def set_goal(self,data):
@@ -635,6 +635,9 @@ class Console(Node):
         if raw_route is not None and (not isinstance(raw_route,list)or not 2<=len(raw_route)<=100):raise ValueError('连续途经点数量无效')
         route_poses=[self.checked_pose(p)for p in raw_route]if raw_route else []
         if raw_route and any(abs(float(raw_route[-1][k])-float(data[k]))>1e-6 for k in ('x','y','yaw')):raise ValueError('连续路线终点与任务终点不一致')
+        reference_mode=data.get('_route_reference_mode','corridor')
+        if reference_mode not in ('corridor','exact'):raise ValueError('未知通道参考模式')
+        guided=bool(route_poses and self.gait_profile=='p2-flat-model' and reference_mode=='corridor')
         heading_mode=data.get('heading_mode','pose')
         if heading_mode not in ('pose','position'):raise ValueError('未知目标朝向模式')
         if heading_mode=='position' and self.gait_profile!='p2-flat-model':raise ValueError('当前配置不支持位置目标规划')
@@ -645,7 +648,7 @@ class Console(Node):
             fault=self.gate.get('collision_fault_generation',-1)
             if type(fault)is int:self.session.generation=max(self.session.generation,fault)
             generation=self.session.prepare(data,time.monotonic());self.path=[];self.goal=None;self.feedback={}
-            self.goal_heading_mode=heading_mode;self.goal_route=route_poses
+            self.goal_heading_mode=heading_mode;self.goal_route=route_poses;self.goal_route_guided=guided
             self.pending_plan_accept=True
             self.op(armed=False,paused=True)
         try:self.wait_planner_active()
@@ -663,13 +666,15 @@ class Console(Node):
         else:
             request=ComputePathToPose.Goal();request.goal=pose
         directed_route=bool(route_poses and heading_mode=='pose' and self.gait_profile=='p2-flat-model')
-        if directed_route:
-            try:self.route_final_goal(data,route_poses[-1])
+        if guided or directed_route:
+            try:
+                if guided:self.route_final_goal(data,route_poses[-1],'GuidePosition' if heading_mode=='position' else 'GuideDirected')
+                else:self.route_final_goal(data,route_poses[-1])
             except (ValueError,TimeoutError):
                 with self.lock:
                     self.pending_plan_accept=False;self.session.planned(generation,0,time.monotonic());self.acknowledge_if_quiet(generation)
                 raise
-        request.planner_id='PositionOnly' if heading_mode=='position' else ('RouteDirected' if directed_route else 'GridBased')
+        request.planner_id=('GuidePosition' if heading_mode=='position' else 'GuideDirected') if guided else ('PositionOnly' if heading_mode=='position' else ('RouteDirected' if directed_route else 'GridBased'))
         with self.lock:
             if self.session.generation!=generation or self.session.phase!='planning':
                 self.pending_plan_accept=False;self.acknowledge_if_quiet(generation);raise ValueError('规划已取消')
@@ -708,7 +713,9 @@ class Console(Node):
             self.pending_nav_accept=False;self.session.cancel();self.stop_actions();self.acknowledge_if_quiet(generation);raise ValueError('导航服务未就绪')
         if route_poses:
             goal=NavigateThroughPoses.Goal();goal.poses=route_poses
-            goal.behavior_tree=str(Path(__file__).with_name('forward_position_through_poses.xml' if getattr(self,'goal_heading_mode','pose')=='position' else ('forward_directed_route.xml' if self.gait_profile=='p2-flat-model' else 'forward_through_poses.xml')))
+            guided=getattr(self,'goal_route_guided',False);position=getattr(self,'goal_heading_mode','pose')=='position'
+            tree=('forward_corridor_position.xml' if position else 'forward_corridor_directed.xml') if guided else ('forward_position_through_poses.xml' if position else ('forward_directed_route.xml' if self.gait_profile=='p2-flat-model' else 'forward_through_poses.xml'))
+            goal.behavior_tree=str(Path(__file__).with_name(tree))
         else:
             goal=NavigateToPose.Goal();goal.pose=pose
             if getattr(self,'goal_heading_mode','pose')=='position':goal.behavior_tree=str(Path(__file__).with_name('forward_position_navigation.xml'))

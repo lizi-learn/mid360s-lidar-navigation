@@ -42,12 +42,37 @@ class PositionGoalTests(unittest.TestCase):
         return c,data
     def test_directed_route_preview_and_replanning_share_final_request(self):
         c,data=self.directed_route();receipt=c.set_goal(data)
-        self.assertEqual(c.planner_through.sent[0].planner_id,'RouteDirected')
-        c.route_final_goal.assert_called_once_with(data,c.goal_route[-1])
+        self.assertEqual(c.planner_through.sent[0].planner_id,'GuideDirected')
+        c.route_final_goal.assert_called_once_with(data,c.goal_route[-1],'GuideDirected')
         c.confirm_goal({'generation':receipt['generation']})
         tree=ET.parse(c.nav_through.sent[0].behavior_tree)
-        self.assertEqual(tree.find('.//ComputeReferencePath').get('planner_id'),'RouteDirected')
+        self.assertEqual(tree.find('.//ComputeReferencePath').get('planner_id'),'GuideDirected')
         self.assertEqual(tree.find('.//FollowPath').get('goal_checker_id'),'goal_checker')
+    def test_position_corridor_uses_same_guide_planner_for_preview_and_execution(self):
+        c,data=self.directed_route();data['heading_mode']='position'
+        receipt=c.set_goal(data)
+        self.assertEqual(c.planner_through.sent[0].planner_id,'GuidePosition')
+        c.route_final_goal.assert_called_once_with(data,c.goal_route[-1],'GuidePosition')
+        c.confirm_goal({'generation':receipt['generation']})
+        tree=ET.parse(c.nav_through.sent[0].behavior_tree)
+        self.assertEqual(tree.find('.//ComputeReferencePath').get('planner_id'),'GuidePosition')
+        self.assertEqual(tree.find('.//FollowPath').get('goal_checker_id'),'position_goal_checker')
+        self.assertEqual(tree.find('.//RemovePassedGoals').get('radius'),'0.75')
+
+    def test_explicit_exact_through_route_preserves_original_constraints(self):
+        for mode,planner,tree in [('pose','RouteDirected','forward_directed_route.xml'),('position','PositionOnly','forward_position_through_poses.xml')]:
+            c,data=self.directed_route();data.update(heading_mode=mode,_route_reference_mode='exact')
+            receipt=c.set_goal(data);self.assertEqual(c.planner_through.sent[0].planner_id,planner)
+            c.confirm_goal({'generation':receipt['generation']})
+            self.assertEqual(ET.parse(c.nav_through.sent[0].behavior_tree).find('.//ComputeReferencePath').get('planner_id'),planner)
+
+    def test_invalid_corridor_mode_does_not_prepare_any_request(self):
+        c,data=self.directed_route();data['_route_reference_mode']='typo'
+        generation=c.session.generation
+        with self.assertRaisesRegex(ValueError,'通道参考'):c.set_goal(data)
+        self.assertEqual(c.session.generation,generation)
+        self.assertFalse(c.planner_through.sent);self.assertFalse(c.nav_through.sent)
+
     def test_manual_cancel_during_route_parameters_never_sends_plan_or_motion(self):
         c,data=self.directed_route();c.route_final_goal.side_effect=lambda *_:c.session.cancel()
         with self.assertRaisesRegex(ValueError,'取消'):c.set_goal(data)

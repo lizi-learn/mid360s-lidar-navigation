@@ -1,0 +1,20 @@
+<?xml version="1.0"?>
+<root main_tree_to_execute="MainTree">
+  <BehaviorTree ID="MainTree">
+    <RecoveryNode number_of_retries="2" name="NavigationRecovery">
+      <PipelineSequence name="NavigateThroughForwardWaypoints">
+        <!-- Track passage every tree tick, including while a slow planner is running. -->
+        <RemovePassedGoals input_goals="{goals}" output_goals="{goals}" radius="0.75"/>
+        <RateController hz="1.0">
+          <Sequence>
+            <ComputeReferencePath goals="{goals}" path="{path}" planner_id="GuidePosition"/>
+          </Sequence>
+        </RateController>
+        <FollowPath path="{path}" controller_id="FollowPath" goal_checker_id="position_goal_checker"/>
+      </PipelineSequence>
+      <Sequence>
+        <Wait wait_duration="2"/>
+      </Sequence>
+    </RecoveryNode>
+  </BehaviorTree>
+</root>

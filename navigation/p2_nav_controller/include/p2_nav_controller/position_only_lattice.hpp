@@ -20,6 +20,8 @@ class PositionOnlyLattice : public nav2_smac_planner::SmacPlannerLattice {
   geometry_msgs::msg::PoseStamped stable_goal_;
   struct RouteMemory {nav_msgs::msg::Path path;geometry_msgs::msg::PoseStamped goal;};
   std::deque<RouteMemory> route_memory_;
+  struct ReferenceMemory {geometry_msgs::msg::PoseStamped original,selected;};
+  std::deque<ReferenceMemory> reference_memory_;
   bool same_goal(const geometry_msgs::msg::PoseStamped &a,const geometry_msgs::msg::PoseStamped &b) const {
     return a.header.frame_id==b.header.frame_id&&std::hypot(a.pose.position.x-b.pose.position.x,a.pose.position.y-b.pose.position.y)<1e-6;
   }
@@ -152,8 +154,98 @@ class PositionOnlyLattice : public nav2_smac_planner::SmacPlannerLattice {
  public:
   void cleanup() override {
     std::lock_guard<std::mutex> stable_lock(stable_mutex_);
-    route_memory_.clear();stable_path_={};stable_goal_={};
+    route_memory_.clear();reference_memory_.clear();stable_path_={};stable_goal_={};
     SmacPlannerLattice::cleanup();
+  }
+  // A corridor reference denotes a passage area. This method is never used
+  // for a final visit: that remains an exact PositionOnly/ExactHeading request.
+  nav_msgs::msg::Path createReferencePlan(const geometry_msgs::msg::PoseStamped &start,
+      const geometry_msgs::msg::PoseStamped &reference,double radius) {
+    if(!std::isfinite(radius)||radius<=0.||radius>=.75)
+      throw nav2_core::PlannerException("Invalid corridor reference radius");
+    std::vector<geometry_msgs::msg::PoseStamped> candidates;
+    const auto deadline=std::chrono::steady_clock::now()+std::chrono::milliseconds(900);
+    auto remember_reference=[&](const geometry_msgs::msg::PoseStamped &selected) {
+      for(auto i=reference_memory_.begin();i!=reference_memory_.end();++i)
+        if(same_goal(i->original,reference)){reference_memory_.erase(i);break;}
+      reference_memory_.push_back({reference,selected});
+      while(reference_memory_.size()>8)reference_memory_.pop_front();
+    };
+    {
+      std::lock_guard<std::mutex> stable_lock(stable_mutex_);
+      std::unique_lock<nav2_costmap_2d::Costmap2D::mutex_t> map_lock(*_costmap->getMutex());
+      prepare_map();
+      const double gx=reference.pose.position.x,gy=reference.pose.position.y;
+      auto add=[&](geometry_msgs::msg::PoseStamped p) {
+        if(std::hypot(p.pose.position.x-gx,p.pose.position.y-gy)>radius+1e-9)return;
+        for(const auto &q:candidates)if(same_goal(p,q))return;
+        try {p.pose.orientation=nav2_util::geometry_utils::orientationAroundZAxis(
+          heading(p.pose.position.x,p.pose.position.y,tf2::getYaw(reference.pose.orientation)));}
+        catch(const nav2_core::PlannerException &){return;}
+        candidates.push_back(p);
+      };
+      add(reference);
+      // Keep the selected passage stable while the original centre is occupied.
+      // It is only a proposal: each candidate gets a complete LIVE body plan.
+      for(const auto &entry:reference_memory_)if(same_goal(entry.original,reference))add(entry.selected);
+      std::vector<geometry_msgs::msg::PoseStamped> nearby;
+      const double resolution=_costmap->getResolution();
+      const int steps=static_cast<int>(std::ceil(radius/resolution));
+      for(int dy=-steps;dy<=steps;++dy)for(int dx=-steps;dx<=steps;++dx) {
+        if(!dx&&!dy)continue;
+        auto p=reference;p.pose.position.x=gx+dx*resolution;p.pose.position.y=gy+dy*resolution;
+        if(std::hypot(dx*resolution,dy*resolution)>radius)continue;
+        nearby.push_back(p);
+      }
+      std::stable_sort(nearby.begin(),nearby.end(),[&](const auto &a,const auto &b) {
+        return std::hypot(a.pose.position.x-gx,a.pose.position.y-gy)<std::hypot(b.pose.position.x-gx,b.pose.position.y-gy);
+      });
+      struct Option {geometry_msgs::msg::PoseStamped pose;int quality;double distance;};
+      std::vector<Option> options;
+      for(auto p:nearby) {
+        if(std::chrono::steady_clock::now()>deadline)break;
+        try {p.pose.orientation=nav2_util::geometry_utils::orientationAroundZAxis(
+          heading(p.pose.position.x,p.pose.position.y,tf2::getYaw(reference.pose.orientation)));}
+        catch(const nav2_core::PlannerException &){continue;}
+        const double yaw=tf2::getYaw(p.pose.orientation);
+        const int quality=clear(p.pose.position.x,p.pose.position.y,yaw,.08)?0:
+          (clear(p.pose.position.x,p.pose.position.y,yaw,.04)?1:2);
+        options.push_back({p,quality,std::hypot(p.pose.position.x-gx,p.pose.position.y-gy)});
+      }
+      // Nearest cells can all be on an obstacle edge. Prefer actual approach
+      // room, then spread proposals across the area before spending time on a
+      // full lattice search. These margins rank proposals; acceptance still
+      // checks the original unchanged footprint.
+      std::stable_sort(options.begin(),options.end(),[](const auto &a,const auto &b) {
+        return a.quality!=b.quality?a.quality<b.quality:a.distance<b.distance;
+      });
+      for(const auto &option:options) {
+        bool crowded=false;for(const auto &p:candidates)
+          if(std::hypot(p.pose.position.x-option.pose.pose.position.x,p.pose.position.y-option.pose.pose.position.y)<.15){crowded=true;break;}
+        if(!crowded)candidates.push_back(option.pose);
+        if(candidates.size()>=24)break;
+      }
+      map_lock.unlock();
+      for(const auto &candidate:candidates) {
+        if(std::chrono::steady_clock::now()>deadline)break;
+        select_route(candidate);
+        try {
+          const auto trial_deadline=std::min(deadline,std::chrono::steady_clock::now()+std::chrono::milliseconds(120));
+          auto path=plan_once(start,candidate,true,trial_deadline);
+          remember_reference(candidate);
+          return retain_route(std::move(path),candidate);
+        }catch(const nav2_core::PlannerException &){}
+      }
+    }
+    // One ordinary full lattice fallback, rather than an unbounded expensive
+    // search for every nearby cell. No obstacle or unknown cell is changed.
+    if(!candidates.empty()) {
+      auto path=PositionOnlyLattice::createPlan(start,candidates.front());
+      std::lock_guard<std::mutex> stable_lock(stable_mutex_);
+      remember_reference(candidates.front());return path;
+    }
+    throw nav2_core::PlannerException("No full-body corridor reference near ("+
+      std::to_string(reference.pose.position.x)+", "+std::to_string(reference.pose.position.y)+")");
   }
   nav_msgs::msg::Path createPlan(const geometry_msgs::msg::PoseStamped &start,
                                 const geometry_msgs::msg::PoseStamped &goal) override {

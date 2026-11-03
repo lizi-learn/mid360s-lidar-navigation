@@ -79,7 +79,34 @@ class RouteDirectedLattice : public ExactHeadingLattice {
     return PositionOnlyLattice::createPlan(start,goal);
   }
 };
+// Separate planner IDs keep corridor guidance distinct from exact through-poses.
+// The original final header identifies the final occurrence, even when a route
+// crosses those same coordinates earlier. No sensor/goal stamp is rewritten.
+class CorridorRouteLattice : public ExactHeadingLattice {
+  std::string prefix_;
+ public:
+  void configure(const rclcpp_lifecycle::LifecycleNode::WeakPtr &parent,std::string name,
+      std::shared_ptr<tf2_ros::Buffer> tf,std::shared_ptr<nav2_costmap_2d::Costmap2DROS> costmap) override {
+    ExactHeadingLattice::configure(parent,name,tf,costmap);prefix_=name;auto node=parent.lock();
+    for(const auto &key:{"final_x","final_y"})nav2_util::declare_parameter_if_not_declared(node,name+"."+key,rclcpp::ParameterValue(0.));
+    nav2_util::declare_parameter_if_not_declared(node,name+".final_request_ns",rclcpp::ParameterValue(int64_t(0)));
+    nav2_util::declare_parameter_if_not_declared(node,name+".reference_radius",rclcpp::ParameterValue(.6));
+    nav2_util::declare_parameter_if_not_declared(node,name+".final_heading_required",rclcpp::ParameterValue(false));
+  }
+  nav_msgs::msg::Path createPlan(const geometry_msgs::msg::PoseStamped &start,const geometry_msgs::msg::PoseStamped &goal) override {
+    auto node=_node.lock();if(!node)throw nav2_core::PlannerException("Corridor planner node expired");
+    double x,y,radius;int64_t stamp;bool heading_required;
+    node->get_parameter(prefix_+".final_x",x);node->get_parameter(prefix_+".final_y",y);
+    node->get_parameter(prefix_+".final_request_ns",stamp);node->get_parameter(prefix_+".reference_radius",radius);
+    node->get_parameter(prefix_+".final_heading_required",heading_required);
+    if(stamp<=0)throw nav2_core::PlannerException("Missing actual final route request");
+    if(std::hypot(goal.pose.position.x-x,goal.pose.position.y-y)<=1e-6&&rclcpp::Time(goal.header.stamp).nanoseconds()==stamp)
+      return heading_required?ExactHeadingLattice::createPlan(start,goal):PositionOnlyLattice::createPlan(start,goal);
+    return PositionOnlyLattice::createReferencePlan(start,goal,radius);
+  }
+};
 }
+PLUGINLIB_EXPORT_CLASS(p2_nav_controller::CorridorRouteLattice,nav2_core::GlobalPlanner)
 PLUGINLIB_EXPORT_CLASS(p2_nav_controller::ExactHeadingLattice,nav2_core::GlobalPlanner)
 
 PLUGINLIB_EXPORT_CLASS(p2_nav_controller::RouteDirectedLattice,nav2_core::GlobalPlanner)

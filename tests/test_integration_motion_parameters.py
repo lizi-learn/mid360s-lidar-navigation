@@ -23,3 +23,13 @@ class RecoveryMotionDefaults(unittest.TestCase):
         self.assertIn('RouteDirected',c['planner_plugins'])
         self.assertEqual(c['RouteDirected']['plugin'],'p2_nav_controller::RouteDirectedLattice')
         self.assertFalse(c['RouteDirected']['smooth_path'])
+
+class CorridorPlannerConfigurationTests(unittest.TestCase):
+    def test_guide_plugins_keep_original_geometry_and_exact_final_variants(self):
+        params=config(gait_profile='p2-flat-model')['planner_server']['ros__parameters']
+        for name,directed in [('GuidePosition',False),('GuideDirected',True)]:
+            self.assertIn(name,params['planner_plugins'])
+            self.assertEqual(params[name]['plugin'],'p2_nav_controller::CorridorRouteLattice')
+            self.assertEqual(params[name]['final_heading_required'],directed)
+            self.assertLess(params[name]['reference_radius'],.75)
+            self.assertEqual(params[name]['allow_unknown'],params['PositionOnly']['allow_unknown'])

@@ -117,6 +117,7 @@ jobs:
           python3 experiments/arrival/check.py --binary /tmp/arrival-build/arrival_planner --output /tmp/arrival/planner/comparison.json
           python3 experiments/arrival/check_plan_time.py --source "$GITHUB_WORKSPACE" --binary /tmp/arrival-build/arrival_planner --output /tmp/arrival/heading-plan-time
           python3 experiments/arrival/check_replanning.py --binary /tmp/arrival-build/arrival_planner --output /tmp/arrival/replanning/comparison.json
+          python3 experiments/arrival/check_corridor.py --binary /tmp/arrival-build/arrival_planner --output /tmp/arrival/corridor/comparison.json
           python3 experiments/arrival/check_pivot.py --binary /tmp/arrival-build/pivot_model --output /tmp/arrival/pivot/comparison.json
           python3 experiments/arrival/check_pivot_native.py --binary /tmp/arrival-build/native_pivot --output /tmp/arrival/native-pivot/report.json
           python3 experiments/arrival/check_tracking.py --binary /tmp/arrival-build/tracking_replay --output /tmp/arrival/tracking/comparison.json

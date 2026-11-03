@@ -136,3 +136,6 @@ still a commissioning candidate, not physical clearance acceptance.
 ### 导览接待扩展（开发中）
 
 点位与朝向、产品介绍、展示路线和操作员执行页见 [导览接待工作台](docs/RECEPTION_STUDIO.md)。[参考调研](docs/RECEPTION_RESEARCH.md)记录采用方向与边界；冻结的 Baseline V1 保持不变。隔离预览使用合成场景，不连接真实机器人。
+
+
+路线中的无到点动作中间参考点使用通道引导：精确中心被占用时，在附近 0.6 米内寻找完整机身可通行的位置，重规划时复核实际障碍并保持有效选择。最终目的地及介绍点朝向仍准确到达。`_route_reference_mode: "exact"` 可保留原精确经过点语义；默认 `corridor` 仅用于 P2 连续参考路线。已过点每个行为树 tick 删除，在途旧请求取消后不发布过期路线，分段路径记忆仍逐次核查完整占地。该软件行为需与实际步态跟踪结果分别记录。

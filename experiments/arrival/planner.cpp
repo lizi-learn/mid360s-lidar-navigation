@@ -90,6 +90,36 @@ int main(int argc,char **argv){
     for(unsigned y=0;y<height;++y)for(unsigned x=0;x<width;++x){double wx,wy;map->mapToWorld(x,y,wx,wy);if(wx>=3.1&&wx<=4.3&&wy>3.)map->setCost(x,y,254);}
     save("alternating-blocked",from,goal);
   }
+  if(std::getenv("P2_ARRIVAL_CORRIDOR_SEQUENCE")) {
+    const std::vector<unsigned char> original(map->getCharMap(),map->getCharMap()+width*height);
+    auto save=[&](const std::string &label,const geometry_msgs::msg::PoseStamped &from,const geometry_msgs::msg::PoseStamped &to) {
+      auto path=planner->createPlan(from,to);if(path.poses.empty())throw std::runtime_error("Empty reference area plan");
+      std::ofstream out(std::string(argv[2])+"-"+label+".csv");out<<"x,y,yaw\n";
+      for(const auto &p:path.poses)out<<std::setprecision(12)<<p.pose.position.x<<','<<p.pose.position.y<<','<<tf2::getYaw(p.pose.orientation)<<'\n';
+      return path;
+    };
+    auto chosen=save("area-initial",start,goal);
+    auto other=goal;other.pose.position.x=1.;other.pose.position.y=3.;save("area-other",start,other);
+    auto from=start;from.pose.position.x+=.1;from.pose.position.y+=.01;
+    auto reused=save("area-reused",from,goal);
+    if(std::hypot(chosen.poses.back().pose.position.x-reused.poses.back().pose.position.x,
+                  chosen.poses.back().pose.position.y-reused.poses.back().pose.position.y)>1e-6)
+      throw std::runtime_error("Selected reference area flapped between route legs");
+    const auto centre=reused.poses.back().pose.position;unsigned ix,iy;
+    if(!map->worldToMap(centre.x,centre.y,ix,iy))throw std::runtime_error("Selected area outside map");
+    map->setCost(ix,iy,254);save("area-new-obstacle",from,goal);
+    for(unsigned y=0;y<height;++y)for(unsigned x=0;x<width;++x){double wx,wy;map->mapToWorld(x,y,wx,wy);if(std::hypot(wx-goal.pose.position.x,wy-goal.pose.position.y)<1.)map->setCost(x,y,254);}
+    bool rejected=false;try{auto path=planner->createPlan(from,goal);rejected=path.poses.empty();}catch(const nav2_core::PlannerException &){rejected=true;}
+    if(!rejected)throw std::runtime_error("Completely occupied reference area accepted");
+    std::copy(original.begin(),original.end(),map->getCharMap());
+    // Same coordinates, a genuine new final request: now they must remain exact.
+    auto final=goal;final.header.stamp=parent->now();
+    parent->set_parameters({rclcpp::Parameter("GridBased.final_x",goal.pose.position.x),rclcpp::Parameter("GridBased.final_y",goal.pose.position.y),
+      rclcpp::Parameter("GridBased.final_request_ns",rclcpp::Time(final.header.stamp).nanoseconds())});
+    bool final_rejected=false;try{auto path=planner->createPlan(from,final);final_rejected=path.poses.empty();}catch(const nav2_core::PlannerException &){final_rejected=true;}
+    if(!final_rejected)throw std::runtime_error("Occupied final visit was moved into a reference area");
+    std::ofstream(std::string(argv[2])+"-area-receipts.json")<<"{\"blocked_area_rejected\":true,\"occupied_final_rejected\":true,\"actual_new_obstacle\":["<<centre.x<<","<<centre.y<<"]}";
+  }
   planner->deactivate();planner->cleanup();planner.reset();cm->on_cleanup(rclcpp_lifecycle::State());cm.reset();parent.reset();
  }catch(const std::exception &e){std::cerr<<e.what();rc=1;}
  rclcpp::shutdown();return rc;
