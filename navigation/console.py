@@ -795,6 +795,10 @@ class Console(Node):
     def reception_save(self,data):
         if not isinstance(data,dict):raise ValueError('导览配置必须是对象')
         operation=data.get('operation','save')
+        if operation=='map_raster':return self.map_library.raster(data['map_id'])
+        if operation=='route_preview':
+            from reception_preview import preview_isolated
+            return preview_isolated(self.map_library.raster(data['document']['map_id']),data['document'],data['route_id'])
         if operation=='trace_runs':return self.reception.history.runs(data['map_id'])
         if operation=='trace_read':return self.reception.history.trace(data['map_id'],data['run_id'],data.get('after',0),data.get('limit',200))
         if operation.startswith('bundle_'):return self.bundle_transfer.request(data)

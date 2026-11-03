@@ -105,6 +105,10 @@ class Sandbox:
     def save(self,data):
         if set(data)!={'reception'}:raise ValueError('沙箱只接收导览内容')
         r=data['reception'];op=r.get('operation')
+        if op=='map_raster':return self.map_library.raster(r['map_id'])
+        if op=='route_preview':
+            from reception_preview import preview
+            return preview(self.map_library.raster(r['document']['map_id']),r['document'],r['route_id'])
         if op.startswith('bundle_'):return self.bundle_transfer.request(r)
         if op=='map_versions':return {'versions':self.map_library.versions(r['map_id'])}
         if op=='trace_runs':return self.reception.history.runs(r['map_id'])
