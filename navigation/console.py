@@ -300,6 +300,10 @@ class Console(Node):
         with self.lock:
             self.collision_stop=msg.action_type==CollisionMonitorState.STOP
             if self.collision_stop and self.session.phase=='executing':
+                if getattr(self.session,'task_kind','navigation')=='rotation':
+                    self.session.finished(self.session.generation,False)
+                    self.session._notice('原地转向受阻，速度已归零')
+                    self.op(armed=False,paused=True);self.stop_actions();return
                 self.obstacle_path_revision=self.path_revision;self.session.obstacle(time.monotonic())
     def execution_ready(self):
         gait=getattr(self,'gait',None)
@@ -320,7 +324,7 @@ class Console(Node):
                 # status was dropped by DDS. Never show executing/zero forever.
                 recover=getattr(getattr(self,'reception',None),'source_fault',None)
                 eligible=self.source_recovery_eligible()
-                scheduled=bool(eligible and recover and recover('避障观测暂时中断'))
+                scheduled=bool(getattr(self.session,'task_kind','navigation')!='rotation' and eligible and recover and recover('避障观测暂时中断'))
                 self.source_revoked_generation=self.session.generation
                 self.session.cancel();self.stop_actions()
                 self.session._notice('观测暂时中断：已停车，等待原任务重新规划'if scheduled else '避障观测失效，导航已停止')
@@ -628,6 +632,23 @@ class Console(Node):
         # Serialize goal-specific planner parameters with their preview request;
         # stop/manual callbacks do not acquire this planning lock.
         with self.goal_request_lock:return self._set_goal(data)
+    def prepare_rotation(self,data):
+        from rotation_intent import rotation_goal
+        if self.mode!='navigation':raise ValueError('请先载入地图进入导航模式')
+        radians=data.get('radians')
+        with self.goal_request_lock:
+            goal=rotation_goal(self.reception_pose(),radians)
+            # The current measured centre stays fixed. Spin uses the live local
+            # costmap/footprint and odometry; no global path is invented here.
+            self.checked_pose(goal,require_free=False)
+            with self.lock:
+                generation=self.session.prepare(goal,time.monotonic())
+                self.goal_rotation=radians;self.goal_route=[];self.goal_route_guided=False
+                self.goal_heading_mode='pose';self.path=[];self.goal=[goal['x'],goal['y']];self.feedback={}
+                self.pending_plan_accept=False;self.op(armed=False,paused=True)
+                if not self.session.rotation_ready(generation):raise ValueError('原地转向已取消')
+            return dict(rotation_prepared=True,global_path_planned=False,generation=generation,
+                radians=radians,translation=[0.,0.],hardware_execution_enabled=False)
     def _set_goal(self,data):
         if self.mode!='navigation':raise ValueError('请先载入地图进入导航模式')
         pose=self.checked_pose(data)
@@ -648,7 +669,7 @@ class Console(Node):
             fault=self.gate.get('collision_fault_generation',-1)
             if type(fault)is int:self.session.generation=max(self.session.generation,fault)
             generation=self.session.prepare(data,time.monotonic());self.path=[];self.goal=None;self.feedback={}
-            self.goal_heading_mode=heading_mode;self.goal_route=route_poses;self.goal_route_guided=guided
+            self.goal_heading_mode=heading_mode;self.goal_route=route_poses;self.goal_route_guided=guided;self.goal_rotation=None
             self.pending_plan_accept=True
             self.op(armed=False,paused=True)
         try:self.wait_planner_active()
@@ -698,7 +719,8 @@ class Console(Node):
             gait=getattr(self,'gait',None);ready=self.execution_ready()
             reason=gait.status().get('blockers','') if gait and not ready else ''
             self.session.start(generation,time.monotonic(),ready,self.health_ready(),execution_reason=reason)
-            self.goal_generation=generation;pose=self.checked_pose(self.session.goal)
+            self.goal_generation=generation
+            pose=self.checked_pose(self.session.goal,require_free=False) if getattr(self,'goal_rotation',None)is not None else self.checked_pose(self.session.goal)
             self.pending_nav_accept=True
         gait=getattr(self,'gait',None)
         if gait:
@@ -719,9 +741,14 @@ class Console(Node):
         else:
             goal=NavigateToPose.Goal();goal.pose=pose
             if getattr(self,'goal_heading_mode','pose')=='position':goal.behavior_tree=str(Path(__file__).with_name('forward_position_navigation.xml'))
-        from recovery_tree import recovery_tree
-        base_tree=getattr(goal,'behavior_tree','') or str(Path(__file__).with_name('forward_navigation.xml'))
-        goal.behavior_tree=recovery_tree(base_tree,self.runtime/'recovery-trees',self.session.replan_timeout)
+        rotation=getattr(self,'goal_rotation',None)
+        if rotation is not None:
+            from rotation_intent import rotation_tree
+            goal.behavior_tree=rotation_tree(self.runtime/'rotation-trees',rotation)
+        else:
+            from recovery_tree import recovery_tree
+            base_tree=getattr(goal,'behavior_tree','') or str(Path(__file__).with_name('forward_navigation.xml'))
+            goal.behavior_tree=recovery_tree(base_tree,self.runtime/'recovery-trees',self.session.replan_timeout)
         with self.lock:
             self.bt_goal_source_ns=self.get_clock().now().nanoseconds;self.bt_recovery_report={}
             if self.session.generation!=generation or self.session.phase!='starting':
@@ -994,7 +1021,7 @@ def main():
                 if not isinstance(d,dict):raise ValueError('请求必须是JSON对象')
                 routes={'/api/audio':lambda:node.audio.update(d),'/api/start':lambda:node.start(d['mode'],d.get('name','office'),d.get('controller','rpp')),
                     '/api/sim_mapping_route':lambda:node.simulated_mapping_route(d['name']),
-                    '/api/save':lambda:save_resource(node,d),'/api/goal':lambda:node.reception_api_goal(d),
+                    '/api/save':lambda:save_resource(node,d),'/api/goal':lambda:node.reception_api_goal(d),'/api/rotate':lambda:node.prepare_rotation(d),
                     '/api/confirm':lambda:node.reception_api_confirm(d),'/api/sim_operator':lambda:node.simulation_operator(d),
                     '/api/initialpose':lambda:node.set_pose(d),'/api/speed':lambda:node.speed(d['speed'],d.get('velocity_scale')),
                     '/api/stop':lambda:(node.stop() or {'stopped':True})}

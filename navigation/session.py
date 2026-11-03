@@ -15,6 +15,7 @@ class NavigationSession:
         self.mode='unknown';self.verified=False;self.source=0;self.sequence=0;self.source_time=0.
         self.manual_activity=False;self.operator_connected=False;self.generation=0
         self.phase='idle';self.goal=None;self.path_points=0;self.cancel_generation=0
+        self.task_kind='navigation'
         self.cancel_pending=False;self.message='等待保护开关状态';self.notice_sequence=0
         self.blocked_since=None;self.replans=0;self.clear_since=None;self.last_now=None;self.prepared_with_authority=False
         self.obstruction_policy=None;self.obstruction_decision='continue';self.obstruction_plan_seen=False
@@ -67,13 +68,18 @@ class NavigationSession:
             if self.cancel_pending:raise ValueError('正在确认上个目标已取消，请稍候')
             if self.phase in ACTIVE:raise ValueError('请先取消当前导航再选择新目标')
             if not all(math.isfinite(float(goal[k])) for k in ('x','y','yaw')):raise ValueError('目标坐标无效')
-            self.generation+=1;self.goal={k:float(goal[k]) for k in ('x','y','yaw')}
+            self.generation+=1;self.goal={k:float(goal[k]) for k in ('x','y','yaw')};self.task_kind='navigation'
             self.prepared_with_authority=self._fresh(now);self.phase='planning';self.path_points=0;self._notice('正在预览路径，尚未开始行走');return self.generation
     def planned(self,generation,path_points,now):
         with self.lock:
             if generation!=self.generation or self.phase!='planning':return False
             if path_points<1:self.phase='blocked';self._notice('未找到可通行路径，速度保持为零');return False
             self.phase='ready';self.path_points=path_points;self._notice('路径已预览，等待确认开始');return True
+    def rotation_ready(self,generation):
+        with self.lock:
+            if generation!=self.generation or self.phase!='planning':return False
+            self.phase='ready';self.task_kind='rotation';self.path_points=0
+            self._notice('原地转向已准备，开始后按实时局部障碍执行');return True
     def start(self,generation,now,execution_ready,health_ready,execution_reason=''):
         with self.lock:
             if self.cancel_pending:raise ValueError('上个导航目标取消尚未确认')
@@ -128,11 +134,11 @@ class NavigationSession:
     def finished(self,generation,succeeded):
         with self.lock:
             if generation!=self.generation or self.phase not in ACTIVE:return False
-            self.phase='arrived' if succeeded else 'blocked';self._notice('已到达，速度归零' if succeeded else '无法完成导航，速度已归零，请手动处理');return True
+            self.phase='arrived' if succeeded else 'blocked';self._notice(('原地转向完成，速度归零' if self.task_kind=='rotation' else '已到达，速度归零') if succeeded else '无法完成导航，速度已归零，请手动处理');return True
     def status(self,now):
         with self.lock:
             fresh=self._fresh(now)
-            return {'phase':self.phase,'generation':self.generation,'goal':self.goal,'path_points':self.path_points,
+            return {'phase':self.phase,'generation':self.generation,'goal':self.goal,'path_points':self.path_points,'task_kind':self.task_kind,
                 'operator_mode':self.mode if fresh else 'unknown','operator_verified':fresh,
                 'manual_activity':self.manual_activity,'navigation_permitted':fresh and self.mode=='navigation_allowed' and not self.manual_activity,
                 'force_navigation_zero':self.phase!='executing' or not fresh or self.mode!='navigation_allowed' or self.manual_activity,

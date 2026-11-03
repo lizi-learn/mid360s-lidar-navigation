@@ -120,8 +120,12 @@ def config(controller='rpp', tree=None, minimum_speed=.03, footprint_vertices=No
         control['goal_checker_plugins'].append('position_goal_checker')
         control['position_goal_checker']=dict(plugin='p2_nav_controller::PositionGoalChecker',xy_goal_tolerance=.15)
     add('behavior_server',dict(use_sim_time=False,costmap_topic='local_costmap/costmap_raw',
-        footprint_topic='local_costmap/published_footprint',cycle_frequency=10.,behavior_plugins=['wait'],
-        wait=dict(plugin='nav2_behaviors/Wait'),global_frame='odom',robot_base_frame='base_link',transform_tolerance=.2))
+        footprint_topic='local_costmap/published_footprint',cycle_frequency=10.,behavior_plugins=['wait','spin'],
+        wait=dict(plugin='nav2_behaviors/Wait'),spin=dict(plugin='nav2_behaviors/Spin'),
+        max_rotational_vel=1.0 if gait_profile=='p2-flat-model' else .35,
+        min_rotational_vel=.5 if gait_profile=='p2-flat-model' else .1,
+        rotational_acc_lim=.5,simulate_ahead_time=2.,
+        global_frame='odom',robot_base_frame='base_link',transform_tolerance=.2))
     add('bt_navigator',dict(use_sim_time=False,global_frame='map',robot_base_frame='base_link',odom_topic='/odom',
         bt_loop_duration=10,default_server_timeout=20,wait_for_service_timeout=1000,
         default_nav_to_pose_bt_xml=str(tree or Path(__file__).with_name('forward_navigation.xml')),

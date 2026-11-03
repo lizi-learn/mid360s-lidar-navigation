@@ -8,7 +8,7 @@ from pathlib import Path
 ROOT=Path(__file__).resolve().parents[2];NAV=ROOT/'navigation';sys.path.insert(0,str(NAV))
 
 def main():
-    ap=argparse.ArgumentParser();ap.add_argument('--output',required=True);ap.add_argument('--setup',required=True);ap.add_argument('--port',type=int,default=8947);ap.add_argument('--domain',type=int,default=208);ap.add_argument('--stop-profile',choices=['baseline-directional','legacy-rectangle'],default='baseline-directional');ap.add_argument('--scenario',choices=['transit','all','obstacle','tools','maps','blockage','followthrough'],default='all');ap.add_argument('--block-case',choices=['persistent','transient','takeover'],default='persistent');ap.add_argument('--obstacle-offset',type=float,default=0.);ap.add_argument('--source-gap-ms',type=float,default=0.);args=ap.parse_args()
+    ap=argparse.ArgumentParser();ap.add_argument('--output',required=True);ap.add_argument('--setup',required=True);ap.add_argument('--port',type=int,default=8947);ap.add_argument('--domain',type=int,default=208);ap.add_argument('--stop-profile',choices=['baseline-directional','legacy-rectangle'],default='baseline-directional');ap.add_argument('--scenario',choices=['transit','all','obstacle','tools','maps','blockage','followthrough','rotation'],default='all');ap.add_argument('--block-case',choices=['persistent','transient','takeover'],default='persistent');ap.add_argument('--obstacle-offset',type=float,default=0.);ap.add_argument('--source-gap-ms',type=float,default=0.);args=ap.parse_args()
     if not 0<=args.source_gap_ms<=1500:raise ValueError('Invalid bounded source gap')
     if not math.isfinite(args.obstacle_offset):raise ValueError('Invalid synthetic obstacle offset')
     out=Path(args.output).resolve().parent
@@ -135,7 +135,35 @@ def main():
         call('/api/sim_operator',{'mode':'navigation_allowed'});wait(lambda d:d['session']['navigation_permitted'],5)
         call('/api/speed',{'speed':.75,'velocity_scale':.5})
         d=status();doc=blank('native_showroom')
-        if args.scenario not in ('obstacle','tools','maps','blockage','followthrough'):
+        if args.scenario=='rotation':
+            ros=ScenarioROS();origin=d['truth']['pose'][:];requested=-math.pi/2
+            prepared=call('/api/rotate',dict(radians=requested))
+            assert prepared['global_path_planned']is False and prepared['hardware_execution_enabled']is False
+            before=status();assert before['session']['path_points']==0 and before['session']['task_kind']=='rotation'
+            call('/api/confirm',dict(generation=prepared['generation']))
+            d=wait(lambda d:d['session']['phase']=='arrived',45)
+            turn=math.remainder(d['truth']['pose'][2]-origin[2],2*math.pi)
+            assert abs(turn-requested)<.15,(turn,requested)
+            assert math.dist(d['truth']['pose'][:2],origin[:2])<.01
+            assert all(abs(t['truth']['command'][0])<1e-9 for t in trace)
+            events.append(dict(case='independent_right90_actual_spin_no_translation_no_global_path',passed=True,actual_turn_rad=turn,global_path_points=0))
+            circle=[origin[0]+.35,origin[1]+.05,.03]
+            until=time.monotonic()+2.
+            while time.monotonic()<until:ros.control(dict(obstacle=circle,control_id='rotation-edge-obstacle'));status();time.sleep(.05)
+            seen=status();rays=ros.obstacle_rays(seen,circle);assert rays>=2,('rotation obstacle not observed',rays)
+            prepared=call('/api/rotate',dict(radians=-math.pi/2));call('/api/confirm',dict(generation=prepared['generation']))
+            d=wait(lambda d:d['session']['phase']in ('blocked','cancelled')and max(map(abs,d['truth']['command']))<1e-6,15)
+            assert d['truth']['collision_attempts']==0
+            assert math.dist(d['truth']['pose'][:2],origin[:2])<.01
+            events.append(dict(case='independent_spin_observed_edge_obstacle_stop',passed=True,ray_returns=rays,collision_attempts=0,terminal_phase=d['session']['phase']))
+            for _ in range(10):ros.control(dict(obstacle=None,control_id='rotation-cleared'));status();time.sleep(.1)
+            prepared=call('/api/rotate',dict(radians=math.pi/2));call('/api/confirm',dict(generation=prepared['generation']))
+            wait(lambda d:abs(d['truth']['command'][1])>.05,10)
+            call('/api/sim_operator',dict(mode='manual'));d=wait(lambda d:d['session']['phase']=='manual'and max(map(abs,d['truth']['command']))<1e-6,5)
+            call('/api/sim_operator',dict(mode='navigation_allowed'));time.sleep(.5);d=status()
+            assert d['session']['force_navigation_zero']and max(map(abs,d['truth']['command']))<1e-6
+            events.append(dict(case='independent_spin_manual_takeover_no_auto_resume',passed=True))
+        if args.scenario not in ('obstacle','tools','maps','blockage','followthrough','rotation'):
             doc=blank('native_showroom');doc['points']=[point('a',2.8,2.5),point('b',3.6,2.5),point('c',4.4,2.5,'visit')]
             doc['routes']=[{'id':'tour','name':'continuous transit','mode':'showcase','loops':1,'description':'synthetic','steps':[{'point_id':i,'speak':False}for i in ['a','b','c']]}]
             doc=save(doc);start(doc);d=complete();mission=d['reception']['mission']
