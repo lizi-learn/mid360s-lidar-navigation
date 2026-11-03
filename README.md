@@ -135,6 +135,8 @@ still a commissioning candidate, not physical clearance acceptance.
 
 ### 导览接待扩展（开发中）
 
+P2 导航的全局动态障碍层保留观测 3 秒；真实新观测持续刷新对应格子，传感器过期时不执行过期清理。已过期的动态标记回退到原静态地图值，不把静态墙壁清为空地。局部障碍层保持原行为。保存地图中的未知区域与手绘禁行线一起由两张代价图的标准 KeepoutFilter 保留，实时激光清障不能在地图外创造通往楼梯侧的路线。地图文件、点位和传感器时间戳不被改写。
+
 点位与朝向、产品介绍、展示路线和操作员执行页见 [导览接待工作台](docs/RECEPTION_STUDIO.md)。[参考调研](docs/RECEPTION_RESEARCH.md)记录采用方向与边界；冻结的 Baseline V1 保持不变。隔离预览使用合成场景，不连接真实机器人。
 
 

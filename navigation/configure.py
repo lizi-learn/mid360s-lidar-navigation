@@ -91,6 +91,9 @@ def config(controller='rpp', tree=None, minimum_speed=.03, footprint_vertices=No
             inflation_layer=dict(plugin='nav2_costmap_2d::InflationLayer',inflation_radius=.75,cost_scaling_factor=3.),
             always_send_full_costmap=True)
         if rolling:common.update(rolling_window=True,width=5,height=5)
+        elif gait_profile=='p2-flat-model':
+            common['obstacle_layer'].update(plugin='p2_nav_controller::TemporalObstacleLayer',
+                observation_keep_time=3.,expiration_source_max_age=.3)
         result[name]={name:{'ros__parameters':common}}
     add('planner_server',dict(use_sim_time=False,expected_planner_frequency=1.,planner_plugins=['GridBased'],
         GridBased=dict(plugin='nav2_smac_planner/SmacPlannerLattice',tolerance=.05,allow_unknown=False,
