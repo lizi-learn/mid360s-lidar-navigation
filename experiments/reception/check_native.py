@@ -132,6 +132,7 @@ def main():
         token=wait(lambda d:'request_token'in d,15)['request_token']
         call('/api/start',{'mode':'navigation','name':'native_showroom','controller':'rpp'})
         wait(lambda d:d.get('gate',{}).get('localized')and d['gate'].get('collision_source_valid')is True and d['gate'].get('data_fresh')is True and d.get('pose'),50)
+        assert status().get('truth',{}).get('input_ramp')=='production_cpp','Owned P2 fixture must use the production C++ input ramp'
         call('/api/sim_operator',{'mode':'navigation_allowed'});wait(lambda d:d['session']['navigation_permitted'],5)
         call('/api/speed',{'speed':.75,'velocity_scale':.5})
         d=status();doc=blank('native_showroom')

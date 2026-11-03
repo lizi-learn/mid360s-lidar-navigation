@@ -261,7 +261,7 @@ if __name__=='__main__':main()
 
 
 def apply_input_ramp_routing(path,native_ramp,buffered):
-    """Physical gait owns the only input ramp; simulation keeps Nav2 smoothing."""
+    """Native hardware or its synthetic input model owns the sole input ramp."""
     path=Path(path);data=yaml.safe_load(path.read_text())
     topic='/p2_nav/cmd_buffered'if buffered else'/p2_nav/cmd_raw'
     data['collision_monitor']['ros__parameters']['cmd_vel_in_topic']=topic if native_ramp else'/p2_nav/cmd_smooth'

@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cmath>
 #include <mutex>
+#include <optional>
 #include "nav2_regulated_pure_pursuit_controller/regulated_pure_pursuit_controller.hpp"
 #include "nav2_core/exceptions.hpp"
 #include "pluginlib/class_list_macros.hpp"
@@ -148,6 +149,7 @@ class SettledGoalRPP : public nav2_regulated_pure_pursuit_controller::RegulatedP
     if(collision_lookahead_floor_>0.)for(double value:{.9,.7,collision_lookahead_floor_})
       if(value<previews.back()-1e-6&&value>=collision_lookahead_floor_)previews.push_back(value);
     std::string last="No collision-free tracking command";
+    std::optional<geometry_msgs::msg::TwistStamped> close_tracking;
     for(size_t i=0;i<previews.size();++i) {
       if(i){min_lookahead_dist_=previews[i];max_lookahead_dist_=previews[i];}
       try {
@@ -167,6 +169,8 @@ class SettledGoalRPP : public nav2_regulated_pure_pursuit_controller::RegulatedP
           if(use_collision_detection_&&body_arc_collision(pose,out.twist.linear.x,bounded,distance))
             throw nav2_core::PlannerException("Forward tracking arc collision ahead");}
         out.twist.angular.z=bounded;
+        {auto *map=costmap_ros_->getCostmap();std::unique_lock<nav2_costmap_2d::Costmap2D::mutex_t> map_lock(*map->getMutex());
+          if(collision_lookahead_floor_>0.&&out.twist.linear.x>0.&&inflation_exposure(pose,out.twist.linear.x,bounded,distance)>.22){close_tracking=out;break;}}
         follow_measured_turn(pose,speed,distance,out);
         if(std::abs(bounded)>.35)RCLCPP_INFO_THROTTLE(costmap_ros_->get_logger(),*clock_,500,
           "Pursuit evidence: source=%ld preview=%.3f attempt=%zu x=%.3f y=%.3f yaw=%.3f measured_yaw=%.3f forward=%.3f turn=%.3f",
@@ -184,16 +188,20 @@ class SettledGoalRPP : public nav2_regulated_pure_pursuit_controller::RegulatedP
       const double angle=std::atan2(carrot.pose.position.y,carrot.pose.position.x);
       auto *map=costmap_ros_->getCostmap();std::unique_lock<nav2_costmap_2d::Costmap2D::mutex_t> map_lock(*map->getMutex());
       double best=1e30,best_v=0.,best_w=0.;bool found=false;
-      // A small velocity window is a fallback after pursuit arcs collide.
-      // Every sampled command keeps the original full prediction horizon.
-      for(double v:{std::min(desired_linear_vel_,.6),0.})for(double fraction:{-1.,-.75,-.5,-.25,0.,.25,.5,.75,1.}) {
-        const double w=fraction*rotate_to_heading_angular_vel_;
-        if(v==0.&&(std::abs(angle)<=.15||std::abs(w)<minimum_pivot_||w*angle<=0.))continue;
-        if(use_collision_detection_&&body_arc_collision(pose,v,w,distance))continue;
+      auto score_command=[&](double v,double w) {
         const double px=std::abs(w)<1e-6?v:v*std::sin(w)/w;
         const double py=std::abs(w)<1e-6?0.:v*(1.-std::cos(w))/w;
         const double heading=std::remainder(angle-w,2*std::acos(-1.));
-        const double score=2.*(std::pow(carrot.pose.position.x-px,2)+std::pow(carrot.pose.position.y-py,2))+.3*heading*heading+.05*w*w;
+        return 2.*(std::pow(carrot.pose.position.x-px,2)+std::pow(carrot.pose.position.y-py,2))+.3*heading*heading+.05*w*w+3.*inflation_exposure(pose,v,w,distance);
+      };
+      if(close_tracking&&(!use_collision_detection_||!body_arc_collision(pose,close_tracking->twist.linear.x,close_tracking->twist.angular.z,distance))){best_v=close_tracking->twist.linear.x;best_w=close_tracking->twist.angular.z;best=score_command(best_v,best_w);found=true;}
+      // A small velocity window is a fallback after pursuit arcs collide.
+      // Every sampled command keeps the original full prediction horizon.
+      for(double v:{std::min(desired_linear_vel_,.6),0.})for(double fraction:{-1.,-.875,-.75,-.625,-.5,-.375,-.25,-.125,0.,.125,.25,.375,.5,.625,.75,.875,1.}) {
+        const double w=fraction*rotate_to_heading_angular_vel_;
+        if(v==0.&&(std::abs(angle)<=.15||std::abs(w)<minimum_pivot_||w*angle<=0.))continue;
+        if(use_collision_detection_&&body_arc_collision(pose,v,w,distance))continue;
+        const double score=score_command(v,w);
         if(score<best){best=score;best_v=v;best_w=w;found=true;}
       }
       if(found){
@@ -205,6 +213,22 @@ class SettledGoalRPP : public nav2_regulated_pure_pursuit_controller::RegulatedP
     }
 
     throw nav2_core::PlannerException(last);
+  }
+  double inflation_exposure(const geometry_msgs::msg::PoseStamped &pose,double v,double w,double distance) {
+    auto *map=costmap_ros_->getCostmap();const double x=pose.pose.position.x,y=pose.pose.position.y,yaw=tf2::getYaw(pose.pose.orientation);
+    double sum=0.,peak=0.;int count=0;
+    for(int i=0;i<=15;++i) {
+      const double t=max_allowed_time_to_collision_up_to_carrot_*i/15.,a=yaw+w*t;
+      const double px=x+(std::abs(w)<1e-8?v*t*std::cos(yaw):v/w*(std::sin(a)-std::sin(yaw)));
+      const double py=y+(std::abs(w)<1e-8?v*t*std::sin(yaw):v/w*(std::cos(yaw)-std::cos(a)));
+      if(std::hypot(px-x,py-y)>distance)break;
+      unsigned ix,iy;if(!map->worldToMap(px,py,ix,iy))return 1.;
+      const double cost=std::min(253.,static_cast<double>(map->getCost(ix,iy)))/253.;
+      sum+=cost*cost;peak=std::max(peak,cost*cost);++count;
+    }
+    // Existing inflation is a preference, never a larger footprint or a new
+    // rejection condition. Retain the clear RPP candidate if no better arc fits.
+    return count?.5*(sum/count+peak):1.;
   }
   bool body_arc_collision(const geometry_msgs::msg::PoseStamped &pose,double v,double w,double distance) {
     const double horizon=max_allowed_time_to_collision_up_to_carrot_;

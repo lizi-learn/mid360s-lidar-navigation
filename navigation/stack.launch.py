@@ -21,8 +21,9 @@ def setup(context):
     assert mode in ('mapping','navigation')
     common={'use_sim_time':False}
     nodes=[]
-    buffered=os.getenv('P2_NAV_MOTION_BUFFER')=='true'
-    native_ramp=get('physical_gait')=='true'
+    emulated_ramp=simulation and get('gait_handoff')=='true' and get('simulation_sensor_fixture')!='true'
+    buffered=os.getenv('P2_NAV_MOTION_BUFFER')=='true' or emulated_ramp
+    native_ramp=get('physical_gait')=='true' or emulated_ramp
     apply_input_ramp_routing(params,native_ramp,buffered)
     if get('physical_gait')=='true':nodes.append(ExecuteProcess(cmd=['/usr/bin/python3','-S',str(root/'path_view_node.py')],output='screen'))
     if buffered:nodes.append(ExecuteProcess(cmd=['/usr/bin/python3','-S',str(root/'motion_buffer_node.py'),
@@ -31,6 +32,7 @@ def setup(context):
     if simulation and get('simulation_sensor_fixture')!='true':
         shape=yaml.safe_load(Path(params).read_text())['local_costmap']['local_costmap']['ros__parameters']['footprint']
         sim_env={'P2_NAV_FOOTPRINT':shape}
+        if native_ramp:sim_env['P2_NAV_NATIVE_INPUT_RAMP']='true'
         if get('gait_handoff')=='true':sim_env['P2_NAV_VELOCITY_WINDOW']=os.getenv('P2_NAV_VELOCITY_WINDOW','.4')
         nodes.append(ExecuteProcess(cmd=['/usr/bin/python3','-S',str(root/'sim_world.py')],additional_env=sim_env,output='screen'))
     elif not simulation:

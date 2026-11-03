@@ -42,6 +42,10 @@ class World(Node):
         self.footprint=np.asarray(checked(json.loads(os.environ['P2_NAV_FOOTPRINT']) if os.getenv('P2_NAV_FOOTPRINT') else DEFAULT))
         self.grid=make_world();self.x=2.;self.y=2.5;self.yaw=0.;self.cmd=(0.,0.);self.cmd_at=0.
         self.last=time.monotonic();self.start=self.last;self.loop_profile={"step_gap_max_ms":0.,"sense_work_max_ms":0.};self.collision_count=0;self.travel=0.;self.path=[]
+        self.input_model=None;self.input_feedback=(0.,0.);self.input_feedback_ns=time.monotonic_ns()
+        if os.getenv('P2_NAV_NATIVE_INPUT_RAMP')=='true':
+            from native_input_model import NativeInputModel
+            self.input_model=NativeInputModel()
         self.native=None
         self.velocity=None
         if os.getenv('P2_NAV_VELOCITY_WINDOW'):
@@ -57,6 +61,7 @@ class World(Node):
         self.scan=self.create_publisher(LaserScan,'/scan',qos_profile_sensor_data)
         self.truth=self.create_publisher(String,'/p2_nav/sim_truth',10)
         self.ground=self.create_publisher(Bool,'/p2_nav/ground_ok',10)
+        self.reference=self.create_publisher(String,'/p2_nav/reference_status',10)
         self.tf=TransformBroadcaster(self);self.static=StaticTransformBroadcaster(self)
         t=TransformStamped();t.header.frame_id='base_link';t.child_frame_id='laser';t.transform.rotation.w=1.;self.static.sendTransform(t)
         self.create_subscription(Twist,'/p2_nav/cmd_safe',self.on_command,10)
@@ -66,7 +71,7 @@ class World(Node):
         self.radii=np.arange(.15,14.,RES)
     def on_command(self,msg):
         self.cmd=(float(msg.linear.x),float(msg.angular.z));self.cmd_at=time.monotonic()
-        if self.native:self.native.send(*self.cmd)
+        if self.native and self.input_model is None:self.native.send(*self.cmd)
     def on_control(self,msg):
         v=json.loads(msg.data)
         for k in ('drop_scan','drop_odom','ground_ok','pause'):
@@ -98,6 +103,9 @@ class World(Node):
         now=time.monotonic();self.loop_profile["step_gap_max_ms"]=max(self.loop_profile["step_gap_max_ms"],(now-self.last)*1000);dt=min(.05,now-self.last);self.last=now
         v,w=self.cmd if now-self.cmd_at<.35 and not self.pause else (0.,0.)
         actual_vy=0.
+        if self.input_model:
+            v,w=self.input_model.step((v,w),self.input_feedback,dt,self.input_feedback_ns,time.monotonic_ns())
+            if self.native:self.native.send(v,w)
         if self.native:
             state,received=self.native.latest()
             if state is None or now-received>.25:return
@@ -120,6 +128,9 @@ class World(Node):
                 b=Bool();b.data=False;self.ground.publish(b);return
             v,actual_vy,w=filtered
         if not self.drop_odom:
+            self.input_feedback=(v,w);self.input_feedback_ns=time.monotonic_ns()
+            reference=String();reference.data=json.dumps(dict(navigation_reference='lidar_projection',navigation_reference_ready=True,velocity_ready=True,body_reference_ready=False,kinematic_feedback_ready=False,simulation=True,source_ros_ns=stamp.sec*1000000000+stamp.nanosec,scope='Synthetic co-located lidar/base pose and measured modeled velocity; no physical calibration'))
+            self.reference.publish(reference)
             t=TransformStamped();t.header.stamp=stamp;t.header.frame_id='odom';t.child_frame_id='base_link'
             t.transform.translation.x=self.x;t.transform.translation.y=self.y
             t.transform.rotation.z=math.sin(self.yaw/2);t.transform.rotation.w=math.cos(self.yaw/2);self.tf.sendTransform(t)
@@ -147,11 +158,12 @@ class World(Node):
         self.loop_profile['sense_work_max_ms']=max(self.loop_profile['sense_work_max_ms'],(time.monotonic()-sense_begin)*1000)
         msg=String();msg.data=json.dumps({'loop_profile':self.loop_profile,'pose':[self.x,self.y,self.yaw],'collision_attempts':self.collision_count,
             'controls':{'control_id':self.control_id,'drop_scan':self.drop_scan,'drop_odom':self.drop_odom,'ground_ok':self.ground_ok,'pause':self.pause,'obstacle':self.obstacle,'doors':self.doors},
-            'travelled_m':self.travel,'command':self.cmd,'elapsed_s':time.monotonic()-self.start,
+            'input_ramp':'production_cpp'if self.input_model else'upstream','travelled_m':self.travel,'command':self.cmd,'elapsed_s':time.monotonic()-self.start,
             'simulation':'native dynamics + ray-cast scan' if self.native else 'planar kinematics + ray-cast scan; not a humanoid dynamics validation'})
         self.truth.publish(msg)
     def destroy_node(self):
         if self.native:self.native.close()
+        if self.input_model:self.input_model.close()
         return super().destroy_node()
 
 def main():
