@@ -6,7 +6,7 @@ import re
 def reception_html(root):
     root=Path(root)
     return (root/'reception.html').read_text().replace('/*RECEPTION_TOOLS*/',
-        (root/'reception_hash.js').read_text()+'\n'+(root/'reception_tools.js').read_text()+'\n'+(root/'reception_studio.js').read_text())
+        (root/'reception_hash.js').read_text()+'\n'+(root/'reception_tools.js').read_text()+'\n'+(root/'reception_studio.js').read_text()+'\n'+(root/'reception_quick.js').read_text())
 
 def embedded_reception_html(root):
     app=reception_html(root)

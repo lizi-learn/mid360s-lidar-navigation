@@ -4,15 +4,18 @@ const {JSDOM,VirtualConsole}=require('jsdom');
 const fs=require('node:fs'),assert=require('node:assert/strict');
 const input=JSON.parse(fs.readFileSync(0,'utf8'));
 const tick=()=>new Promise(r=>setImmediate(r));
-async function page(html,embedded=false,fixture=input.fixture){
- const requests=[],errors=[];let hold=false,release=null;
+async function page(html,embedded=false,fixture=input.fixture,overrides={}){
+ const requests=[],missions=[],stops=[],errors=[],intervals=[];let hold=false,release=null,offline=false;
+ let liveStatus={robot_name:'synthetic editor',simulation:true,maps:['fixture'],reception:{map_id:'fixture'},session:{operator_verified:true,operator_mode:'manual',navigation_permitted:false},gait_transport:{controller_instance:1,readiness:3,phase:'stopped'},request_token:'synthetic',map_revision:-1,...overrides};
  let catalog=structuredClone(fixture);
- const dom=new JSDOM(html,{url:embedded?'http://fixture/api/v1/modules/navigation/workbench?route=tour':'http://fixture/reception?route=tour',runScripts:'dangerously',virtualConsole:new VirtualConsole().on('jsdomError',e=>errors.push(e.message)),beforeParse(w){
-  w.ResizeObserver=class{observe(){}};w.HTMLCanvasElement.prototype.getContext=()=>({});w.requestAnimationFrame=()=>1;w.cancelAnimationFrame=()=>{};w.setInterval=()=>1;w.TextEncoder=TextEncoder;
+ const dom=new JSDOM(html,{url:embedded?'http://fixture/api/v1/modules/navigation/workbench?route=tour':'http://fixture/reception?route=tour',runScripts:'dangerously',pretendToBeVisual:true,virtualConsole:new VirtualConsole().on('jsdomError',e=>errors.push(e.message)),beforeParse(w){
+  w.ResizeObserver=class{observe(){}};w.HTMLCanvasElement.prototype.getContext=()=>new Proxy({measureText:t=>({width:String(t).length*8})},{get:(o,k)=>o[k]??(()=>{})});w.HTMLCanvasElement.prototype.setPointerCapture=()=>{};w.requestAnimationFrame=()=>1;w.cancelAnimationFrame=()=>{};w.setInterval=(fn,ms)=>{intervals.push([fn,ms]);return intervals.length};w.TextEncoder=TextEncoder;
   w.fetch=async(url,options)=>{
    const response=value=>({ok:true,json:async()=>structuredClone(value)});
-   if(!options?.body)return response({robot_name:'synthetic editor',simulation:true,maps:['fixture'],reception:{map_id:'fixture'},session:{operator_verified:true,operator_mode:'manual'},request_token:'synthetic',map_revision:-1});
+   if(!options?.body){if(offline)throw Error('synthetic disconnect');return response(liveStatus)}
    const q=JSON.parse(options.body),r=q.reception;
+   if(String(url).endsWith('/api/confirm')){missions.push(structuredClone(q));return liveStatus.session.navigation_permitted?response({phase:'navigating'}):{ok:false,json:async()=>({error:'当前 E 档位或摇杆未允许导航'})}}
+   if(String(url).endsWith('/api/stop')){stops.push(q);return response({stopped:true})}
    if(r?.operation==='read')return response({document:catalog,voice:{}});
    if(r?.operation==='map_raster')return{ok:false,json:async()=>({error:'synthetic fixture has no raster'})};
    assert.equal(r?.operation,'save','Only content saving is allowed in editor fixture');requests.push(structuredClone(q));
@@ -26,12 +29,31 @@ async function page(html,embedded=false,fixture=input.fixture){
  await until(()=>d.getElementById('pName'));for(let i=0;i<5;i++)await tick();
  function field(id,value,event=true){const e=d.getElementById(id);assert.ok(e,id);e.value=value;if(event)e.dispatchEvent(new dom.window.Event('input',{bubbles:true}));}
  async function save(button='saveButton'){const n=requests.length;d.getElementById(button).click();await until(()=>requests.length>n);for(let i=0;i<8;i++)await tick()}
- return{dom,d,field,save,until,requests,errors,hold(){hold=true},release(){hold=false;release()},close(){dom.window.close()}};
+ return{dom,d,field,save,until,requests,missions,stops,errors,hold(){hold=true},release(){hold=false;release()},async poll(value,disconnect=false){if(value)liveStatus={...liveStatus,...value};offline=disconnect;await intervals.find(x=>x[1]===1000)[0]();for(let i=0;i<8;i++)await tick()},map(){const c=d.getElementById('mapCanvas');Object.defineProperties(c,{clientWidth:{configurable:true,value:800},clientHeight:{configurable:true,value:600}});d.querySelector('[onclick="fitMap()"]').click();return c},close(){dom.window.close()}};
 }
 (async()=>{
  const results=[],payloads=[];
  for(const embedded of [false,true]){
   const variant=embedded?'embedded':'direct';
+  const left={operator_verified:true,operator_mode:'navigation_allowed',navigation_permitted:true};
+  let quick=await page(embedded?input.embedded:input.direct,embedded,input.fixture,{session:left});
+  quick.field('pName','单点试走',false);quick.field('pScript','测试介绍',false);quick.d.getElementById('quickVisit').click();quick.d.getElementById('quickVisit').click();await quick.until(()=>quick.missions.length===1);for(let i=0;i<8;i++)await tick();
+  assert.equal(quick.requests.length,1);assert.equal(quick.requests[0].reception.document.points[0].script,'测试介绍');assert.equal(quick.missions[0].reception_command.point_id,'home');assert.equal(quick.missions[0].reception_command.revision,2);assert.ok(quick.d.body.classList.contains('operator'));payloads.push(quick.requests[0]);results.push({variant,case:'point_test_saves_visible_edits_then_sends_one_start_without_confirmation',passed:true});quick.close();
+  quick=await page(embedded?input.embedded:input.direct,embedded,input.fixture,{session:left});
+  assert.equal(quick.d.getElementById('gaitBadge').textContent,'D 策略');assert.equal(quick.d.getElementById('automationBadge').textContent,'E 左 · 自动化已开');
+  await quick.poll({session:{operator_verified:true,operator_mode:'manual',navigation_permitted:false}});assert.match(quick.d.getElementById('automationBadge').textContent,/E 右/);
+  await quick.poll({session:{operator_verified:true,operator_mode:'paused',navigation_permitted:false}});assert.match(quick.d.getElementById('automationBadge').textContent,/E 中/);
+  await quick.poll({session:{...left,manual_activity:true}});assert.match(quick.d.getElementById('automationBadge').textContent,/摇杆接管/);
+  await quick.poll({session:{operator_verified:false,operator_mode:'navigation_allowed'},gait_transport:{controller_instance:1,readiness:0,phase:'disconnected'}});assert.match(quick.d.getElementById('automationBadge').textContent,/未连接/);assert.match(quick.d.getElementById('gaitBadge').textContent,/未连接/);
+  await quick.poll({session:left,gait_transport:{controller_instance:1,readiness:2,phase:'stopped'}});assert.match(quick.d.getElementById('gaitBadge').textContent,/未进入 D/);
+  await quick.poll(null,true);assert.match(quick.d.getElementById('gaitBadge').textContent,/未连接/);assert.match(quick.d.getElementById('automationBadge').textContent,/未连接/);assert.equal(quick.missions.length,0);results.push({variant,case:'badges_follow_actual_D_and_E_manual_pause_stick_unknown_and_disconnect',passed:true});quick.close();
+  quick=await page(embedded?input.embedded:input.direct,embedded,input.fixture,{session:left});const c=quick.map();quick.d.getElementById('mapNavigate').click();for(let i=0;i<8;i++)await tick();assert.equal(quick.missions.length,0);const savedBeforeMapTap=quick.requests.length;
+  const e=(x,y,extra={})=>({pointerId:1,pointerType:'mouse',button:0,clientX:x,clientY:y,...extra});
+  c.onpointerdown(e(400,300));c.onpointerup(e(400,300));await quick.until(()=>quick.missions.length===1);assert.equal(quick.missions[0].reception_command.point_id,'home');
+  c.onpointerdown(e(500,300));c.onpointermove(e(530,310));c.onpointerup(e(530,310));for(let i=0;i<8;i++)await tick();assert.equal(quick.missions.length,1,'Pan must not start navigation');
+  c.onpointerdown(e(600,400));c.onpointerup(e(600,400));await quick.until(()=>quick.missions.length===2);assert.ok(Number.isFinite(quick.missions[1].reception_command.target.x));assert.ok(Number.isFinite(quick.missions[1].reception_command.target.y));assert.equal(quick.requests.length,savedBeforeMapTap,'Temporary destination must not create saved points');
+  quick.d.getElementById('cancelAll').click();await quick.until(()=>quick.stops.length===1);quick.d.getElementById('mapNavigate').click();for(let i=0;i<8;i++)await tick();c.onpointerdown(e(650,420));c.onpointerup(e(650,420));for(let i=0;i<8;i++)await tick();assert.equal(quick.missions.length,2);assert.equal(quick.errors.length,0);results.push({variant,case:'explicit_map_mode_starts_saved_or_temporary_tap_pan_is_inert_cancel_works_mode_can_close',passed:true});quick.close();
+  quick=await page(embedded?input.embedded:input.direct,embedded);quick.d.getElementById('quickVisit').click();await quick.until(()=>quick.missions.length===1);for(let i=0;i<8;i++)await tick();assert.match(quick.d.getElementById('toast').textContent,/未允许导航/);assert.ok(!quick.d.body.classList.contains('operator'));results.push({variant,case:'manual_mode_keeps_actual_server_rejection_visible',passed:true});quick.close();
   for(const button of ['saveButton','applyPoint']){
    const q=await page(embedded?input.embedded:input.direct,embedded);
    q.d.getElementById('addButton').click();q.field('pName','  旧点名  ',false);q.d.getElementById(button).click();for(let i=0;i<8;i++)await tick();
