@@ -287,7 +287,7 @@ class MissionService:
         command=copy.deepcopy(self.active_command);feedback=getattr(self.node,'feedback',{})
         remaining=feedback.get('poses_remaining')if feedback.get('generation')==self.engine.goal_generation else None
         if type(remaining)is int and 0<remaining<=len(command['points']):command['points']=command['points'][-remaining:]
-        command.pop('reroute',None);command.pop('wait',None)
+        for key in ('reroute','wait','source_recovery','source_deadline'):command.pop(key,None)
         self.resume_command=command
     def source_fault(self,reason):
         """Recover an authorized task through real cancel, plan and arm receipts.
@@ -328,7 +328,7 @@ class MissionService:
             self.engine.begin_reroute(reason)
             command.update(epoch=self.engine.epoch,reroute=True,source_recovery=True,reason=reason,
                            source_deadline=time.monotonic()+self.node.session.replan_timeout)
-            self.pending_source_command=command;self.source_recovery_active=True
+            self.pending_source_command=command;self.active_command=copy.deepcopy(command);self.source_recovery_active=True
             self.engine.event('source_recovery_wait',generation=self.node.session.generation,reason=reason)
             return True
     def dispatch(self, command):

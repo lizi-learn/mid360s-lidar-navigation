@@ -1,6 +1,6 @@
 {
   "base_commit": "a55634c81f2b37ff261c6b075f58fd141b807e7a",
-  "unit_tests": 386,
+  "unit_tests": 387,
   "regression_before": {
     "cases": 8,
     "failed": 7,
@@ -487,7 +487,8 @@
       "curved_forward_receipts": 1
     },
     "udp_profile_sha256": "7ea5d3f98e0bd15680a6d6fde92edc233c12220386226b35639e8e209f0f8f86",
-    "scope": "Same authorized task: actual stop/cancel, original health recovery, replan and newer authorization. No source timestamp changes or driver/policy restart. Simulation only."
+    "scope": "Same authorized task: actual stop/cancel, original health recovery, replan and newer authorization. No source timestamp changes or driver/policy restart. Simulation only.",
+    "pause_regression": "Pause during a replacement plan preserves only remaining route references and removes the old automatic-recovery deadline before explicit Continue."
   },
   "latest_ci": "pending exact source revision"
 }

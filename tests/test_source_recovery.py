@@ -25,6 +25,13 @@ class SourceRecoveryTests(unittest.TestCase):
         s.dispatch(cmd);self.assertEqual(s.engine.phase,'navigating');self.assertEqual(s.engine.goal_generation,8)
         s.node.cancel_reception_leg.assert_called_once();s.node.confirm_goal.assert_called_once()
         self.assertFalse(s.source_recovery_active);self.assertNotIn('source_recovery',s.active_command)
+    def test_pause_during_new_plan_keeps_remaining_route_and_discards_old_recovery_deadline(self):
+        s=self.service();s.source_fault('source gap')
+        s.node.feedback={};s.node.session.generation=8
+        s.capture_resume()
+        self.assertEqual([p['id']for p in s.resume_command['points']],['c'])
+        for key in ['reroute','wait','source_recovery','source_deadline']:self.assertNotIn(key,s.resume_command)
+
     def test_waits_for_actual_health_before_planning(self):
         s=self.service();s.source_fault('source gap');s.node.health_ready.side_effect=[False,True,True]
         with patch('reception_mission.time.sleep')as sleep:s.dispatch(s.pending_source_command)
