@@ -39,7 +39,7 @@ class SavedPreview(unittest.TestCase):
         speaking=next(s for s in seq if s['phase']=='presenting');self.assertAlmostEqual(speaking['pose'][2],1.,places=3)
         self.assertEqual(speaking['script'],'介绍产品');self.assertLess(next(i for i,s in enumerate(seq)if s['phase']=='guest_wait'),next(i for i,s in enumerate(seq)if s['phase']=='dwell'))
         dwell=[s for s in seq if s['phase']=='dwell'];self.assertAlmostEqual(dwell[-1]['t']-dwell[0]['t'],4.,places=2)
-        self.assertEqual(seq[-1]['phase'],'completed');self.assertEqual(r['hardware_commands'],0);self.assertEqual(g,oldg);self.assertEqual(d,oldd)
+        self.assertEqual(seq[-1]['phase'],'completed');self.assertEqual(seq[-1]['t'],r['duration_s']);self.assertEqual(r['hardware_commands'],0);self.assertEqual(g,oldg);self.assertEqual(d,oldd)
 
     def test_keepout_blocks_and_speed_zone_changes_preview_duration(self):
         g,d=self.fixture();before=preview(g,d,'tour')

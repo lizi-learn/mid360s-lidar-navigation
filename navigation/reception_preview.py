@@ -124,7 +124,7 @@ def preview(grid,document,route_id):
                 route_name=route['name'],scope='saved_map_geometric_task_preview_not_gait_or_live_nav2',
                 hardware_commands=0,saved_map_sha256=grid.get('image_sha256'),body_m=.55,
                 model_speed_mps=.4,model_turn_radps=.6,guest_continue_after_s=3.,
-                duration_s=round(elapsed,2),length_m=round(length,2),samples=samples,events=events,
+                duration_s=round(elapsed,3),length_m=round(length,2),samples=samples,events=events,
                 annotations=annotation_report,expanded=expanded)
 
 

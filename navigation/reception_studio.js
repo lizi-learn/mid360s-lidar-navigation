@@ -99,7 +99,7 @@ canvas.onpointerdown=e=>{
 };
 canvas.onpointerup=e=>{const result=studioUp(e);if(tab==='points')renderStudioToolbar();return result;};
 
-function studioStopPreview(clear=false){studioPlaying=false;++studioRequest;if(studioFrame!==null)cancelAnimationFrame(studioFrame);studioFrame=null;if(clear){studioPreview=null;studioClock=0;}previewStrip.classList.add('hidden');if(typeof draw==='function'&&view)draw();}
+function studioStopPreview(clear=true){studioPlaying=false;++studioRequest;if(studioFrame!==null)cancelAnimationFrame(studioFrame);studioFrame=null;if(clear){studioPreview=null;studioClock=0;}previewStrip.classList.add('hidden');if(typeof draw==='function'&&view)draw();}
 async function studioStartPreview(){
     if(!selectedRoute)return toast('先在地图上方选择一条路线');
     studioStopPreview(true);const requestId=studioRequest;
