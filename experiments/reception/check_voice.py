@@ -5,6 +5,8 @@ from pathlib import Path
 ROOT=Path(__file__).resolve().parents[2];sys.path.insert(0,str(ROOT/'navigation'))
 from reception_catalog import content_key
 from reception_voice import VoiceCache,PresentationPlayer
+from reception_mission import Mission
+from reception_catalog import blank, validate
 
 def wait(test):
     until=time.monotonic()+3
@@ -43,7 +45,33 @@ def main():
             mission['epoch']=125;mission['speech_key']='0'*64;p.observe(mission,enabled=True,volume=55,now=time.monotonic())
             assert json.loads(result.read_text())['result']=='missing'
             q.stop();p.stop()
-            report={'passed':True,'cases':['background_cache_subprocess','playback_completion_and_volume','worker_restart_no_replay','interrupt_reconnect_no_replay','missing_not_success'],
+            # Same cached words, four distinct arrivals across two tour loops.
+            document=blank('synthetic_voice')
+            document['points']=[dict(id=i,name=i,x=x,y=0.,yaw=0.,kind='visit',product_id='',
+                script=text,dwell=0.,guest_wait=True)for i,x in [('a',1.),('b',2.)]]
+            document['routes']=[dict(id='tour',name='Repeated product',mode='showcase',loops=2,
+                description='',steps=[dict(point_id=i,speak=True)for i in ['a','b']])]
+            m=Mission();m.start(validate(document),'tour',0.)
+            before=len(trace.read_text().splitlines());receipts=[]
+            def state(phase,g):return dict(navigation_permitted=True,operator_mode='navigation_allowed',phase=phase,generation=g)
+            for i in range(4):
+                command=m.tick(state('arrived',i),i*10.)
+                assert m.dispatched(command['epoch'],i+1)
+                m.tick(state('arrived',i+1),i*10.+1)
+                # Reject the preceding visit's persisted acknowledgement.
+                old=json.loads(result.read_text());m.tick(state('arrived',i+1),i*10.+2,old)
+                assert m.phase=='presenting'
+                p.observe(m.status(),enabled=True,volume=55,now=time.monotonic())
+                assert p.process is not None
+                time.sleep(.4);p.observe(m.status(),enabled=True,volume=55,now=time.monotonic())
+                receipt=json.loads(result.read_text());assert receipt['result']=='completed'
+                receipts.append(receipt)
+                m.tick(state('arrived',i+1),i*10.+3,receipt);assert m.phase=='guest_wait'
+                m.tick(state('arrived',i+1),i*10.+100);assert m.phase=='guest_wait'
+                m.continue_visit(i*10.+101)
+            assert m.phase=='completed' and len({(r['epoch'],r['key'])for r in receipts})==4
+            assert len(trace.read_text().splitlines())-before==4
+            report={'passed':True,'cases':['background_cache_subprocess','playback_completion_and_volume','worker_restart_no_replay','interrupt_reconnect_no_replay','missing_not_success','four_visits_same_content_actual_playback_and_continue'],
                     'hardware_commands':0,'scope':'Actual subprocesses and 0.5s silent synthetic WAV; fake paplay. Not subjective speech or physical speaker proof.'}
         finally:
             os.environ['PATH']=original_path;os.environ.pop('RECEPTION_TEST_TRACE',None)

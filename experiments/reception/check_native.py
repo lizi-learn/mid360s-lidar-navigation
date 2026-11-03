@@ -8,7 +8,7 @@ from pathlib import Path
 ROOT=Path(__file__).resolve().parents[2];NAV=ROOT/'navigation';sys.path.insert(0,str(NAV))
 
 def main():
-    ap=argparse.ArgumentParser();ap.add_argument('--output',required=True);ap.add_argument('--setup',required=True);ap.add_argument('--port',type=int,default=8947);ap.add_argument('--domain',type=int,default=208);ap.add_argument('--stop-profile',choices=['baseline-directional','legacy-rectangle'],default='baseline-directional');ap.add_argument('--scenario',choices=['transit','all','obstacle','tools','maps','blockage'],default='all');ap.add_argument('--block-case',choices=['persistent','transient','takeover'],default='persistent');ap.add_argument('--obstacle-offset',type=float,default=0.);args=ap.parse_args()
+    ap=argparse.ArgumentParser();ap.add_argument('--output',required=True);ap.add_argument('--setup',required=True);ap.add_argument('--port',type=int,default=8947);ap.add_argument('--domain',type=int,default=208);ap.add_argument('--stop-profile',choices=['baseline-directional','legacy-rectangle'],default='baseline-directional');ap.add_argument('--scenario',choices=['transit','all','obstacle','tools','maps','blockage','followthrough'],default='all');ap.add_argument('--block-case',choices=['persistent','transient','takeover'],default='persistent');ap.add_argument('--obstacle-offset',type=float,default=0.);args=ap.parse_args()
     if not math.isfinite(args.obstacle_offset):raise ValueError('Invalid synthetic obstacle offset')
     out=Path(args.output).resolve().parent
     if out.exists()and any(out.iterdir()):raise ValueError('Use a new output directory; old failures are retained')
@@ -32,7 +32,7 @@ def main():
     if doors:env['P2_NAV_SIM_DOORS']=json.dumps(doors)
     shell='source /opt/ros/humble/setup.bash\nsource '+shlex.quote(str(setup))+'\nexport PYTHONPATH=/usr/lib/python3/dist-packages:'+shlex.quote(str(NAV))+':${PYTHONPATH:-}\nexec /usr/bin/python3 -S '+shlex.quote(str(NAV/'console.py'))+' --simulation --gait-profile p2-flat-model --footprint-profile '+shlex.quote(str(foot))+' --runtime '+shlex.quote(str(runtime))+' --port '+str(args.port)
     log=(out/'console.log').open('w');process=subprocess.Popen(['bash','-c',shell],env=env,stdout=log,stderr=subprocess.STDOUT,start_new_session=True)
-    url=f'http://127.0.0.1:{args.port}';token='';latest={};trace=[];events=[];report={};started=time.monotonic();ros=None
+    url=f'http://127.0.0.1:{args.port}';token='';latest={};trace=[];events=[];report={};started=time.monotonic();ros=None;presentation=None;presentation_trace=None
     def call(path,data=None):
         raw=None if data is None else json.dumps(data).encode();request=urllib.request.Request(url+path,data=raw,headers={'Content-Type':'application/json','X-Nav-Token':token})
         try:
@@ -41,6 +41,10 @@ def main():
     def status():
         nonlocal latest
         latest=call('/api/status?summary=1')
+        if presentation:
+            from audio_feedback import atomic_json
+            atomic_json(runtime/'audio-feedback-state.json',dict(updated_at=time.time()))
+            presentation.observe(latest['reception']['mission'],enabled=True,volume=55,now=time.monotonic())
         if ros:ros.spin();ros.snapshot(latest)
         if latest.get('truth'):trace.append({'truth':latest['truth'],'feedback':latest['feedback'],'session':latest['session'],'path_source':latest.get('path_source',{}),'mission':{k:latest['reception']['mission'][k]for k in ['phase','index','epoch']}})
         return latest
@@ -130,7 +134,7 @@ def main():
         call('/api/sim_operator',{'mode':'navigation_allowed'});wait(lambda d:d['session']['navigation_permitted'],5)
         call('/api/speed',{'speed':.75,'velocity_scale':.5})
         d=status();doc=blank('native_showroom')
-        if args.scenario not in ('obstacle','tools','maps','blockage'):
+        if args.scenario not in ('obstacle','tools','maps','blockage','followthrough'):
             doc=blank('native_showroom');doc['points']=[point('a',2.8,2.5),point('b',3.6,2.5),point('c',4.4,2.5,'visit')]
             doc['routes']=[{'id':'tour','name':'continuous transit','mode':'showcase','loops':1,'description':'synthetic','steps':[{'point_id':i,'speak':False}for i in ['a','b','c']]}]
             doc=save(doc);start(doc);d=complete();mission=d['reception']['mission']
@@ -143,6 +147,48 @@ def main():
                 assert samples and min(t['command'][0]for t in samples)>.05,('transit stopped or unobserved',x)
                 windows[str(x)]={'samples':len(samples),'minimum_forward':min(t['command'][0]for t in samples)}
             events.append({'case':'continuous_native_transit','passed':True,'windows':windows})
+        if args.scenario=='followthrough':
+            # Real native navigation results, real playback subprocess lifecycle;
+            # only sound output is a short synthetic WAV and fake paplay.
+            import wave
+            from reception_voice import PresentationPlayer
+            from reception_catalog import content_key
+            voice=runtime/'reception-voice-cache';voice.mkdir(exist_ok=True)
+            text='Synthetic repeated product introduction.';key=content_key(text)
+            with wave.open(str(voice/(key+'.wav')),'wb')as wav:
+                wav.setparams((1,2,24000,0,'NONE','none'));wav.writeframes(b'\0\0'*12000)
+            fake=out/'fake-audio';fake.mkdir();presentation_trace=out/'presentation-processes.txt'
+            player=fake/'paplay'
+            player.write_text('\n'.join(['#!/usr/bin/python3', 'import sys,time',
+                'with open('+repr(str(presentation_trace))+',"a")as f:',
+                '    f.write(" ".join(sys.argv[1:])+"\\n")', 'time.sleep(.25)', '']))
+            player.chmod(0o755);os.environ['PATH']=str(fake)+os.pathsep+os.environ['PATH']
+            presentation=PresentationPlayer(voice,runtime/'reception-speech-result.json')
+            a=point('product_a',2.8,2.5,'visit');a.update(yaw=.6,script=text,guest_wait=True)
+            b=point('product_b',3.8,2.5,'visit');b.update(yaw=0.,script=text,dwell=1.)
+            home=point('home',2.,2.5,'home')
+            doc['points']=[a,b,home];doc['routes']=[dict(id='tour',name='Heading, product, guest wait, dwell, return',mode='showcase',loops=1,description='',steps=[dict(point_id=p['id'],speak=True)for p in doc['points']])]
+            doc=save(doc);start(doc)
+            parked=wait(lambda d:d['reception']['mission']['phase']=='guest_wait',45)
+            assert parked['reception']['mission']['index']==0
+            error=abs(math.remainder(parked['pose'][2]-a['yaw'],2*math.pi));assert error<.15,error
+            epoch=parked['reception']['mission']['epoch'];pose=parked['truth']['pose']
+            time.sleep(.6);parked=status()
+            assert parked['reception']['mission']['phase']=='guest_wait'
+            assert max(map(abs,parked['truth']['command']))<1e-6
+            assert math.dist(parked['truth']['pose'][:2],pose[:2])<.01
+            call('/api/confirm',{'reception_command':dict(command='continue',epoch=epoch)})
+            dwelling=wait(lambda d:d['reception']['mission']['phase']=='dwell',45)
+            assert dwelling['reception']['mission']['index']==1
+            assert abs(math.remainder(dwelling['pose'][2]-b['yaw'],2*math.pi))<.15
+            assert dwelling['reception']['mission']['epoch']!=epoch
+            assert max(map(abs,dwelling['truth']['command']))<1e-6
+            d=complete()
+            assert len(presentation_trace.read_text().splitlines())==2
+            assert d['truth']['collision_attempts']==0
+            events.append(dict(case='native_heading_then_same_product_twice_guest_continue_dwell_return',passed=True,
+                first_yaw_error=error,actual_playback_processes=2,guest_wait_held=True,dwell_observed=True,
+                audio_scope='Synthetic silent WAV and fake paplay; not a physical speaker test'))
         if args.scenario=='blockage':
             ros=ScenarioROS()
             doc=blank('native_showroom');doc['points']=[point('finish',5.0,2.5,'visit')]
@@ -328,6 +374,7 @@ def main():
             try:process.wait(timeout=25)
             except subprocess.TimeoutExpired:os.killpg(process.pid,signal.SIGKILL);process.wait()
         if ros:ros.close()
+        if presentation:presentation.stop()
         log.close();report['curved_forward_receipts']=sum('Curved forward input blended'in line for line in(runtime/'workflow.log').read_text(errors='replace').splitlines())if(runtime/'workflow.log').is_file()else None;Path(args.output).write_text(json.dumps(report,ensure_ascii=False,indent=2))
     print(json.dumps({k:v for k,v in report.items()if k not in ('latest','source_sha','truth')},ensure_ascii=False))
     return 0 if report.get('passed')else 1

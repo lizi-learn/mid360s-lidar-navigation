@@ -27,3 +27,7 @@ add_executable(settled_reset settled_reset.cpp)
 target_compile_features(settled_reset PUBLIC cxx_std_17)
 target_include_directories(settled_reset PRIVATE ../../navigation/p2_nav_controller/include)
 ament_target_dependencies(settled_reset nav2_core nav2_costmap_2d pluginlib)
+
+add_executable(rotation_progress rotation_progress.cpp)
+target_compile_features(rotation_progress PUBLIC cxx_std_17)
+ament_target_dependencies(rotation_progress nav2_core pluginlib)

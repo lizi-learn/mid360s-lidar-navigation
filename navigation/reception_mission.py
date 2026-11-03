@@ -11,12 +11,39 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from reception_catalog import introduction, content_key
 
+def route_poses(points, start=None):
+    """Seed unspecified orientations with the incoming route direction.
+
+    These headings constrain the lattice search, not arrival actions. Explicit
+    point headings remain authoritative; position-only final goals stay so.
+    Missing start poses and coincident points use the next nonzero segment,
+    then the last usable heading. Saved catalog points are never changed.
+    """
+    previous=start
+    heading=start[2] if start is not None else 0.
+    result=[]
+    for i,point in enumerate(points):
+        x,y=point['x'],point['y']
+        if point['yaw'] is not None:
+            heading=point['yaw']
+        elif previous is not None and math.hypot(x-previous[0],y-previous[1])>1e-6:
+            heading=math.atan2(y-previous[1],x-previous[0])
+        else:
+            for following in points[i+1:]:
+                dx,dy=following['x']-x,following['y']-y
+                if math.hypot(dx,dy)>1e-6:
+                    heading=math.atan2(dy,dx);break
+        result.append(dict(x=x,y=y,yaw=heading))
+        previous=(x,y,heading)
+    return result
+
 BUSY = {'dispatching', 'navigating', 'presenting', 'guest_wait', 'dwell', 'rerouting', 'waiting_route'}
 
 class Mission:
     def __init__(self,event_sink=None):
         self.event_sink=event_sink
-        self.lock = threading.RLock(); self.epoch = secrets.randbits(48)*256; self.reset()
+        # Keep command/receipt IDs exact through JSON and JavaScript Number.
+        self.lock = threading.RLock(); self.epoch = secrets.randbits(40)*256; self.reset()
     def reset(self):
         self.run_id='';self.paused_from=None;self.pause_remaining=0.
         self.phase = 'idle'; self.steps = []; self.index = 0; self.document = None
@@ -145,11 +172,15 @@ class Mission:
                     p = self.steps[self.index]['point']; script = introduction(self.document, p) if self.steps[self.index]['speak'] else ''
                     self.event('arrived', point=p['id'], at=now)
                     if script:
+                        # The content cache key can repeat at another stop or loop.
+                        # A new presentation must have its own playback receipt.
+                        self.epoch += 1
                         self.phase = 'presenting'; self.presentation_started = now; self.speech_key = content_key(script)
                         self.event('presentation', key=self.speech_key, text=script, point=p['name'])
                     else: self._after_speech(now)
             elif self.phase == 'presenting':
-                if speech_result and speech_result.get('key') == self.speech_key:
+                if (speech_result and speech_result.get('epoch') == self.epoch and
+                        speech_result.get('key') == self.speech_key):
                     result = speech_result.get('result')
                     if result == 'completed': self.event('speech_completed'); self._after_speech(now)
                     elif result in ('missing', 'failed'):
@@ -261,8 +292,6 @@ class MissionService:
         if self.resume_command and not command.get('reroute'):
             command=dict(self.resume_command,epoch=epoch);self.resume_command=None
         p = command['point']
-        data = {'x': p['x'], 'y': p['y'], 'yaw': p['yaw'] or 0.,
-                'heading_mode': 'position' if p['yaw'] is None else 'pose'}
         try:
             if not self.engine.valid(epoch): return
             if command.get('reroute'):
@@ -270,8 +299,11 @@ class MissionService:
                 if command.get('wait'):
                     self.engine.wait_route(epoch,time.monotonic(),command['reason']);return
             points=command.get('points',[p])
+            read_pose=getattr(self.node,'reception_pose',None)
+            poses=route_poses(points,read_pose() if callable(read_pose) else None)
+            data=dict(poses[-1],heading_mode='position' if p['yaw'] is None else 'pose')
             if len(points)>1:
-                data['_route_goals']=[{'x':q['x'],'y':q['y'],'yaw':q['yaw'] or 0.}for q in points]
+                data['_route_goals']=poses
             result = self.node.set_goal(data)
             # Allow the existing observations/lifecycle to finish initializing.
             # Do not change freshness requirements or resume after takeover.
@@ -318,12 +350,12 @@ class MissionService:
                     from pathlib import Path
                     import json
                     clip=self.node.reception_voice.root/(snapshot['speech_key']+'.wav')
-                    if not clip.is_file():speech={'key':snapshot['speech_key'],'result':'missing'}
+                    if not clip.is_file():speech={'epoch':snapshot['epoch'],'key':snapshot['speech_key'],'result':'missing'}
                     elif time.monotonic()-(self.engine.presentation_started or time.monotonic())>3:
                         try: worker=json.loads((self.node.runtime/'audio-feedback-state.json').read_text())
                         except (OSError,ValueError):worker={}
                         if not 0<=time.time()-worker.get('updated_at',0)<=3:
-                            speech={'key':snapshot['speech_key'],'result':'failed'}
+                            speech={'epoch':snapshot['epoch'],'key':snapshot['speech_key'],'result':'failed'}
                 if not state.get('navigation_permitted') and snapshot['phase'] in BUSY:self.capture_resume()
                 command = self.engine.tick(state, time.monotonic(), speech)
                 current = self.engine.status()

@@ -225,7 +225,10 @@ class CuePolicy:
         reception_phase=((data.get('reception')or{}).get('mission')or{}).get('phase')
         generation = (data.get('session') or {}).get('generation')
         allowed = {
-            'started': {'executing'}, 'continued': {'executing'},
+            # A short same-goal replan may finish an already-playing sentence.
+            # Queued starts are still discarded until execution resumes.
+            'started': {'executing', 'replanning'} if max_age is None else {'executing'},
+            'continued': {'executing', 'replanning'} if max_age is None else {'executing'},
             'obstacle': {'replanning'}, 'arrived': {'arrived'},
             'no_path': {'blocked'}, 'failed': {'blocked'},
             'manual': {'manual'}, 'paused': {'paused'},

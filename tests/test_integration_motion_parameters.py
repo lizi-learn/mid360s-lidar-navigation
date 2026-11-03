@@ -13,4 +13,7 @@ class RecoveryMotionDefaults(unittest.TestCase):
         self.assertFalse(f['allow_reversing']);self.assertTrue(f['use_collision_detection'])
         self.assertEqual(p['goal_checker']['plugin'],'p2_nav_controller::SettledHeadingGoalChecker')
         self.assertEqual(p['progress_checker']['movement_time_allowance'],40.)
+        self.assertEqual(p['progress_checker']['plugin'],'p2_nav_controller::RotationProgressChecker')
+        self.assertEqual(p['progress_checker']['required_movement_radius'],.1)
+        self.assertEqual(p['progress_checker']['required_movement_angle'],.1)
         self.assertFalse(c['planner_server']['ros__parameters']['GridBased']['smooth_path'])

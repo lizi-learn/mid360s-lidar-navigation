@@ -96,8 +96,8 @@ class MissionTest(unittest.TestCase):
         m,d,e=self.start();cmd=m.tick(permitted(),0);self.assertEqual(cmd['point']['id'],'b')
         m.dispatched(e,1);m.tick(permitted('arrived'),1);self.assertEqual(m.phase,'dispatching')
         m.dispatched(e,2);m.tick(permitted('arrived',2),2);self.assertEqual(m.phase,'presenting')
-        key=m.speech_key;m.tick(permitted('arrived',2),3,{'key':'wrong','result':'completed'});self.assertEqual(m.phase,'presenting')
-        m.tick(permitted('arrived',2),4,{'key':key,'result':'completed'});self.assertEqual(m.phase,'completed')
+        key=m.speech_key;m.tick(permitted('arrived',2),3,{'epoch':m.epoch,'key':'wrong','result':'completed'});self.assertEqual(m.phase,'presenting')
+        m.tick(permitted('arrived',2),4,{'epoch':m.epoch,'key':key,'result':'completed'});self.assertEqual(m.phase,'completed')
         self.assertEqual([x['kind']for x in m.events].count('arrived'),2)
     def test_snapshot_not_changed_by_admin_edit(self):
         m,d,e=self.start();d['points'][1]['x']=100.;self.assertEqual(m.tick(permitted(),0)['point']['x'],3.)
@@ -112,7 +112,7 @@ class MissionTest(unittest.TestCase):
         m,d,e=self.start();m.dispatched(e,1);m.tick(permitted('executing',2),1);self.assertEqual(m.phase,'failed');self.assertEqual(m.index,0)
     def test_speech_failure_becomes_visible_wait_not_success(self):
         m,d,e=self.start();m.index=1;m.dispatched(e,2);m.tick(permitted('arrived',2),1)
-        m.tick(permitted('arrived',2),2,{'key':m.speech_key,'result':'missing'})
+        m.tick(permitted('arrived',2),2,{'epoch':m.epoch,'key':m.speech_key,'result':'missing'})
         self.assertEqual(m.phase,'guest_wait');self.assertNotIn('speech_completed',[x['kind']for x in m.events])
         m.continue_visit(3);self.assertEqual(m.phase,'completed')
     def test_guest_continue_and_dwell(self):

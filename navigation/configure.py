@@ -153,7 +153,7 @@ def config(controller='rpp', tree=None, minimum_speed=.03, footprint_vertices=No
         result['planner_server']['ros__parameters']['GridBased']['plugin']='p2_nav_controller::ExactHeadingLattice'
         result['planner_server']['ros__parameters']['GridBased']['smooth_path']=False
         for costmap in ('local_costmap','global_costmap'):result[costmap][costmap]['ros__parameters']['inflation_layer']['inflation_radius']=1.2
-        result['controller_server']['ros__parameters']['progress_checker']['movement_time_allowance']=40.
+        result['controller_server']['ros__parameters']['progress_checker'].update(plugin='p2_nav_controller::RotationProgressChecker',movement_time_allowance=40.,required_movement_angle=.1)
         result['controller_server']['ros__parameters']['goal_checker']['plugin']='p2_nav_controller::SettledHeadingGoalChecker'
         result['velocity_smoother']['ros__parameters']['max_velocity'][0]=.8
         result['velocity_smoother']['ros__parameters']['max_accel'][0]=.4
