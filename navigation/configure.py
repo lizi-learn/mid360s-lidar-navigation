@@ -129,6 +129,7 @@ def config(controller='rpp', tree=None, minimum_speed=.03, footprint_vertices=No
             'nav2_goal_updated_condition_bt_node','nav2_globally_updated_goal_condition_bt_node',
             'nav2_is_path_valid_condition_bt_node','nav2_round_robin_node_bt_node',
             'nav2_spin_action_bt_node','nav2_back_up_action_bt_node']))
+    if gait_profile=='p2-flat-model':result['bt_navigator']['ros__parameters']['plugin_lib_names'].append('p2_nav_reference_bt_node')
     add('velocity_smoother',dict(use_sim_time=False,smoothing_frequency=20.,scale_velocities=False,
         feedback='OPEN_LOOP',max_velocity=[.30,0.,.35],min_velocity=[0.,0.,-.35],
         max_accel=[.15,0.,.5],max_decel=[-.30,0.,-.5],odom_topic='odom',odom_duration=.1,

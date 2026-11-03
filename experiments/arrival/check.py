@@ -8,7 +8,8 @@ from configure import config
 
 def intrusions(cells,r,origin,path):
     h,w=cells.shape;ox,oy=origin;total=0
-    for a,b in zip(path,path[1:]):
+    if not len(path):return 1
+    for a,b in zip([path[0],*path],path):
         angle=math.remainder(b[2]-a[2],2*math.pi);n=max(1,math.ceil(math.hypot(b[0]-a[0],b[1]-a[1])/.01),math.ceil(abs(angle)/.01))
         for k in range(n+1):
             f=k/n;x=a[0]+f*(b[0]-a[0]);y=a[1]+f*(b[1]-a[1]);yaw=a[2]+f*angle;c,s=math.cos(yaw),math.sin(yaw)

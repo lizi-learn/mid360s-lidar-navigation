@@ -3,10 +3,11 @@
   <BehaviorTree ID="MainTree">
     <RecoveryNode number_of_retries="2" name="NavigationRecovery">
       <PipelineSequence name="NavigateThroughForwardWaypoints">
+        <!-- Track passage every tree tick, including while a slow planner is running. -->
+        <RemovePassedGoals input_goals="{goals}" output_goals="{goals}" radius="0.75"/>
         <RateController hz="1.0">
           <Sequence>
-            <RemovePassedGoals input_goals="{goals}" output_goals="{goals}" radius="0.75"/>
-            <ComputePathThroughPoses goals="{goals}" path="{path}" planner_id="PositionOnly"/>
+            <ComputeReferencePath goals="{goals}" path="{path}" planner_id="PositionOnly"/>
           </Sequence>
         </RateController>
         <FollowPath path="{path}" controller_id="FollowPath" goal_checker_id="position_goal_checker"/>

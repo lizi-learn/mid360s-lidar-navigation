@@ -46,7 +46,7 @@ class PositionGoalTests(unittest.TestCase):
         c.route_final_goal.assert_called_once_with(data,c.goal_route[-1])
         c.confirm_goal({'generation':receipt['generation']})
         tree=ET.parse(c.nav_through.sent[0].behavior_tree)
-        self.assertEqual(tree.find('.//ComputePathThroughPoses').get('planner_id'),'RouteDirected')
+        self.assertEqual(tree.find('.//ComputeReferencePath').get('planner_id'),'RouteDirected')
         self.assertEqual(tree.find('.//FollowPath').get('goal_checker_id'),'goal_checker')
     def test_manual_cancel_during_route_parameters_never_sends_plan_or_motion(self):
         c,data=self.directed_route();c.route_final_goal.side_effect=lambda *_:c.session.cancel()

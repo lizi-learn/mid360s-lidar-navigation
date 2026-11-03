@@ -74,6 +74,22 @@ int main(int argc,char **argv){
     goal.pose.position.x=2.2;goal.pose.position.y=5.5;
     save_path("newgoal",start,goal);
   }
+  if(std::getenv("P2_ARRIVAL_ALTERNATING_SEQUENCE")) {
+    const std::vector<unsigned char> original(map->getCharMap(),map->getCharMap()+width*height);
+    auto save=[&](const std::string &name,const geometry_msgs::msg::PoseStamped &from,const geometry_msgs::msg::PoseStamped &to){
+      auto path=planner->createPlan(from,to);if(path.poses.empty())throw std::runtime_error("Alternating replan empty");
+      std::ofstream out(std::string(argv[2])+"-"+name+".csv");out<<"x,y,yaw\n";
+      for(const auto &p:path.poses)out<<std::setprecision(12)<<p.pose.position.x<<','<<p.pose.position.y<<','<<tf2::getYaw(p.pose.orientation)<<'\n';};
+    // First observe one side closed, then reopen it while the existing upper
+    // detour remains valid. Another route leg must not evict that detour.
+    for(unsigned y=0;y<height;++y)for(unsigned x=0;x<width;++x){double wx,wy;map->mapToWorld(x,y,wx,wy);if(wx>=3.1&&wx<=4.3&&wy<2.)map->setCost(x,y,254);}
+    save("alternating-initial",start,goal);
+    std::copy(original.begin(),original.end(),map->getCharMap());
+    auto other=goal;other.pose.position.x=2.2;other.pose.position.y=5.5;save("alternating-other",start,other);
+    auto from=start;from.pose.position.x=2.2;from.pose.position.y=2.48;save("alternating-reused",from,goal);
+    for(unsigned y=0;y<height;++y)for(unsigned x=0;x<width;++x){double wx,wy;map->mapToWorld(x,y,wx,wy);if(wx>=3.1&&wx<=4.3&&wy>3.)map->setCost(x,y,254);}
+    save("alternating-blocked",from,goal);
+  }
   planner->deactivate();planner->cleanup();planner.reset();cm->on_cleanup(rclcpp_lifecycle::State());cm.reset();parent.reset();
  }catch(const std::exception &e){std::cerr<<e.what();rc=1;}
  rclcpp::shutdown();return rc;

@@ -44,6 +44,21 @@ def main():
  blocked=json.loads(Path(str(narrow_prefix)+'-blocked.json').read_text());assert blocked['rejected']and blocked['marked_cells']>0
  receipts=(process.stdout+process.stderr).count('Reusing complete route with original footprint');assert receipts>0,'Original-body fallback was not exercised'
  rows.append(dict(case='same_body_narrow_reuse_and_new_blocked_goal',points=len(reused),body_intrusions=0,reuse_receipts=receipts,actual_obstacle_cells=blocked['marked_cells'],blocked_rejected=True))
+ # Alternate intermediate targets on one actual planner instance. A second
+ # route leg must not erase the first leg's still-valid detour; a real new
+ # obstacle must nevertheless invalidate it.
+ yy,xx=np.mgrid[:cells.shape[0],:cells.shape[1]];wx=origin[0]+(xx+.5)*r;wy=origin[1]+(yy+.5)*r
+ alt=out.parent/'alternating';alt_env=dict(os.environ,P2_ARRIVAL_ALTERNATING_SEQUENCE='1')
+ proc=subprocess.run([a.binary,str(mp),str(alt),'p2_nav_controller::PositionOnlyLattice','2','2.5','0','5.2','2.5','0','--ros-args','--params-file',str(pp),'--log-level','warn'],env=alt_env,capture_output=True,text=True,timeout=35)
+ (out.parent/'alternating.log').write_text(proc.stdout+proc.stderr);assert proc.returncode==0,proc.stderr[-3000:]
+ alt_paths={k:[[float(z[c])for c in ('x','y','yaw')]for z in csv.DictReader(Path(str(alt)+'-alternating-'+k+'.csv').open())]for k in ('initial','other','reused','blocked')}
+ assert side(alt_paths['initial'])==side(alt_paths['reused']),'valid detour changed side after another route leg'
+ assert side(alt_paths['blocked'])==-side(alt_paths['initial']),'new actual obstacle failed to invalidate per-leg memory'
+ for key,path in alt_paths.items():
+  grid=cells.copy()
+  if key in ('initial','blocked'):grid[(wx>=3.1)&(wx<=4.3)&((wy<2.)if key=='initial'else(wy>3.))]=254
+  hits=intrusions(grid,r,origin,path);assert hits==0,(key,hits)
+  rows.append(dict(case='alternating_'+key,points=len(path),body_intrusions=hits))
  result=dict(passed=True,cases=rows,small_pose_update_keeps_side=True,new_obstacle_changes_side=True,new_opening_uses_direct=True,new_goal_invalidates_route=True,hardware_commands=0,fixture_seed=0,scope='Actual own Nav2 planner, same-goal synthetic replans; no perception, control tracking or physical walking acceptance')
  out.write_text(json.dumps(result,indent=2));print(json.dumps(result))
 if __name__=='__main__':main()

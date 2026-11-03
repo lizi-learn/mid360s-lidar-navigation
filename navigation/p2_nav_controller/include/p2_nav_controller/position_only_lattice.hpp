@@ -18,6 +18,27 @@ class PositionOnlyLattice : public nav2_smac_planner::SmacPlannerLattice {
   std::mutex stable_mutex_;
   nav_msgs::msg::Path stable_path_;
   geometry_msgs::msg::PoseStamped stable_goal_;
+  struct RouteMemory {nav_msgs::msg::Path path;geometry_msgs::msg::PoseStamped goal;};
+  std::deque<RouteMemory> route_memory_;
+  bool same_goal(const geometry_msgs::msg::PoseStamped &a,const geometry_msgs::msg::PoseStamped &b) const {
+    return a.header.frame_id==b.header.frame_id&&std::hypot(a.pose.position.x-b.pose.position.x,a.pose.position.y-b.pose.position.y)<1e-6;
+  }
+  void select_route(const geometry_msgs::msg::PoseStamped &goal) {
+    stable_path_={};stable_goal_=goal;
+    for(const auto &entry:route_memory_)if(same_goal(entry.goal,goal)){stable_path_=entry.path;stable_goal_=entry.goal;break;}
+  }
+  nav_msgs::msg::Path retain_route(nav_msgs::msg::Path path,const geometry_msgs::msg::PoseStamped &goal) {
+    for(auto i=route_memory_.begin();i!=route_memory_.end();++i)if(same_goal(i->goal,goal)){route_memory_.erase(i);break;}
+    // Bounded memory for alternating legs of ComputePathThroughPoses. Stored
+    // paths are only proposals: plan_once rechecks their entire filled sweep
+    // against the current map before returning them. Recovery anchors never
+    // enter this cache until the complete requested leg has succeeded.
+    if(!path.poses.empty()&&path.poses.size()<=16000){
+      route_memory_.push_back({path,goal});size_t poses=0;for(const auto &entry:route_memory_)poses+=entry.path.poses.size();
+      while(route_memory_.size()>8||poses>32000){poses-=route_memory_.front().path.poses.size();route_memory_.pop_front();}
+    }
+    return remember(std::move(path),goal);
+  }
   nav_msgs::msg::Path remember(nav_msgs::msg::Path path,const geometry_msgs::msg::PoseStamped &goal) {
     stable_path_=path;stable_goal_=goal;return path;
   }
@@ -112,7 +133,7 @@ class PositionOnlyLattice : public nav2_smac_planner::SmacPlannerLattice {
     unsigned ix,iy;if(!_costmap->worldToMap(x,y,ix,iy))throw nav2_core::PlannerException("Position endpoint outside costmap");
     double cx,cy;_costmap->mapToWorld(ix,iy,cx,cy);
     for(double a:angles)if(clear(x,y,a)&&clear(cx,cy,a))return a;
-    throw nav2_core::PlannerException("No full-body heading fits position endpoint");
+    throw nav2_core::PlannerException("No full-body heading fits position endpoint ("+std::to_string(x)+", "+std::to_string(y)+")");
   }
   nav_msgs::msg::Path completed(nav_msgs::msg::Path path) {
     // This timestamp belongs to the newly computed path, not the original
@@ -129,10 +150,16 @@ class PositionOnlyLattice : public nav2_smac_planner::SmacPlannerLattice {
     for(const auto &p:samples){geometry_msgs::msg::PoseStamped pose;pose.header=header;pose.pose.position.x=p[0];pose.pose.position.y=p[1];pose.pose.orientation=nav2_util::geometry_utils::orientationAroundZAxis(p[2]);out.poses.push_back(pose);}return completed(std::move(out));
   }
  public:
+  void cleanup() override {
+    std::lock_guard<std::mutex> stable_lock(stable_mutex_);
+    route_memory_.clear();stable_path_={};stable_goal_={};
+    SmacPlannerLattice::cleanup();
+  }
   nav_msgs::msg::Path createPlan(const geometry_msgs::msg::PoseStamped &start,
                                 const geometry_msgs::msg::PoseStamped &goal) override {
     std::lock_guard<std::mutex> stable_lock(stable_mutex_);
-    try { return plan_once(start,goal); }
+    select_route(goal);
+    try { return retain_route(plan_once(start,goal),goal); }
     catch(const nav2_core::PlannerException &original_error) {
       // A locally curved exit can defeat the long-distance point guide even
       // though its two complete native plans fit. Search an intermediate
@@ -169,7 +196,7 @@ class PositionOnlyLattice : public nav2_smac_planner::SmacPlannerLattice {
           {std::unique_lock<nav2_costmap_2d::Costmap2D::mutex_t> lock(*_costmap->getMutex());
             prepare_map();if(!swept_clear(samples,0.))continue;}
           RCLCPP_INFO(_logger,"Complete position route recovered through local reference: %.3f %.3f, %zu poses",via.pose.position.x,via.pose.position.y,joined.poses.size());
-          return remember(completed(std::move(joined)),goal);
+          return retain_route(completed(std::move(joined)),goal);
         }catch(const nav2_core::PlannerException &){}
       }
       stable_path_=saved_path;stable_goal_=saved_goal;
