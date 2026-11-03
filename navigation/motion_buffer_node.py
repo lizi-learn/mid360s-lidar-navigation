@@ -12,7 +12,9 @@ from navigation_reference import reference_ready
 
 class MotionBufferNode(Node):
     def __init__(self):
-        super().__init__('gait_motion_buffer');self.buffer=MotionBuffer(accel=.4,decel=.8,angular_accel=20.0);self.target=(0.,0.,0.)
+        super().__init__('gait_motion_buffer')
+        native_ramp=self.declare_parameter('native_input_ramp',False).value
+        self.buffer=MotionBuffer(accel=.4,decel=.8,angular_accel=.5,ramp_enabled=not native_ramp);self.target=(0.,0.,0.)
         self.motion_mean=MeasuredMotionMean();self.measured=(0.,0.,0.);self.command_time=0.;self.odom_stamp=0.
         self.armed=False;self.paused=True;self.collision=True;self.reference=False;self.reference_time=0.
         self.output=self.create_publisher(Twist,'/p2_nav/cmd_buffered',10)

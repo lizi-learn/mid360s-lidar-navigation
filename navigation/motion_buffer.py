@@ -8,13 +8,14 @@ import math
 from gate import Limits
 
 class MotionBuffer:
-    def __init__(self,accel=.10,decel=.15,angular_accel=.30,settle_time=.15,feedback_timeout=None):
+    def __init__(self,accel=.10,decel=.15,angular_accel=.30,settle_time=.15,feedback_timeout=None,ramp_enabled=True):
         if not all(math.isfinite(v) and v>0 for v in (accel,decel,angular_accel,settle_time)):
             raise ValueError('positive_finite_motion_parameters_required')
         self.feedback_timeout=Limits().sensor_timeout if feedback_timeout is None else feedback_timeout
         if not math.isfinite(self.feedback_timeout) or not 0<self.feedback_timeout<=Limits().sensor_timeout:
             raise ValueError('feedback timeout must not exceed the command gate sensor expiry')
         self.accel=accel;self.decel=decel;self.angular_accel=angular_accel;self.settle_time=settle_time
+        self.ramp_enabled=ramp_enabled
         self.reset()
     def reset(self):
         self.v=self.w=0.;self.last=None;self.phase='stopped';self.stable_since=None
@@ -62,8 +63,13 @@ class MotionBuffer:
             w=0.;self.phase='settling_yaw';self.stable_since=None
         def slew(current,target,rate):
             delta=target-current;return current+math.copysign(min(abs(delta),rate*dt),delta)
-        self.v=slew(self.v,v,self.accel if v>self.v else self.decel)
-        self.w=slew(self.w,w,self.angular_accel)
+        if self.ramp_enabled:
+            self.v=slew(self.v,v,self.accel if v>self.v else self.decel)
+            self.w=slew(self.w,w,self.angular_accel)
+        else:
+            # The physical gait handoff owns the sole input ramp. Keep only
+            # the measured phase transitions and immediate-stop behavior here.
+            self.v,self.w=v,w
         if self.phase=='normal_braking' and self.v==self.w==0 and self._settled(now,linear<=.06 and angular<=.06):
             self.phase='stopped'
         return (self.v,0.,self.w)

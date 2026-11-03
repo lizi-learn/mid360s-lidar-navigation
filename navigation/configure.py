@@ -166,11 +166,6 @@ def config(controller='rpp', tree=None, minimum_speed=.03, footprint_vertices=No
         result['velocity_smoother']['ros__parameters']['max_velocity'][0]=.8
         result['velocity_smoother']['ros__parameters']['max_accel'][0]=.4
         result['velocity_smoother']['ros__parameters']['max_decel'][0]=-.8
-        # P2 yaw is already slewed at0.5 input/s by the native handoff.
-        # Upstream shaping must pass its bounded pulse instead of adding two
-        # more slow ramps; these20/s values are internal input units.
-        result['velocity_smoother']['ros__parameters']['max_accel'][2]=20.
-        result['velocity_smoother']['ros__parameters']['max_decel'][2]=-20.
         result['velocity_smoother']['ros__parameters']['max_velocity'][2]=1.
         result['velocity_smoother']['ros__parameters']['min_velocity'][2]=-1.
         # Routes must fit the monitor's stop clearance, rather than repeatedly
@@ -259,3 +254,11 @@ def main():
     if not .03<=args.minimum_speed<=.25:raise ValueError('Minimum speed outside profile range')
     path.write_text(yaml.safe_dump(config(args.controller,minimum_speed=args.minimum_speed,footprint_vertices=load_footprint(args.footprint_profile) if args.footprint_profile else None,odometry_model=args.odometry_model,gait_profile=args.gait_profile),sort_keys=False))
 if __name__=='__main__':main()
+
+
+def apply_input_ramp_routing(path,native_ramp,buffered):
+    """Physical gait owns the only input ramp; simulation keeps Nav2 smoothing."""
+    path=Path(path);data=yaml.safe_load(path.read_text())
+    topic='/p2_nav/cmd_buffered'if buffered else'/p2_nav/cmd_raw'
+    data['collision_monitor']['ros__parameters']['cmd_vel_in_topic']=topic if native_ramp else'/p2_nav/cmd_smooth'
+    path.write_text(yaml.safe_dump(data,sort_keys=False))

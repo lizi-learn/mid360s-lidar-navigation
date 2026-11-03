@@ -13,22 +13,14 @@ class BufferTest(unittest.TestCase):
         self.assertGreater(mean.step((0,0,.3),1.2)[2],.06)
         self.assertEqual(mean.step((.2,0,.3),2.),(.2,0,.3))
 
-    def test_bounded_pivot_pulse_survives_both_input_ramps(self):
-        from configure import config
-        params=config(gait_profile='p2-flat-model')['velocity_smoother']['ros__parameters']
-        self.assertEqual(params['max_accel'][2],20.)
-        for sign in [-1.,1.]:
-            b=MotionBuffer(accel=.4,decel=.8,angular_accel=20.)
-            smoothed=0.;peak=0.
-            for i in range(55):
-                out=b.step((0.,0.,sign),(0.,0.,0.),i*.02,.02,frame_verified=True)
-                delta=out[2]-smoothed
-                smoothed+=math.copysign(min(abs(delta),params['max_accel'][2]*.02),delta)
-                self.assertLessEqual(abs(smoothed),1.)
-                self.assertGreaterEqual(smoothed*sign,0.)
-                peak=max(peak,abs(smoothed))
-            self.assertGreaterEqual(peak,.8)
-            self.assertEqual(b.step((0,0,0),(0,0,0),1.1,.02,frame_verified=True),(0,0,0))
+    def test_native_ramp_mode_only_performs_phase_transitions(self):
+        b=MotionBuffer(ramp_enabled=False)
+        self.assertEqual(b.step((.75,0.,.4),(0,0,0),1.,.02,frame_verified=True),(.75,0.,.4))
+        self.assertEqual(b.step((.6,0.,.8),(.2,0,.1),1.02,.02,frame_verified=True),(.6,0.,.8))
+        self.assertEqual(b.step((0,0,1),(.2,0,0),1.04,.02,frame_verified=True),(0,0,0))
+        for i in range(20):out=b.step((0,0,1),(0,0,0),1.06+i*.02,.02,frame_verified=True)
+        self.assertEqual(out,(0,0,1))
+        self.assertEqual(b.step((0,0,1),(0,0,0),1.46,.02,hard_stop=True,frame_verified=True),(0,0,0))
 
     def test_forward_steering_correction_does_not_enter_pivot_settling(self):
         b=MotionBuffer(accel=.4,decel=.8);values=[]

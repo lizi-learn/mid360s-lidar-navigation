@@ -43,11 +43,10 @@ class PivotPipelineTest(unittest.TestCase):
             native.command.restype = ctypes.c_double
             native.input.argtypes = [ctypes.c_double]*3
             native.input.restype = ctypes.c_double
-            slope = config(gait_profile='p2-flat-model')['velocity_smoother']['ros__parameters']['max_accel'][2]
             for goal in [-.7, .7]:
                 for delay in [.3, .8, 1.3]:
                     native.reset()
-                    buffer = MotionBuffer(accel=.4, decel=.8, angular_accel=20.)
+                    buffer = MotionBuffer(accel=.4, decel=.8, angular_accel=.5,ramp_enabled=False)
                     mean = MeasuredMotionMean()
                     queue = collections.deque([0.]*(round(delay/.02)+1))
                     yaw = rate = smooth = quiet = 0.
@@ -59,12 +58,9 @@ class PivotPipelineTest(unittest.TestCase):
                         raw = native.command(error, yaw, observed, t)
                         measured = mean.step((0., 0., observed), 1.+t)
                         requested = buffer.step((0., 0., raw), measured, t, .02, frame_verified=True)[2]
-                        # Numerical model of the configured OPEN_LOOP smoother.
-                        # The actual ROS smoother and collision node are not
-                        # instantiated in this unit-level synthetic plant.
-                        delta = requested-smooth
-                        smooth += math.copysign(min(abs(delta), slope*.02), delta)
-                        input_value = native.input(smooth, observed, t)
+                        # Physical launch skips the redundant Nav2 smoother;
+                        # the actual native handoff below owns the single ramp.
+                        input_value = native.input(requested, observed, t)
                         self.assertLessEqual(abs(input_value), 1.)
                         queue.append(input_value)
                         applied = queue.popleft()
