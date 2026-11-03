@@ -66,7 +66,7 @@ class ReceptionFollowthroughTests(unittest.TestCase):
     def service(self,points,start):
         s=MissionService.__new__(MissionService);s.engine=Mission();e=s.engine.start(fixture(),'tour',0)
         s.resume_command=None
-        s.node=SimpleNamespace(reception_pose=lambda:start,set_goal=Mock(return_value={'generation':7}),confirm_goal=Mock())
+        s.node=SimpleNamespace(gait_profile='p2-flat-model',reception_pose=lambda:start,set_goal=Mock(return_value={'generation':7}),confirm_goal=Mock())
         original=copy.deepcopy(points)
         s.dispatch(dict(epoch=e,point=points[-1],points=points,end_index=1))
         self.assertEqual(s.engine.phase,'navigating',s.engine.error)
@@ -91,6 +91,14 @@ class ReceptionFollowthroughTests(unittest.TestCase):
         points=[dict(id='a',x=2.,y=2.,yaw=None),dict(id='b',x=2.,y=2.,yaw=None),dict(id='c',x=0.,y=2.,yaw=None)]
         d=self.service(points,None)
         for p in d['_route_goals']: self.assertAlmostEqual(abs(p['yaw']),math.pi)
+
+    def test_presentation_actions_select_approximate_arrival_without_rewriting_target(self):
+        for change in [dict(script='欢迎参观'),dict(dwell=3),dict(guest_wait=True),dict(yaw=.2)]:
+            point=dict(id='visit',x=2.,y=-5.,yaw=None,**{k:v for k,v in change.items()if k!='yaw'})
+            if 'yaw'in change:point['yaw']=change['yaw']
+            d=self.service([point],[0.,0.,0.])
+            self.assertEqual(d['_arrival_profile'],'presentation')
+            self.assertEqual((d['x'],d['y']),(2.,-5.))
 
     def test_single_position_goal_keeps_position_only(self):
         d=self.service([dict(id='end',x=-2.,y=0.,yaw=None)],[0.,0.,0.])

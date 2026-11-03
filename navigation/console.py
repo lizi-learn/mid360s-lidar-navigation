@@ -661,6 +661,9 @@ class Console(Node):
         guided=bool(route_poses and self.gait_profile=='p2-flat-model' and reference_mode=='corridor')
         heading_mode=data.get('heading_mode','pose')
         if heading_mode not in ('pose','position'):raise ValueError('未知目标朝向模式')
+        arrival_profile=data.get('_arrival_profile','standard')
+        if arrival_profile not in ('standard','presentation'):raise ValueError('未知到点停靠方式')
+        if arrival_profile=='presentation'and self.gait_profile!='p2-flat-model':raise ValueError('当前配置不支持讲解停靠方式')
         if heading_mode=='position' and self.gait_profile!='p2-flat-model':raise ValueError('当前配置不支持位置目标规划')
         if not self.gate.get('localized'):raise ValueError('定位尚未就绪，请先设置初始位置')
         with self.lock:
@@ -669,7 +672,7 @@ class Console(Node):
             fault=self.gate.get('collision_fault_generation',-1)
             if type(fault)is int:self.session.generation=max(self.session.generation,fault)
             generation=self.session.prepare(data,time.monotonic());self.path=[];self.goal=None;self.feedback={}
-            self.goal_heading_mode=heading_mode;self.goal_route=route_poses;self.goal_route_guided=guided;self.goal_rotation=None
+            self.goal_heading_mode=heading_mode;self.goal_arrival_profile=arrival_profile;self.goal_route=route_poses;self.goal_route_guided=guided;self.goal_rotation=None
             self.pending_plan_accept=True
             self.op(armed=False,paused=True)
         try:self.wait_planner_active()
@@ -748,7 +751,9 @@ class Console(Node):
         else:
             from recovery_tree import recovery_tree
             base_tree=getattr(goal,'behavior_tree','') or str(Path(__file__).with_name('forward_navigation.xml'))
-            goal.behavior_tree=recovery_tree(base_tree,self.runtime/'recovery-trees',self.session.replan_timeout)
+            checker=None
+            if getattr(self,'goal_arrival_profile','standard')=='presentation':checker='presentation_position_goal_checker'if getattr(self,'goal_heading_mode','pose')=='position'else'presentation_goal_checker'
+            goal.behavior_tree=recovery_tree(base_tree,self.runtime/'recovery-trees',self.session.replan_timeout,checker)
         with self.lock:
             self.bt_goal_source_ns=self.get_clock().now().nanoseconds;self.bt_recovery_report={}
             if self.session.generation!=generation or self.session.phase!='starting':

@@ -355,6 +355,7 @@ class MissionService:
             read_pose=getattr(self.node,'reception_pose',None)
             poses=route_poses(points,read_pose() if callable(read_pose) else None)
             data=dict(poses[-1],_mission_epoch=epoch,heading_mode='position' if p['yaw'] is None else 'pose')
+            if getattr(self.node,'gait_profile',None)=='p2-flat-model'and (p.get('script')or p.get('product_id')or p.get('dwell')or p.get('guest_wait')or p.get('yaw')is not None):data['_arrival_profile']='presentation'
             if len(points)>1:
                 data['_route_goals']=poses
             starting_generation=self.node.session.generation if command.get('source_recovery')else None

@@ -119,6 +119,11 @@ def config(controller='rpp', tree=None, minimum_speed=.03, footprint_vertices=No
         control=result['controller_server']['ros__parameters']
         control['goal_checker_plugins'].append('position_goal_checker')
         control['position_goal_checker']=dict(plugin='p2_nav_controller::PositionGoalChecker',xy_goal_tolerance=.15)
+        # Authored presentation stops use approximate positioning and direction.
+        # Keep ordinary route tracking/position-only navigation unchanged.
+        control['goal_checker_plugins']+=['presentation_goal_checker','presentation_position_goal_checker']
+        control['presentation_goal_checker']=dict(plugin='nav2_controller::SimpleGoalChecker',xy_goal_tolerance=.30,yaw_goal_tolerance=math.radians(20),stateful=True)
+        control['presentation_position_goal_checker']=dict(plugin='nav2_controller::SimpleGoalChecker',xy_goal_tolerance=.30,yaw_goal_tolerance=math.pi,stateful=True)
     add('behavior_server',dict(use_sim_time=False,costmap_topic='local_costmap/costmap_raw',
         footprint_topic='local_costmap/published_footprint',cycle_frequency=10.,behavior_plugins=['wait','spin'],
         wait=dict(plugin='nav2_behaviors/Wait'),spin=dict(plugin='nav2_behaviors/Spin'),

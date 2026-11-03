@@ -15,3 +15,23 @@ class RecoveryTreeTests(unittest.TestCase):
   with tempfile.TemporaryDirectory()as d:
    for value in [True,float('nan'),0,-1,601]:
     with self.assertRaises(ValueError):recovery_tree('missing',d,value)
+
+class PresentationArrivalTrees(unittest.TestCase):
+ def test_only_terminal_checker_changes_and_source_tree_is_preserved(self):
+  from configure import config
+  import math
+  params=config(gait_profile='p2-flat-model')['controller_server']['ros__parameters']
+  self.assertEqual(params['presentation_goal_checker']['xy_goal_tolerance'],.30)
+  self.assertAlmostEqual(params['presentation_goal_checker']['yaw_goal_tolerance'],math.radians(20))
+  self.assertEqual(params['position_goal_checker']['xy_goal_tolerance'],.15)
+  self.assertEqual(params['presentation_goal_checker']['plugin'],'nav2_controller::SimpleGoalChecker')
+  nav=Path(__file__).resolve().parents[1]/'navigation'
+  with tempfile.TemporaryDirectory()as d:
+   for name in ['forward_navigation.xml','forward_position_navigation.xml','forward_corridor_directed.xml','forward_corridor_position.xml']:
+    base=nav/name;before=base.read_bytes()
+    for checker in ['presentation_goal_checker','presentation_position_goal_checker']:
+     result=recovery_tree(base,d,25.,checker);tree=ET.parse(result).getroot()
+     self.assertEqual(tree.find('.//FollowPath').get('goal_checker_id'),checker)
+     self.assertEqual(tree.find('.//Wait').get('name'),'ObservedRouteWait')
+     self.assertEqual(before,base.read_bytes())
+   with self.assertRaises(ValueError):recovery_tree(nav/'forward_navigation.xml',d,25.,'arbitrary_checker')

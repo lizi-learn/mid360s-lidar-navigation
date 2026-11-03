@@ -41,3 +41,7 @@ add_executable(route_rejoin_replay route_rejoin_replay.cpp)
 target_compile_features(route_rejoin_replay PUBLIC cxx_std_17)
 target_include_directories(route_rejoin_replay PRIVATE ../../navigation/p2_nav_controller/include)
 ament_target_dependencies(route_rejoin_replay nav2_costmap_2d)
+
+add_executable(presentation_arrival presentation_arrival.cpp)
+target_compile_features(presentation_arrival PUBLIC cxx_std_17)
+ament_target_dependencies(presentation_arrival nav2_core nav2_costmap_2d pluginlib)

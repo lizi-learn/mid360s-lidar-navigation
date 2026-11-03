@@ -219,7 +219,7 @@ def main():
                     observed_fault_samples=sum(s['gate'].get('collision_source_valid')is False for s in witness),stopped_samples=sum(max(map(abs,s['command']))<1e-6 for s in witness),user_start_requests=1))
             parked=wait(lambda d:d['reception']['mission']['phase']=='guest_wait',45)
             assert parked['reception']['mission']['index']==1
-            error=abs(math.remainder(parked['pose'][2]-a['yaw'],2*math.pi));assert error<.15,error
+            error=abs(math.remainder(parked['pose'][2]-a['yaw'],2*math.pi));assert error<=math.radians(20),error
             epoch=parked['reception']['mission']['epoch'];pose=parked['truth']['pose']
             time.sleep(.6);parked=status()
             assert parked['reception']['mission']['phase']=='guest_wait'
@@ -228,7 +228,7 @@ def main():
             call('/api/confirm',{'reception_command':dict(command='continue',epoch=epoch)})
             dwelling=wait(lambda d:d['reception']['mission']['phase']=='dwell',45)
             assert dwelling['reception']['mission']['index']==2
-            assert abs(math.remainder(dwelling['pose'][2]-b['yaw'],2*math.pi))<.15
+            assert abs(math.remainder(dwelling['pose'][2]-b['yaw'],2*math.pi))<=math.radians(20)
             assert dwelling['reception']['mission']['epoch']!=epoch
             assert max(map(abs,dwelling['truth']['command']))<1e-6
             d=complete()
@@ -353,7 +353,7 @@ def main():
             orient=point('oriented',before[0],before[1],'visit');orient['yaw']=math.remainder(pose+1.,2*math.pi)
             doc['points']=[orient];doc['routes']=[dict(id='tour',name='directed arrival',mode='showcase',loops=1,description='',steps=[dict(point_id='oriented',speak=False)])];doc=save(doc);start(doc);d=complete()
             actual_yaw=d['pose'][2];yaw_error=abs(math.remainder(actual_yaw-orient['yaw'],2*math.pi))
-            assert yaw_error<.15,(actual_yaw,orient['yaw'])
+            assert yaw_error<=math.radians(20),(actual_yaw,orient['yaw'])
             events.append({'case':'actual_directed_goal_settled_action_completion','passed':True,'requested_yaw':orient['yaw'],'actual_yaw':actual_yaw,'error_rad':yaw_error})
             doc['points']=[point('finish',10.5,4.25,'visit')];doc['routes'][0]['steps']=[dict(point_id='finish',speak=False)];doc=save(doc)
             start(doc);wait(lambda d:d['reception']['mission']['phase']=='navigating',10)
