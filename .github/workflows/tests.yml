@@ -26,6 +26,10 @@ jobs:
       - run: python experiments/reception/check.py --output /tmp/reception-workflow.json
       - run: python experiments/reception/check_voice.py --output /tmp/reception-voice.json
       - run: python experiments/reception/check_ui.py
+      - name: Save point forms and empty route drafts through the rendered editor
+        run: |
+          npm install --prefix /tmp/p2-editor-dom --no-audit --no-fund --save-exact jsdom@26.1.0
+          NODE_PATH=/tmp/p2-editor-dom/node_modules python experiments/reception/check_editor.py --output /tmp/reception-editor.json
       - run: python -m compileall -q robot_profile.py nav_server.py nav_geometry.py survey.py localization_health.py demo_server.py sensor_watchdog.py scripts tests navigation
       - run: python -m compileall -q experiments
       - run: bash -n experiments/continuous_forward/build.sh experiments/continuous_forward/check_collision.sh experiments/gait_space/build.sh experiments/gait_space/check.sh

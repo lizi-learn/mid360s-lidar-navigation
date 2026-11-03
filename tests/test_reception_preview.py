@@ -34,6 +34,10 @@ class SavedPreview(unittest.TestCase):
         d['routes']=[dict(id='tour',name='tour',mode='showcase',loops=1,description='',steps=[dict(point_id='a',speak=True),dict(point_id='home',speak=False)])]
         return grid,d
 
+    def test_empty_draft_preview_has_actionable_error(self):
+        g,d=self.fixture();d['routes'][0]['steps']=[]
+        with self.assertRaisesRegex(ValueError,'先加入点位再预演'):preview(g,d,'tour')
+
     def test_task_order_heading_script_wait_and_dwell_no_input_mutation(self):
         g,d=self.fixture();oldg,oldd=copy.deepcopy(g),copy.deepcopy(d);r=preview(g,d,'tour');seq=r['samples']
         speaking=next(s for s in seq if s['phase']=='presenting');self.assertAlmostEqual(speaking['pose'][2],1.,places=3)

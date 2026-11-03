@@ -40,6 +40,7 @@ def preview(grid,document,route_id):
     if grid.get('map_id',document['map_id'])!=document['map_id']:raise ValueError('预演地图与点位不一致')
     route=next((r for r in document['routes']if r['id']==route_id),None)
     if not route:raise ValueError('请选择要预演的路线')
+    if not route['steps']:raise ValueError('这条路线还没有点位，请先加入点位再预演')
     points={p['id']:p for p in document['points']}
     if len(route['steps'])*route['loops']>150:raise ValueError('一次预演最多150站，可减少循环次数')
     cells,annotation_report=AnnotationLayer().apply(grid,document['annotations'])

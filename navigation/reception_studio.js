@@ -18,7 +18,7 @@ function preferredMap(options,active){
 const studioLoadCatalog=loadCatalog;
 loadCatalog=async function(mapId){
     const id=++savedMapRequest;studioStopPreview(true);if(map?.map_id!==mapId)cacheMap(null);
-    await studioLoadCatalog(mapId);const wantedRoute=new URLSearchParams(location.search).get('route');if(doc?.routes.some(r=>r.id===wantedRoute)){selectedRoute=wantedRoute;selected=doc.routes.find(r=>r.id===selectedRoute).steps[0].point_id;}render();
+    await studioLoadCatalog(mapId);const wantedRoute=new URLSearchParams(location.search).get('route');if(doc?.routes.some(r=>r.id===wantedRoute)){selectedRoute=wantedRoute;selected=doc.routes.find(r=>r.id===selectedRoute).steps[0]?.point_id||doc.points[0]?.id||null;}render();
     if(id!==savedMapRequest||doc?.map_id!==mapId)return;
     try{
         const raster=await mapCall('map_raster',{map_id:mapId});

@@ -41,6 +41,17 @@ class CatalogTest(unittest.TestCase):
             two=store.save(one,1);os.utime(path,ns=(original.st_atime_ns,original.st_mtime_ns))
             self.assertEqual(store.read(one['map_id'])['revision'],2)
             with self.assertRaises(ValueError):store.save(one,1)
+    def test_empty_route_draft_saves_without_blocking_point_updates(self):
+        with tempfile.TemporaryDirectory() as root:
+            store=Catalog(root);d=fixture();d['routes'][0]['steps']=[]
+            d['points'][0]['name']='接待起点';saved=store.save(d,0)
+            self.assertEqual(store.read(saved['map_id'])['points'][0]['name'],'接待起点')
+            self.assertEqual(saved['routes'][0]['steps'],[])
+    def test_invalid_name_reports_which_point_and_keeps_route_limit(self):
+        d=fixture();d['points'][1]['name']=' '
+        with self.assertRaisesRegex(ValueError,'第2个点位名称不能为空'):validate(d)
+        d=fixture();d['routes'][0]['steps']*=51
+        with self.assertRaisesRegex(ValueError,'最多包含100'):validate(d)
     def test_path_traversal(self):
         with tempfile.TemporaryDirectory() as root:
             for s in ['../other','/tmp/a','x/abc','']:
@@ -76,6 +87,10 @@ class CatalogTest(unittest.TestCase):
 class MissionTest(unittest.TestCase):
     def start(self,d=None):
         m=Mission();d=d or fixture();epoch=m.start(d,'tour',0);return m,d,epoch
+    def test_empty_saved_draft_does_not_create_a_task(self):
+        m=Mission();d=fixture();d['routes'][0]['steps']=[];epoch=m.epoch
+        with self.assertRaisesRegex(ValueError,'还没有点位'):m.start(d,'tour',0)
+        self.assertEqual(m.phase,'idle');self.assertEqual(m.epoch,epoch);self.assertEqual(m.run_id,'')
     def test_plain_transit_batch_has_one_native_action_and_no_fake_arrivals(self):
         d=fixture();d['points'][1]['kind']='transit';d['points'][1]['dwell']=0
         m,d,e=self.start(d);cmd=m.tick(permitted(),0)

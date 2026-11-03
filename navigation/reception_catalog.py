@@ -61,10 +61,10 @@ def validate(raw):
         p['name'] = text(p.get('name', ''), 80)
         p['script'] = text(p.get('script', ''), 3000)
         p['tags'] = text(p.get('tags', ''), 200)
-    for p in d['points']:
+    for point_index,p in enumerate(d['points']):
         fields(p, 'id name x y yaw product_id script dwell guest_wait kind')
         p['name'] = text(p.get('name', ''), 80)
-        if not p['name']: raise ValueError('点位名称不能为空')
+        if not p['name']: raise ValueError(f'第{point_index+1}个点位名称不能为空')
         for k in ('x', 'y'): p[k] = number(p.get(k), -100000., 100000.)
         yaw = p.get('yaw')
         p['yaw'] = None if yaw is None else number(yaw, -math.pi, math.pi)
@@ -84,7 +84,7 @@ def validate(raw):
         if r['mode'] not in ('showcase', 'adaptive'): raise ValueError('路线模式无效')
         if type(r.get('loops', 1)) is not int or not 1 <= r.get('loops', 1) <= 10: raise ValueError('循环次数应为1到10')
         r['loops'] = r.get('loops', 1)
-        if not isinstance(r.get('steps'), list) or not 1 <= len(r['steps']) <= 100: raise ValueError('路线需包含1到100个点位')
+        if not isinstance(r.get('steps'), list) or not 0 <= len(r['steps']) <= 100: raise ValueError('路线最多包含100个点位')
         for s in r['steps']:
             fields(s, 'point_id speak')
             if s.get('point_id') not in ids['points']: raise ValueError('路线引用的点位不存在')

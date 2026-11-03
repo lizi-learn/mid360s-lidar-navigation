@@ -62,6 +62,7 @@ class Mission:
             if self.phase in BUSY: raise ValueError('当前任务正在执行，请先取消或暂停')
             route = next((r for r in document['routes'] if r['id'] == route_id), None)
             if route is None: raise ValueError('路线不存在')
+            if not route['steps']: raise ValueError('这条路线还没有点位，请先加入点位再开始巡游')
             self.reset(); self.run_id=secrets.token_hex(12);self.epoch += 1; self.document = copy.deepcopy(document)
             points = {p['id']: p for p in document['points']}
             def make_step(s):
