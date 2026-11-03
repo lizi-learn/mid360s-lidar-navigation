@@ -32,7 +32,11 @@ class SettledPivot {
         // A fresh but motionless response may still be below the selected
         // multiplier/deadzone. Retry at the existing1.0 raw-input maximum;
         // the operator multiplier and native ramp remain unchanged.
-        if(near_peak_<.03&&near_delta_<.02){near_level_=1.;near_peak_=0.;near_duration_=1.1;}
+        // Brief rate spikes from a standing biped do not establish useful
+        // rotation. Once the pulse has settled, use the observed heading
+        // displacement to detect a motionless response. The existing full
+        // input retry remains bounded by the normal pulse, ramp and checks.
+        if(near_delta_<.02){near_level_=1.;near_peak_=0.;near_duration_=1.1;}
       }else {far_delta_=std::abs(std::remainder(yaw-from_,2.*std::acos(-1.)));far_peak_=peak_;far_duration_=duration_;}
     }
     if(!active_&&std::abs(error)<=tolerance&&std::abs(rate)<.03)return 0.;

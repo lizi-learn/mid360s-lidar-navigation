@@ -29,6 +29,19 @@ int main(){
  assert(c.step(.1,0,0,1.)==0.&&!c.pending());
  c.step(1.,0,0,1.05);assert(c.step(.1,0,0,.2)==0.&&!c.pending());
  bool rejected=false;try{c.step(std::numeric_limits<double>::quiet_NaN(),0,0,2.);}catch(const std::invalid_argument&){rejected=true;}assert(rejected);
+ // Gyro vibration without accumulated heading progress is not a successful
+ // turn. A deadzone must trigger the existing bounded full-input retry even
+ // when short rate spikes are above the quiet threshold.
+ for(double sign:{-1.,1.}) {
+  SettledPivot noisy;bool boosted=false;
+  for(int k=0;k<160;++k) {
+   const double rate=k%20==0?.08:0.;
+   const double raw=noisy.step(sign*.7,0.,rate,k*.05);
+   assert(raw*sign>=0.&&std::abs(raw)<=1.);
+   if(std::abs(raw)>.99)boosted=true;
+  }
+  assert(boosted);
+ }
  // Frozen independent response parameters, both signs. Settled success is
  // checked after transport drains, rather than first entry into tolerance.
  for(double gain:{.55,.62,1.25,1.65,1.9})for(double delay:{.55,1.45,1.95})for(double dead:{.32,.44})for(double goal:{-.4,.4,-2.8,2.8})for(double scale:{.5,1.}){
