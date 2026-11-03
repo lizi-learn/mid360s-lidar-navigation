@@ -31,3 +31,8 @@ ament_target_dependencies(settled_reset nav2_core nav2_costmap_2d pluginlib)
 add_executable(rotation_progress rotation_progress.cpp)
 target_compile_features(rotation_progress PUBLIC cxx_std_17)
 ament_target_dependencies(rotation_progress nav2_core pluginlib)
+
+add_executable(filled_footprint filled_footprint.cpp)
+target_compile_features(filled_footprint PUBLIC cxx_std_17)
+target_include_directories(filled_footprint PRIVATE ../../navigation/p2_nav_controller/include)
+ament_target_dependencies(filled_footprint nav2_costmap_2d)

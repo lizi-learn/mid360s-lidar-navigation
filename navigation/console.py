@@ -16,6 +16,8 @@ from nav2_msgs.msg import SpeedLimit,CollisionMonitorState,CostmapFilterInfo,Beh
 from slam_toolbox.srv import SerializePoseGraph
 from nav2_msgs.srv import SaveMap
 from lifecycle_msgs.srv import GetState
+from rcl_interfaces.srv import SetParametersAtomically
+from rcl_interfaces.msg import Parameter,ParameterValue,ParameterType
 from std_msgs.msg import String
 from tf2_ros import Buffer,TransformListener
 from map_persistence import configure_save_request,validate_map_metadata
@@ -99,6 +101,8 @@ class Console(Node):
         self.planner=ActionClient(self,ComputePathToPose,'compute_path_to_pose')
         self.nav_through=ActionClient(self,NavigateThroughPoses,'navigate_through_poses')
         self.planner_through=ActionClient(self,ComputePathThroughPoses,'compute_path_through_poses')
+        self.goal_request_lock=threading.RLock()
+        self.route_parameters=self.create_client(SetParametersAtomically,'/planner_server/set_parameters_atomically')
         self.buffer=Buffer();self.listener=TransformListener(self.buffer,self)
         self.create_timer(.5,self.publish_speed)
         self.create_timer(.02,self.poll_session)
@@ -580,7 +584,21 @@ class Console(Node):
                 if self.session.finished(generation,status==4):
                     self.op(armed=False,paused=True);self.last_action=self.session.message
             self.acknowledge_if_quiet(generation)
+    def route_final_goal(self,data,final_pose):
+        # Publish the actual final request coordinates atomically before either
+        # preview or navigation replans; never encode task flags in pose stamps.
+        if not self.route_parameters.wait_for_service(timeout_sec=2.):raise ValueError('路线规划参数服务尚未响应')
+        request=SetParametersAtomically.Request()
+        request.parameters=[Parameter(name='RouteDirected.final_'+k,value=ParameterValue(type=ParameterType.PARAMETER_DOUBLE,double_value=float(data[k])))for k in ('x','y')]
+        stamp=final_pose.header.stamp
+        request.parameters.append(Parameter(name='RouteDirected.final_request_ns',value=ParameterValue(type=ParameterType.PARAMETER_INTEGER,integer_value=stamp.sec*10**9+stamp.nanosec)))
+        response=self.wait_future(self.route_parameters.call_async(request),2.)
+        if not response.result.successful:raise ValueError('路线终点参数未应用：'+response.result.reason)
     def set_goal(self,data):
+        # Serialize goal-specific planner parameters with their preview request;
+        # stop/manual callbacks do not acquire this planning lock.
+        with self.goal_request_lock:return self._set_goal(data)
+    def _set_goal(self,data):
         if self.mode!='navigation':raise ValueError('请先载入地图进入导航模式')
         pose=self.checked_pose(data)
         raw_route=data.get('_route_goals')
@@ -610,7 +628,14 @@ class Console(Node):
             request=ComputePathThroughPoses.Goal();request.goals=route_poses
         else:
             request=ComputePathToPose.Goal();request.goal=pose
-        request.planner_id='PositionOnly' if heading_mode=='position' else 'GridBased'
+        directed_route=bool(route_poses and heading_mode=='pose' and self.gait_profile=='p2-flat-model')
+        if directed_route:
+            try:self.route_final_goal(data,route_poses[-1])
+            except (ValueError,TimeoutError):
+                with self.lock:
+                    self.pending_plan_accept=False;self.session.planned(generation,0,time.monotonic());self.acknowledge_if_quiet(generation)
+                raise
+        request.planner_id='PositionOnly' if heading_mode=='position' else ('RouteDirected' if directed_route else 'GridBased')
         with self.lock:
             if self.session.generation!=generation or self.session.phase!='planning':
                 self.pending_plan_accept=False;self.acknowledge_if_quiet(generation);raise ValueError('规划已取消')
@@ -649,7 +674,7 @@ class Console(Node):
             self.pending_nav_accept=False;self.session.cancel();self.stop_actions();self.acknowledge_if_quiet(generation);raise ValueError('导航服务未就绪')
         if route_poses:
             goal=NavigateThroughPoses.Goal();goal.poses=route_poses
-            goal.behavior_tree=str(Path(__file__).with_name('forward_position_through_poses.xml' if getattr(self,'goal_heading_mode','pose')=='position' else 'forward_through_poses.xml'))
+            goal.behavior_tree=str(Path(__file__).with_name('forward_position_through_poses.xml' if getattr(self,'goal_heading_mode','pose')=='position' else ('forward_directed_route.xml' if self.gait_profile=='p2-flat-model' else 'forward_through_poses.xml')))
         else:
             goal=NavigateToPose.Goal();goal.pose=pose
             if getattr(self,'goal_heading_mode','pose')=='position':goal.behavior_tree=str(Path(__file__).with_name('forward_position_navigation.xml'))

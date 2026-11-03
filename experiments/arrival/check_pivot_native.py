@@ -11,7 +11,7 @@ cohorts=[('original_large',list(itertools.product([.8,1.2],[.3,.8,1.1],[.28,.35]
  ('sweep_a',list(itertools.product([.55,1.25,1.9],[.55,1.45,1.95],[.32,.44],[-.4,.4,-2.8,2.8]))),
  ('sweep_b',list(itertools.product([.62,1.05,1.65],[.65,1.35,1.85],[.31,.425],[-.47,.47,-2.65,2.65])))]
 for candidate in [False,True]:
- params=config(gait_profile='p2-flat-model')['controller_server']['ros__parameters'];params['FollowPath']['settled_pivot_response']=candidate;params['goal_checker']['plugin']='p2_nav_controller::SettledHeadingGoalChecker'if candidate else'nav2_controller::SimpleGoalChecker'
+ params=config(gait_profile='p2-flat-model')['controller_server']['ros__parameters'];params['FollowPath']['settled_pivot_response']=candidate;params['progress_checker']['plugin']='p2_nav_controller::RotationProgressChecker'if candidate else'nav2_controller::SimpleProgressChecker';params['goal_checker']['plugin']='p2_nav_controller::SettledHeadingGoalChecker'if candidate else'nav2_controller::SimpleGoalChecker'
  pf=out/('candidate.yaml'if candidate else'baseline.yaml');pf.write_text(yaml.safe_dump({'preview_controller':{'ros__parameters':params}}))
  for cohort,cases in cohorts:
   # Paired comparisons retain every failure. These public fixed sweeps

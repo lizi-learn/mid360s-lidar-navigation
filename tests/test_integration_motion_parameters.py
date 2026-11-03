@@ -17,3 +17,9 @@ class RecoveryMotionDefaults(unittest.TestCase):
         self.assertEqual(p['progress_checker']['required_movement_radius'],.1)
         self.assertEqual(p['progress_checker']['required_movement_angle'],.1)
         self.assertFalse(c['planner_server']['ros__parameters']['GridBased']['smooth_path'])
+
+    def test_directed_routes_keep_free_transit_separate_from_final_heading(self):
+        c=config(gait_profile='p2-flat-model')['planner_server']['ros__parameters']
+        self.assertIn('RouteDirected',c['planner_plugins'])
+        self.assertEqual(c['RouteDirected']['plugin'],'p2_nav_controller::RouteDirectedLattice')
+        self.assertFalse(c['RouteDirected']['smooth_path'])

@@ -6,7 +6,7 @@ class RecoveryTreeTests(unittest.TestCase):
  def test_policy_waits_and_cancel_nodes_preserved(self):
   nav=Path(__file__).resolve().parents[1]/'navigation'
   with tempfile.TemporaryDirectory()as d:
-   for name in ['forward_navigation.xml','forward_position_navigation.xml','forward_through_poses.xml','forward_position_through_poses.xml']:
+   for name in ['forward_navigation.xml','forward_position_navigation.xml','forward_through_poses.xml','forward_position_through_poses.xml','forward_directed_route.xml']:
     base=nav/name;before=base.read_bytes()
     for wait in [8.,25.,600.]:
      target=recovery_tree(base,d,wait);root=ET.parse(target).getroot();recovery=root.find('.//RecoveryNode');self.assertGreaterEqual(int(recovery.get('number_of_retries'))*2,wait)

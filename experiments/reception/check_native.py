@@ -167,10 +167,10 @@ def main():
             a=point('product_a',2.8,2.5,'visit');a.update(yaw=.6,script=text,guest_wait=True)
             b=point('product_b',3.8,2.5,'visit');b.update(yaw=0.,script=text,dwell=1.)
             home=point('home',2.,2.5,'home')
-            doc['points']=[a,b,home];doc['routes']=[dict(id='tour',name='Heading, product, guest wait, dwell, return',mode='showcase',loops=1,description='',steps=[dict(point_id=p['id'],speak=True)for p in doc['points']])]
+            doc['points']=[point('via',2.4,2.5),a,b,home];doc['routes']=[dict(id='tour',name='Heading, product, guest wait, dwell, return',mode='showcase',loops=1,description='',steps=[dict(point_id=p['id'],speak=True)for p in doc['points']])]
             doc=save(doc);start(doc)
             parked=wait(lambda d:d['reception']['mission']['phase']=='guest_wait',45)
-            assert parked['reception']['mission']['index']==0
+            assert parked['reception']['mission']['index']==1
             error=abs(math.remainder(parked['pose'][2]-a['yaw'],2*math.pi));assert error<.15,error
             epoch=parked['reception']['mission']['epoch'];pose=parked['truth']['pose']
             time.sleep(.6);parked=status()
@@ -179,7 +179,7 @@ def main():
             assert math.dist(parked['truth']['pose'][:2],pose[:2])<.01
             call('/api/confirm',{'reception_command':dict(command='continue',epoch=epoch)})
             dwelling=wait(lambda d:d['reception']['mission']['phase']=='dwell',45)
-            assert dwelling['reception']['mission']['index']==1
+            assert dwelling['reception']['mission']['index']==2
             assert abs(math.remainder(dwelling['pose'][2]-b['yaw'],2*math.pi))<.15
             assert dwelling['reception']['mission']['epoch']!=epoch
             assert max(map(abs,dwelling['truth']['command']))<1e-6

@@ -32,6 +32,12 @@ int main(int argc,char **argv){
   geometry_msgs::msg::PoseStamped start,goal;start.header.frame_id=goal.header.frame_id="fixture_world";start.header.stamp=parent->now();goal.header.stamp=parent->now()-rclcpp::Duration::from_seconds(5.);
   start.pose.position.x=std::stod(argv[4]);start.pose.position.y=std::stod(argv[5]);start.pose.orientation=nav2_util::geometry_utils::orientationAroundZAxis(std::stod(argv[6]));
   goal.pose.position.x=std::stod(argv[7]);goal.pose.position.y=std::stod(argv[8]);goal.pose.orientation=nav2_util::geometry_utils::orientationAroundZAxis(std::stod(argv[9]));
+  if(std::getenv("P2_ARRIVAL_FINAL_REQUEST")) {
+    const double fx=parent->get_parameter("GridBased.final_x").as_double(),fy=parent->get_parameter("GridBased.final_y").as_double();
+    // A real request header is used, rather than synthesizing a pose timestamp.
+    if(std::hypot(goal.pose.position.x-fx,goal.pose.position.y-fy)<1e-6)
+      parent->set_parameter(rclcpp::Parameter("GridBased.final_request_ns",rclcpp::Time(goal.header.stamp).nanoseconds()));
+  }
   const auto began=std::chrono::steady_clock::now();
   try{
    auto path=planner->createPlan(start,goal);std::ofstream out(std::string(argv[2])+".csv");out<<"x,y,yaw\n";

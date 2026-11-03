@@ -111,6 +111,8 @@ jobs:
           /tmp/arrival-build/settled_reset
           mkdir -p /tmp/arrival
           /tmp/arrival-build/rotation_progress > /tmp/arrival/rotation-progress.json
+          /tmp/arrival-build/filled_footprint > /tmp/arrival/filled-footprint.json
+          python3 experiments/arrival/check_directed_route.py --binary /tmp/arrival-build/arrival_planner --output /tmp/arrival/directed-route
           python3 experiments/arrival/check.py --binary /tmp/arrival-build/arrival_planner --output /tmp/arrival/planner/comparison.json
           python3 experiments/arrival/check_plan_time.py --source "$GITHUB_WORKSPACE" --binary /tmp/arrival-build/arrival_planner --output /tmp/arrival/heading-plan-time
           python3 experiments/arrival/check_replanning.py --binary /tmp/arrival-build/arrival_planner --output /tmp/arrival/replanning/comparison.json

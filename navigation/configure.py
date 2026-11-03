@@ -109,6 +109,9 @@ def config(controller='rpp', tree=None, minimum_speed=.03, footprint_vertices=No
         planner['PositionOnly']['plugin']='p2_nav_controller::PositionOnlyLattice'
         planner['PositionOnly']['smooth_path']=False
         planner['PositionOnly']['cache_obstacle_heuristic']=True
+        planner['planner_plugins'].append('RouteDirected')
+        planner['RouteDirected']=copy.deepcopy(planner['PositionOnly'])
+        planner['RouteDirected']['plugin']='p2_nav_controller::RouteDirectedLattice'
         control=result['controller_server']['ros__parameters']
         control['goal_checker_plugins'].append('position_goal_checker')
         control['position_goal_checker']=dict(plugin='p2_nav_controller::PositionGoalChecker',xy_goal_tolerance=.15)
