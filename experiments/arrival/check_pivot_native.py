@@ -1,4 +1,4 @@
-import os,json,itertools,subprocess,sys,argparse
+import os,json,itertools,subprocess,sys,argparse,csv
 from pathlib import Path
 import yaml
 ROOT=Path(__file__).resolve().parents[2];sys.path.insert(0,str(ROOT/'navigation'))
@@ -34,7 +34,11 @@ for candidate in [False,True]:
   r=subprocess.run(cmd,capture_output=True,text=True,timeout=12);prefix.with_suffix('.log').write_text(r.stdout+r.stderr)
   row={'cohort':kind,'candidate':candidate,'kind':kind,'returncode':r.returncode}
   if r.returncode==0:
-   row.update(json.loads(prefix.with_suffix('.json').read_text()));row['passed']=row['body_intrusions']==0 and ((kind=='blocked'and row['obstacle_verified']and row['collision_stops']>0)or(kind=='endpoint'and row['obstacle_verified']and row['goal_reached']and row['collision_stops']==0)or(kind=='cancel'and row['cancelled']and not row['post_cancel_nonzero']and abs(row['final_measured_rate'])<.03))
+   row.update(json.loads(prefix.with_suffix('.json').read_text()))
+   if kind=='endpoint':
+    first=next(csv.DictReader(prefix.with_suffix('.csv').open()))
+    row['initial_requested_turn_allowed']=float(first['raw_z'])>0.0 and int(first['collision_exception'])==0
+   row['passed']=row['body_intrusions']==0 and ((kind=='blocked'and row['obstacle_verified']and row['collision_stops']>0)or(kind=='endpoint'and row['obstacle_verified']and row['goal_reached']and row['initial_requested_turn_allowed'])or(kind=='cancel'and row['cancelled']and not row['post_cancel_nonzero']and abs(row['final_measured_rate'])<.03))
   else:row['passed']=False
   rows.append(row)
 summary={}

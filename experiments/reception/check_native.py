@@ -388,6 +388,20 @@ def main():
             start(doc);d=complete()
             cross=[t['truth']['pose']for t in trace if abs(t['truth']['pose'][0]-3.5)<.08]
             assert cross and all(p[1]<1.7 or p[1]>3.3 for p in cross),cross
+            # Independent synthetic truth audit of the complete55cm square
+            # against the authored10cm line, rather than robot-centre crossing.
+            intrusion_samples=0;body_samples=0;previous=None
+            for entry in trace:
+                if entry['mission']['phase']not in ('navigating','dispatching'):continue
+                current=entry['truth']['pose']
+                for k in range(1,11):
+                    q=current if previous is None else [previous[0]+(current[0]-previous[0])*k/10.,previous[1]+(current[1]-previous[1])*k/10.,previous[2]+math.remainder(current[2]-previous[2],2*math.pi)*k/10.]
+                    x,y,yaw=q;dx=3.5-x;dy=2.5-y;c=math.cos(yaw);sn=math.sin(yaw);half=.275;hx=.05;hy=.55
+                    overlaps=(abs(dx)<=half*(abs(c)+abs(sn))+hx and abs(dy)<=half*(abs(c)+abs(sn))+hy and abs(c*dx+sn*dy)<=half+hx*abs(c)+hy*abs(sn) and abs(-sn*dx+c*dy)<=half+hx*abs(sn)+hy*abs(c))
+                    body_samples+=1;intrusion_samples+=int(overlaps)
+                previous=current
+            witness.update(body_intrusion_samples=intrusion_samples,body_check_samples=body_samples,body_scope='synthetic truth square vs authored line;10 interpolated samples per trace interval')
+            assert body_samples>0 and intrusion_samples==0,witness
             wait(lambda d:d['speed_zones']['factor']==1.,5)
             run=d['reception']['mission']['run_id'];history=call('/api/save',{'reception':dict(operation='trace_read',map_id=doc['map_id'],run_id=run,limit=200)})
             assert len(history['samples'])>5 and all(s.get('pose_source_ros_ns')and s['gate'].get('evaluated_monotonic_ns')for s in history['samples'])

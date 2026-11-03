@@ -12,6 +12,7 @@
 #include "p2_nav_controller/settled_pivot.hpp"
 #include "p2_nav_controller/reference_goal.hpp"
 #include "p2_nav_controller/curved_forward.hpp"
+#include "p2_nav_controller/filled_footprint.hpp"
 
 namespace p2_nav_controller {
 class SettledGoalRPP : public nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController {
@@ -56,7 +57,7 @@ class SettledGoalRPP : public nav2_regulated_pure_pursuit_controller::RegulatedP
       path.poses[pivot_end+1].pose.position.y-path.poses.front().pose.position.y)<.005)++pivot_end;
     const double reference_turn=std::abs(std::remainder(tf2::getYaw(path.poses[pivot_end].pose.orientation)-tf2::getYaw(path.poses.front().pose.orientation),2.*std::acos(-1.)));
     if(pivot_end>0&&(reference_turn>.55||(reference_pivot_&&reference_turn>.15))){reference_pivot_=true;reference_target_=path.poses[pivot_end];reference_target_.header.frame_id=path.header.frame_id;}
-    else if(pivot_end==0)reference_pivot_=false;
+    else reference_pivot_=false;
     goal_=goal; plan_source_ns_=rclcpp::Time(path.header.stamp).nanoseconds(); Base::setPlan(path);
   }
   void activate() override { response_braking_=false; reference_pivot_=false; phase_.reset(); breakaway_.reset(); settled_pivot_.reset(); Base::activate(); }
@@ -98,7 +99,7 @@ class SettledGoalRPP : public nav2_regulated_pure_pursuit_controller::RegulatedP
     const double w=std::clamp(requested_w,-rotate_to_heading_angular_vel_,rotate_to_heading_angular_vel_);
     auto *costmap=costmap_ros_->getCostmap();
     std::unique_lock<nav2_costmap_2d::Costmap2D::mutex_t> map_lock(*(costmap->getMutex()));
-    if (use_collision_detection_ && (v==0.?pivot_collision(pose,w,pivot_error,speed.angular.z,distance):isCollisionImminent(pose,v,w,distance)))
+    if (use_collision_detection_ && (v==0.?pivot_collision(pose,w,pivot_error,speed.angular.z,distance):body_arc_collision(pose,v,w,distance)))
       {settled_pivot_.reset();throw nav2_core::PlannerException("Terminal rotation collision ahead");}
     geometry_msgs::msg::TwistStamped out; out.header=pose.header; out.twist.linear.x=v; out.twist.angular.z=w; return out;
   }
@@ -112,10 +113,18 @@ class SettledGoalRPP : public nav2_regulated_pure_pursuit_controller::RegulatedP
       if(!transformPose(pose.header.frame_id,reference,target))throw nav2_core::PlannerException("Reference pivot transform unavailable");
       const double error=std::remainder(tf2::getYaw(target.pose.orientation)-tf2::getYaw(pose.pose.orientation),2.*std::acos(-1.));
       const double w=settled_pivot_.step(error,tf2::getYaw(pose.pose.orientation),speed.angular.z,clock_->now().seconds(),.15);
+      bool pivot_clear=true;
       {auto *map=costmap_ros_->getCostmap();std::unique_lock<nav2_costmap_2d::Costmap2D::mutex_t> map_lock(*map->getMutex());
-        if(use_collision_detection_&&pivot_collision(pose,w,error,speed.angular.z,distance))throw nav2_core::PlannerException("Reference pivot collision ahead");}
-      if(std::abs(error)<.15&&!settled_pivot_.pending())reference_pivot_=false;
-      geometry_msgs::msg::TwistStamped out;out.header=pose.header;out.twist.angular.z=w;return out;
+        pivot_clear=!use_collision_detection_||!pivot_collision(pose,w,error,speed.angular.z,distance);}
+      if(pivot_clear) {
+        if(std::abs(error)<.15&&!settled_pivot_.pending())reference_pivot_=false;
+        geometry_msgs::msg::TwistStamped out;out.header=pose.header;out.twist.angular.z=w;return out;
+      }
+      // A global-map pivot can disagree with newer/local obstacle cells at a
+      // line endpoint. Try the existing fully checked forward/window tracking
+      // before failing the action; moving past the corner can make the turn fit.
+      reference_pivot_=false;settled_pivot_.reset();
+      RCLCPP_INFO_THROTTLE(costmap_ros_->get_logger(),*clock_,1000,"Reference pivot unavailable locally; evaluating current-body forward alternatives");
     }
     const double lo=min_lookahead_dist_,hi=max_lookahead_dist_;
     struct Restore {
@@ -155,7 +164,7 @@ class SettledGoalRPP : public nav2_regulated_pure_pursuit_controller::RegulatedP
         // A shorter carrot must not shorten the original time horizon: check
         // its actual bounded arc out to the unchanged goal/time limit as well.
         {auto *map=costmap_ros_->getCostmap();std::unique_lock<nav2_costmap_2d::Costmap2D::mutex_t> map_lock(*map->getMutex());
-          if(use_collision_detection_&&isCollisionImminent(pose,out.twist.linear.x,bounded,distance))
+          if(use_collision_detection_&&body_arc_collision(pose,out.twist.linear.x,bounded,distance))
             throw nav2_core::PlannerException("Forward tracking arc collision ahead");}
         out.twist.angular.z=bounded;
         follow_measured_turn(pose,speed,distance,out);
@@ -180,7 +189,7 @@ class SettledGoalRPP : public nav2_regulated_pure_pursuit_controller::RegulatedP
       for(double v:{std::min(desired_linear_vel_,.6),0.})for(double fraction:{-1.,-.75,-.5,-.25,0.,.25,.5,.75,1.}) {
         const double w=fraction*rotate_to_heading_angular_vel_;
         if(v==0.&&(std::abs(angle)<=.15||std::abs(w)<minimum_pivot_||w*angle<=0.))continue;
-        if(use_collision_detection_&&isCollisionImminent(pose,v,w,distance))continue;
+        if(use_collision_detection_&&body_arc_collision(pose,v,w,distance))continue;
         const double px=std::abs(w)<1e-6?v:v*std::sin(w)/w;
         const double py=std::abs(w)<1e-6?0.:v*(1.-std::cos(w))/w;
         const double heading=std::remainder(angle-w,2*std::acos(-1.));
@@ -197,19 +206,39 @@ class SettledGoalRPP : public nav2_regulated_pure_pursuit_controller::RegulatedP
 
     throw nav2_core::PlannerException(last);
   }
-  bool pivot_collision(const geometry_msgs::msg::PoseStamped &pose,double requested,
-      double remaining_error,double measured,double distance) {
+  bool body_arc_collision(const geometry_msgs::msg::PoseStamped &pose,double v,double w,double distance) {
     const double horizon=max_allowed_time_to_collision_up_to_carrot_;
-    struct Restore {double &value;double previous;~Restore(){value=previous;}} restore{max_allowed_time_to_collision_up_to_carrot_,horizon};
-    // The reference/final pivot ends at its target yaw. A constant command
-    // projected past that target can collide with a line corner even when the
-    // complete requested turn fits. Keep the measured ongoing rotation check
-    // over the original horizon; do not assume zero response or instant stop.
-    if(requested*remaining_error>0.&&std::abs(requested)>1e-6)
-      max_allowed_time_to_collision_up_to_carrot_=std::min(horizon,std::abs(remaining_error/requested));
-    if(isCollisionImminent(pose,0.,requested,distance))return true;
-    max_allowed_time_to_collision_up_to_carrot_=horizon;
-    return std::abs(measured)>1e-6&&isCollisionImminent(pose,0.,measured,distance);
+    if(!std::isfinite(v)||!std::isfinite(w)||!std::isfinite(horizon)||horizon<0.)return true;
+    auto *map=costmap_ros_->getCostmap();const auto body=costmap_ros_->getRobotFootprint();
+    const double x=pose.pose.position.x,y=pose.pose.position.y,yaw=tf2::getYaw(pose.pose.orientation);
+    const int steps=std::max({1,int(std::ceil(horizon/.01)),int(std::ceil(std::abs(v)*horizon/.005)),int(std::ceil(std::abs(w)*horizon/.005))});
+    for(int i=0;i<=steps;++i) {
+      const double t=horizon*static_cast<double>(i)/steps,a=yaw+w*t;
+      const double px=x+(std::abs(w)<1e-8?v*t*std::cos(yaw):v/w*(std::sin(a)-std::sin(yaw)));
+      const double py=y+(std::abs(w)<1e-8?v*t*std::sin(yaw):v/w*(std::cos(yaw)-std::cos(a)));
+      if(std::hypot(px-x,py-y)>distance)break;
+      if(!filled_footprint_clear(map,body,px,py,a))return true;
+    }
+    return false;
+  }
+  bool pivot_collision(const geometry_msgs::msg::PoseStamped &pose,double requested,
+      double remaining_error,double measured,double /*distance*/) {
+    const double horizon=max_allowed_time_to_collision_up_to_carrot_;
+    if(!std::isfinite(requested)||!std::isfinite(remaining_error)||!std::isfinite(measured))return true;
+    const double requested_angle=requested*remaining_error>=0.?remaining_error:requested*horizon;
+    auto *map=costmap_ros_->getCostmap();const auto body=costmap_ros_->getRobotFootprint();
+    auto clear=[&](double angle) {
+      const double yaw=tf2::getYaw(pose.pose.orientation);
+      const int steps=std::max(1,static_cast<int>(std::ceil(std::abs(angle)/.005)));
+      for(int i=0;i<=steps;++i)if(!filled_footprint_clear(map,body,pose.pose.position.x,
+          pose.pose.position.y,yaw+angle*static_cast<double>(i)/steps))return false;
+      return true;
+    };
+    // Check the COMPLETE intended angle, irrespective of pulse magnitude;
+    // do not add rotation beyond the requested yaw. Filled-cell intersection
+    // also avoids outline raster gaps near the corner of the square body.
+    // The measured continuing rotation keeps the original full time horizon.
+    return !clear(requested_angle)||!clear(measured*horizon);
   }
   void follow_measured_turn(const geometry_msgs::msg::PoseStamped &pose,
       const geometry_msgs::msg::Twist &speed,double distance,geometry_msgs::msg::TwistStamped &out,
@@ -228,12 +257,12 @@ class SettledGoalRPP : public nav2_regulated_pure_pursuit_controller::RegulatedP
     std::unique_lock<nav2_costmap_2d::Costmap2D::mutex_t> map_lock(*map->getMutex(),std::defer_lock);
     if(acquire_map)map_lock.lock();
     const double forward=std::max(speed.linear.x,out.twist.linear.x);
-    const bool continuing_arc_blocked=isCollisionImminent(pose,forward,speed.angular.z,distance);
+    const bool continuing_arc_blocked=body_arc_collision(pose,forward,speed.angular.z,distance);
     // Keep one correction phase. Releasing merely because measured translation
     // dipped near zero alternated forward/pivot on every acceleration and kept
     // resetting the downstream turn ramp. The normal handoff settles yaw before
     // resuming forward, so that zero-yaw continuation must also fit at release.
-    const bool settling_arc_blocked=response_braking_&&isCollisionImminent(pose,forward,0.,distance);
+    const bool settling_arc_blocked=response_braking_&&body_arc_collision(pose,forward,0.,distance);
     response_braking_=continuing_arc_blocked||settling_arc_blocked;
     if(response_braking_) {
       RCLCPP_INFO_THROTTLE(costmap_ros_->get_logger(),*clock_,1000,

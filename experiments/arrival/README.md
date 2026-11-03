@@ -86,3 +86,19 @@ original full projection horizon. A new occupied-cell endpoint case verifies
 that a clear short turn is allowed while a blocked requested turn remains
 rejected. The actual keepout-line tracking/SLAM-tools integration also covers
 the corner where the former overrun projection stalled.
+
+The pure-turn check uses the filled square against whole occupied/unknown cells
+at5mrad spacing. It checks the complete requested angle even for low pulse
+inputs; coarse outline sampling could miss a cell inside the rotated corner.
+The endpoint regression requires the first requested turn to be admitted and
+the goal to settle with zero body intrusion. Later braking for measured ongoing
+rotation is recorded rather than incorrectly requiring zero brake events.
+
+When a globally planned initial pivot disagrees with local obstacle cells, the
+controller evaluates its existing forward/velocity-window alternatives before
+failing the action. Every returned alternative and continuing response arc uses
+analytic filled-body sweep checks. This allows progression past a line corner
+before turning. The tools integration independently audits the synthetic truth
+body against the full authored line rectangle; it does not accept centre-only
+crossing as full-body clearance. Small new plans also clear obsolete reference
+pivot state instead of retaining an older target.
