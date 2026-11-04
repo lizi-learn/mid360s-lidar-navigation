@@ -26,7 +26,9 @@ class NativeSnapshotTests(unittest.TestCase):
                 stamp=time.monotonic_ns();packet=NATIVE.pack(0x4e4f5031,1,40,7,stamp,123456,1,3,0.,0.,0.,0)
                 self.assertTrue(w.publish(packet));self.assertEqual(Path(path).read_bytes(),packet)
                 self.assertEqual(r.sample(40,stamp+99_000_000),dict(source=40,sequence=7,stamp_ns=stamp,mode=1,flags=3))
-                self.assertIsNone(r.sample(41,stamp));self.assertIsNone(r.sample(40,stamp+101_000_000));self.assertIsNone(r.sample(40,stamp-6_000_000))
+                self.assertIsNotNone(r.sample(40,stamp+160_000_000))
+                self.assertIsNotNone(r.sample(40,stamp+2_000_000_000))
+                self.assertIsNone(r.sample(41,stamp));self.assertIsNone(r.sample(40,stamp+2_000_000_001));self.assertIsNone(r.sample(40,stamp-6_000_000))
             finally:r.close();w.close()
     def test_unverified_invalid_and_changed_sources_are_not_authority(self):
         with tempfile.TemporaryDirectory()as d:
@@ -70,7 +72,8 @@ class NativeSnapshotTests(unittest.TestCase):
             child=subprocess.Popen([sys.executable,'-c',code,path],stdout=subprocess.PIPE,text=True)
             try:
                 self.assertEqual(child.stdout.readline().strip(),'locked');self.assertEqual(r.sample(40,stamp+99_000_000)['stamp_ns'],stamp)
-                self.assertIsNone(r.sample(40,stamp+101_000_000));self.assertIsNone(r.sample(41,stamp))
+                self.assertEqual(r.sample(40,stamp+160_000_000)['stamp_ns'],stamp)
+                self.assertIsNone(r.sample(40,stamp+2_000_000_001));self.assertIsNone(r.sample(41,stamp))
             finally:child.terminate();child.communicate(timeout=2);r.close();w.close()
 
 if __name__=='__main__':unittest.main()

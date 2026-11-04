@@ -379,7 +379,7 @@ class Console(Node):
                 # while a newer receiver observation is available.
                 d=gait.operator_authority()
                 now=max(now,time.monotonic())
-                source_fresh=bool(d and -.005<=now-d['stamp']<=.1)
+                source_fresh=bool(d and -.005<=now-d['stamp']<=self.session.authority_timeout)
                 reply_fresh=bool(d and(d.get('source_transport')=='native_packet_snapshot' or -.005<=now-d['reply_stamp']<=.1))
                 if not source_fresh or not reply_fresh:
                     # One UI read may be descheduled while the independent

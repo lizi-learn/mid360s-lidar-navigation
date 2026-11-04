@@ -21,7 +21,7 @@ class AuthorityTests(unittest.TestCase):
         self.assertAlmostEqual(o['source_monotonic_ns']/1e9,9.999,places=5)
         self.assertFalse(d.decode(a,b'g',100.01,10.009,1)['receiver_connected'])
         a[0]+=10000
-        self.assertFalse(d.decode(a,b'g',100.5,10.499,1)['receiver_connected'])
+        self.assertFalse(d.decode(a,b'g',102.1,12.099,1)['receiver_connected'])
         a[0]=101_000_000
         self.assertEqual(d.decode(a,b'g',101.,10.5,1)['fault'],'host_clock_changed')
         a[0]+=10000
@@ -33,4 +33,11 @@ class AuthorityTests(unittest.TestCase):
         self.assertFalse(ReceiverAuthority(False).decode(self.sample(),b'g',100.001,10.,1)['switch_mapping_verified'])
         a=self.sample();a[0]=float('nan')
         self.assertFalse(ReceiverAuthority(True).decode(a,b'g',100.,10.,1)['receiver_connected'])
+    def test_requested_two_second_original_sample_window(self):
+        for age in [.101,.16,1.,1.999,2.]:
+            d=ReceiverAuthority(True);o=d.decode(self.sample(),b'g',100.+age,10.+age,1)
+            self.assertTrue(o['receiver_connected'],age)
+            self.assertAlmostEqual(o['source_monotonic_ns']/1e9,10.,places=5)
+        o=ReceiverAuthority(True).decode(self.sample(),b'g',102.000001,12.000001,1)
+        self.assertFalse(o['receiver_connected'])
 if __name__=='__main__':unittest.main()

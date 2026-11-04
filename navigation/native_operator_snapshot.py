@@ -6,6 +6,7 @@ by a reader, and a missing/stale/different source cannot refresh authority.
 """
 import fcntl,math,os,stat,time,threading
 from native_operator_source import NATIVE
+from operator_authority import OPERATOR_SOURCE_TIMEOUT_NS
 
 class NativeSnapshotWriter:
     def __init__(self,path):
@@ -44,7 +45,7 @@ class NativeSnapshotReader:
             except BlockingIOError:
                 now=observed_now()
                 old=self.last
-                return old if old and old['source']==instance and -5_000_000<=now-old['stamp_ns']<=100_000_000 else None
+                return old if old and old['source']==instance and -5_000_000<=now-old['stamp_ns']<=OPERATOR_SOURCE_TIMEOUT_NS else None
             try:data=os.pread(self.fd,NATIVE.size,0)
             finally:fcntl.lockf(self.fd,fcntl.LOCK_UN)
             if len(data)!=NATIVE.size:return None
@@ -54,7 +55,7 @@ class NativeSnapshotReader:
             # the future merely because this reader sampled its clock first.
             now=observed_now()
             if (magic!=0x4e4f5031 or version!=1 or source!=instance or not sequence or not stamp or
-                    not -5_000_000<=now-stamp<=100_000_000 or mode not in(1,2,3)or
+                    not -5_000_000<=now-stamp<=OPERATOR_SOURCE_TIMEOUT_NS or mode not in(1,2,3)or
                     flags&3!=3 or flags&~15 or reserved or not all(math.isfinite(v)and abs(v)<=1. for v in(x,y,yaw))):return None
             self.last=dict(source=source,sequence=sequence,stamp_ns=stamp,mode=mode,flags=flags)
             return dict(self.last)

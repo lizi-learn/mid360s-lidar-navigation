@@ -34,7 +34,7 @@ class SessionTests(unittest.TestCase):
     def test_stale_replayed_changed_source_and_clock_rollback_stop(self):
         for failure in ['stale','replay','source','rollback']:
             s=NavigationSession();self.active(s);s.poll(10.)
-            if failure=='stale':s.poll(10.101)
+            if failure=='stale':s.poll(12.001)
             if failure=='replay':self.op(s,10.,seq=10000)
             if failure=='source':self.op(s,10.001,source=2)
             if failure=='rollback':s.poll(9.999)

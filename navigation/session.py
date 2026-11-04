@@ -4,13 +4,14 @@ A left switch permits a NEW explicit start, never starts/resumes a goal itself.
 import math
 import threading
 import time
+from operator_authority import OPERATOR_SOURCE_TIMEOUT_S
 
 MODES={'unknown','navigation_allowed','paused','manual'}
 ACTIVE={'starting','executing','replanning'}
 PENDING={'planning','ready'}
 
 class NavigationSession:
-    def __init__(self,authority_timeout=.1,replan_timeout=8.,max_replans=3):
+    def __init__(self,authority_timeout=OPERATOR_SOURCE_TIMEOUT_S,replan_timeout=8.,max_replans=3):
         self.lock=threading.RLock();self.authority_timeout=authority_timeout
         self.replan_timeout=replan_timeout;self.max_replans=max_replans
         self.mode='unknown';self.verified=False;self.source=0;self.sequence=0;self.source_time=0.

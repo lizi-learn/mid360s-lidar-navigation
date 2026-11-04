@@ -4,9 +4,11 @@ The timestamp belongs to the original host receiver, not this observer. This
 module cannot write joystick input, change policy, or command an actuator.
 """
 import math
+OPERATOR_SOURCE_TIMEOUT_S=2.0
+OPERATOR_SOURCE_TIMEOUT_NS=2_000_000_000
 
 class ReceiverAuthority:
-    def __init__(self, verified=False, timeout=.1):
+    def __init__(self, verified=False, timeout=OPERATOR_SOURCE_TIMEOUT_S):
         self.verified=verified is True;self.timeout=timeout
         self.publisher=None;self.last_stamp=0;self.sequence=0;self.clock_fault=False
         self.offset=None

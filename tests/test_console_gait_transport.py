@@ -34,7 +34,7 @@ class ConsoleGaitTests(unittest.TestCase):
         self.assertEqual(c.session.phase,'ready');self.assertTrue(c.session.verified)
     def test_fresh_left_packet_preserves_original_stop_cause(self):
         c,g=self.setup_console();now=time.monotonic();c.session.start(g,now,True,True);c.session.started(g,now)
-        c.session.poll(now+.101);reason=c.session.message
+        c.session.poll(now+2.001);reason=c.session.message
         self.assertEqual(c.session.phase,'stopped');self.assertIn('过期',reason)
         fresh=time.monotonic();c.session.operator('navigation_allowed',True,True,False,c.session.source,c.session.sequence+1,fresh,fresh)
         self.assertEqual(c.session.message,reason);self.assertEqual(c.session.last_stop['reason'],reason)
@@ -50,7 +50,7 @@ class ConsoleGaitTests(unittest.TestCase):
         c.poll_gait_authority(now);self.assertEqual(c.session.source,77)
         c.poll_gait_authority(now+.02);self.assertTrue(c.session.verified)
         self.assertEqual(c.session.source_time,now)
-        c.poll_gait_authority(now+.101);self.assertFalse(c.session.verified)
+        c.poll_gait_authority(now+2.001);self.assertFalse(c.session.verified)
     def test_alternative_ros_source_cannot_override_attached_gait(self):
         c,g=self.setup_console();source=c.session.source
         c.on_authority(object());self.assertEqual(c.session.source,source)
@@ -59,7 +59,9 @@ class ConsoleGaitTests(unittest.TestCase):
         d={'mode':'navigation_allowed','verified':True,'connected':True,'activity':False,
             'source':77,'sequence':11,'stamp':now,'reply_stamp':None,'source_transport':'native_packet_snapshot'}
         c.gait.operator_authority=lambda:d;c.poll_gait_authority(now);self.assertTrue(c.session.verified)
-        c.poll_gait_authority(now+.101);self.assertFalse(c.session.verified)
+        c.poll_gait_authority(now+.16);self.assertTrue(c.session.verified)
+        self.assertEqual(c.session.source_time,now)
+        c.poll_gait_authority(now+2.001);self.assertFalse(c.session.verified)
     def test_slow_gait_status_cannot_turn_new_operator_time_into_the_future(self):
         c,g=self.setup_console();c.gate={};c.session.start(g,time.monotonic(),True,True);c.session.started(g,time.monotonic());c.gait.phase='active'
         def actual_source():
@@ -79,10 +81,10 @@ class ConsoleGaitTests(unittest.TestCase):
             return dict(mode='navigation_allowed',verified=True,connected=True,activity=False,
                 source=c.session.source,sequence=c.session.sequence+len(calls),stamp=stamp,reply_stamp=None,source_transport='native_packet_snapshot')
         c.gait.operator_authority=sample;c.poll_gait_authority(time.monotonic())
-        self.assertEqual(len(calls),2);self.assertEqual(c.session.phase,'executing');self.assertFalse(c.session.cancel_pending)
-        self.assertEqual(c.session.source_time,calls[1])
+        self.assertEqual(len(calls),1);self.assertEqual(c.session.phase,'executing');self.assertFalse(c.session.cancel_pending)
+        self.assertEqual(c.session.source_time,calls[0])
     def test_retry_does_not_renew_truly_expired_native_packet(self):
-        c,g=self.setup_console();c.session.start(g,time.monotonic(),True,True);c.session.started(g,time.monotonic());stamp=time.monotonic()-.12;calls=[]
+        c,g=self.setup_console();c.session.start(g,time.monotonic(),True,True);c.session.started(g,time.monotonic());stamp=time.monotonic()-2.01;calls=[]
         def sample():
             calls.append(True);return dict(mode='navigation_allowed',verified=True,connected=True,activity=False,
                 source=c.session.source,sequence=c.session.sequence+1,stamp=stamp,reply_stamp=None,source_transport='native_packet_snapshot')
