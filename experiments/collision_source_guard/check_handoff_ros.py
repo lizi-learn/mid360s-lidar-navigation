@@ -60,8 +60,12 @@ def main():
             scan=LaserScan();scan.header.stamp=stamp.to_msg();scan.header.frame_id='base_link';scan.angle_min=-math.pi;scan.angle_increment=2*math.pi/360;scan.angle_max=scan.angle_min+359*scan.angle_increment;scan.range_min=.12;scan.range_max=14.;scan.ranges=[3.]*360;scanpub.publish(scan)
         trace.append(dict(t=sim,**state,gate_armed=gates[-1].get('armed')if gates else False,gate_reason=gates[-1].get('reason')if gates else None,phase=gates[-1].get('motion_phase')if gates else None))
     node.create_timer(.02,publish);children=[];logs=[];result={}
+    # The fixture's child interpreters deliberately use -S, like the real
+    # console. Humble generated message bindings need distro numpy even when
+    # the calling CI shell has not exported its dist-packages directory.
+    child_env={**os.environ,'PYTHONPATH':'/usr/lib/python3/dist-packages'+os.pathsep+os.environ.get('PYTHONPATH','')}
     def child(cmd,name):
-        f=out.with_name(out.stem+'-'+name+'.log').open('w');logs.append(f);children.append(subprocess.Popen(cmd,stdout=f,stderr=subprocess.STDOUT,start_new_session=True))
+        f=out.with_name(out.stem+'-'+name+'.log').open('w');logs.append(f);children.append(subprocess.Popen(cmd,env=child_env,stdout=f,stderr=subprocess.STDOUT,start_new_session=True))
     def spin(seconds):
         end=time.monotonic()+seconds
         while time.monotonic()<end:
@@ -83,7 +87,11 @@ def main():
         armed_samples=sum(bool(x['gate_armed'])for x in trace)
         identities={str(p.resolve()):hashlib.sha256(p.read_bytes()).hexdigest()for p in [Path(a.binary),Path(a.library),NAV/'motion_buffer_node.py',NAV/'gate_node.py',NAV/'motion_buffer.py']}
         result=dict(passed=armed_samples>20 and(not reached if a.duplicate_owner else reached),armed_samples=armed_samples,duplicate_owner=a.duplicate_owner,goal_reached=reached,goal=goal,actual_yaw=state['yaw'],max_native_input=max(abs(x['input'])for x in trace),duration=time.monotonic()-started,scope=__doc__,actual_processes=[p.args for p in children],binary_and_source_sha256=identities,parameters=params,seed=0,source_hz=10,ripple_mps=.12,body_total_side=.55,actuator_commands=0)
+    except Exception as error:
+        result=dict(passed=False,error=repr(error),scope=__doc__,actuator_commands=0)
+        raise
     finally:
+        result['child_exit_codes_before_cleanup']=[p.poll()for p in children]
         for p in reversed(children):
             if p.poll()is None:os.killpg(p.pid,signal.SIGINT)
         for p in children:
