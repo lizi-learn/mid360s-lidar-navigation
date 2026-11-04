@@ -1,13 +1,15 @@
 # MID-360S 雷达可视化导航
 
-倒装 MID-360S 的 ROS 2 雷达惯性建图、浏览器可视化、已知地面路径预览与人工推架录包。适用于没有深度相机、先验证地图与定位的实验平台。
+倒装 MID-360S 的 ROS 2 雷达惯性建图、实时地图、前向导航与导览接待。支持没有深度相机的双足平台，保留规划、控制、到点介绍和任务回放记录。
 
-**当前导航冻结为 [Baseline V1](https://github.com/lizi-learn/mid360s-lidar-navigation/releases/tag/baseline-v1)。** P2-1006已有现场监护下的办公室往返与真人障碍绕行记录。最新终点/途中规划修订完成实际路径预览和零输出核验，仍有保留的回放失败，尚未完成这个修订的新一轮真机运动复测。公开项目包含导航与通用步态速度协议；厂商私有驱动、全身策略和模型不随仓库分发。
+**当前冻结为 [Navigation V2 · Release Baseline](https://github.com/lizi-learn/mid360s-lidar-navigation/releases/tag/baseline-v2)。** P2-1006 的20个编号点位均已到达；中途修复后，从4号续跑到20号由导航程序自动完成到点、按配置介绍、下一站和最终停车。途中仍有6次自行恢复的短暂重规划，不能称为一次从1到20无干预通过。公开项目提供导航与通用D策略输入协议，厂商私有驱动、全身策略、模型和办公室数据不分发。
 
-纯转向和带朝向到点的后续候选改进见 [停稳转向说明](docs/SETTLED_PIVOT.md)，包含实际 Nav2 接口对比与保留的回程失败；不移动 Baseline V1。
+V2 固定55cm方块、实时射线清障、点位40cm/20°到达容差、S形前向起步和2秒原始遥控样本过期时间。速度值是策略输入，不是实测m/s；完整归零的S形正常制动仍未接入。后续功能从这套版本继续迭代，V1标签保留。
 
-- [基线功能、证据与已知边界](docs/BASELINE_V1.md)
-- [下一步产品功能建议](docs/NAVIGATION_ROADMAP.md)
+- [V2功能、实机结果、固定参数与已知问题](docs/BASELINE_V2.md)
+- [V2参考配置](navigation/profiles/baseline-v2.json) · [发布清单](releases/baseline-v2.json)
+- [历史Baseline V1](docs/BASELINE_V1.md)
+- [产品功能建议与后续方向](docs/NAVIGATION_ROADMAP.md)
 - [机身平和语音与音量设置](docs/NAVIGATION_AUDIO.md)
 
 - [交互演示与说明](https://lizi-learn.github.io/mid360s-lidar-navigation/)：全部使用合成几何，不连接实机。
@@ -133,13 +135,13 @@ body padding and the monitor's StopZone: nominal padded width 1.14 m. Front/rear
 padding remains unchanged. This avoids counting lateral padding twice; it is
 still a commissioning candidate, not physical clearance acceptance.
 
-### 导览接待扩展（开发中）
+### V2导览接待与后续迭代
 
-P2 导航的全局动态障碍层保留观测 3 秒；真实新观测持续刷新对应格子，传感器过期时不执行过期清理。已过期的动态标记回退到原静态地图值，不把静态墙壁清为空地。局部障碍层保持原行为。保存地图中的未知区域与手绘禁行线一起由两张代价图的标准 KeepoutFilter 保留，实时激光清障不能在地图外创造通往楼梯侧的路线。地图文件、点位和传感器时间戳不被改写。
+P2 导航的全局动态障碍层保留观测 3 秒；真实新观测持续刷新对应格子，传感器过期时不执行过期清理。已过期的动态标记回退到原静态地图值，不把静态墙壁清为空地。V2局部与全局障碍层都保留真实观测射线的清障能力：观测到的自由空间可释放旧占用，实际新回波仍标记，未观测的静态物体仍保留。保存地图中的未知区域与手绘禁行线一起由两张代价图的标准 KeepoutFilter 保留，实时激光清障不能在地图外创造通往楼梯侧的路线。地图文件、点位和传感器时间戳不被改写。
 
 转向响应在回调间断后丢弃旧脉冲与位姿证据，但保留当前目标已测出的有界起转输入；轻微站立抖动不再被当作有效转身。显式重置、目标变化或计时倒退仍清除响应学习。普通弯道保持边走边转，不额外插入原地对正动作。路线参数服务可取消地等待真实回执；排队超时可在原任务恢复期限内重试，人工接管和取消仍结束任务。此等待与传感器时效检查相互独立。
 
-点位与朝向、产品介绍、展示路线和操作员执行页见 [导览接待工作台](docs/RECEPTION_STUDIO.md)。[参考调研](docs/RECEPTION_RESEARCH.md)记录采用方向与边界；冻结的 Baseline V1 保持不变。隔离预览使用合成场景，不连接真实机器人。
+点位与朝向、产品介绍、展示路线和操作员执行页见 [导览接待工作台](docs/RECEPTION_STUDIO.md)。[参考调研](docs/RECEPTION_RESEARCH.md)记录采用方向与边界；当前采用 [V2基线](docs/BASELINE_V2.md)，历史Baseline V1保持不变。隔离预览使用合成场景，不连接真实机器人。
 
 
 路线中的无到点动作中间参考点使用通道引导：精确中心被占用时，在附近 0.6 米内寻找完整机身可通行的位置，重规划时复核实际障碍并保持有效选择。最终目的地及介绍点朝向仍准确到达。`_route_reference_mode: "exact"` 可保留原精确经过点语义；默认 `corridor` 仅用于 P2 连续参考路线。已过点每个行为树 tick 删除，在途旧请求取消后不发布过期路线，分段路径记忆仍逐次核查完整占地。该软件行为需与实际步态跟踪结果分别记录。

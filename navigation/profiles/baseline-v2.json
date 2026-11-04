@@ -1,0 +1,24 @@
+{
+  "footprint": [
+    [
+      0.275,
+      0.275
+    ],
+    [
+      0.275,
+      -0.275
+    ],
+    [
+      -0.275,
+      -0.275
+    ],
+    [
+      -0.275,
+      0.275
+    ]
+  ],
+  "footprint_padding": 0.0,
+  "global_obstacle_combination": 0,
+  "local_obstacle_combination": 0,
+  "presentation_xy_tolerance": 0.4
+}
