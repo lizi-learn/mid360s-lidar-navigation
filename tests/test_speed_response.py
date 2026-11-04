@@ -34,6 +34,11 @@ int main(){
  for(int k=0;k<400;++k){now+=10000000;c.step(.75,.6,0.,0.,.01,now,now,true);}
  s=c.step(0.,.6,0.,0.,.01,now,now,true);assert(s.policy_x==0.&&s.policy_yaw>.59);
  s=c.step(.75,0.,0.,0.,.01,now,now,true);assert(s.policy_yaw==0.&&s.policy_x<=.000021);
+ // A startup fix must not add hidden braking distance to an approach request.
+ c.reset();for(int k=0;k<400;++k){now+=10000000;c.step(.75,.2,0.,0.,.01,now,now,true);}
+ double old_forward=.75;
+ for(int k=0;k<100;++k){now+=10000000;old_forward=std::max(.1,old_forward-.008);
+  s=c.step(.1,.2,0.,0.,.01,now,now,true);assert(std::abs(s.policy_x-old_forward)<1e-10);}
  // Retain the entire old yaw contract, including changing signs and zeros.
  c.reset();double old_yaw=0.;
  for(int k=0;k<1200;++k){now+=10000000;const double target=k<220?1.:(k<620?-.8:(k<640?0.:.6));

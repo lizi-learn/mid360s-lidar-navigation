@@ -46,12 +46,17 @@ class SpeedResponse {
     state_.target_x=vx;state_.target_yaw=wz;
     state_.measured_x=measured_x;state_.measured_yaw=measured_yaw;
     state_.source_ns=source_ns;state_.valid=1;state_.reason=speed_tracking;
-    // Forward starts and nonzero speed changes use the finite S trajectory.
+    // Forward starts use the finite S trajectory. Keep the original .8/s
+    // decrease response: slowing an already-issued approach/braking request
+    // changes its stopping distance and must not hide behind a startup fix.
     // Keep the original yaw slew exactly: replacing that closed-loop steering
     // response with a slower filter changes both pursuit and pivot pulse area.
     // Explicit axis withdrawal keeps the original immediate-zero contract.
-    if(vx==0.)forward_.reset();
-    state_.policy_x=forward_.step(vx,dt,.30,.40);
+    if(vx==0.){forward_.reset();state_.policy_x=0.;}
+    else if(vx<forward_.value()){
+      forward_.reset(std::max(vx,forward_.value()-.8*dt));
+      state_.policy_x=forward_.value();
+    }else state_.policy_x=forward_.step(vx,dt,.30,.40);
     if(wz==0.)yaw_=0.;
     else yaw_=std::clamp(wz,yaw_-.5*dt,yaw_+.5*dt);
     state_.policy_yaw=yaw_;

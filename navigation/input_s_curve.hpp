@@ -11,7 +11,7 @@ class SmoothInputAxis {
  double value_=0.,acceleration_=0.,target_=0.,left_=0.;
  unsigned phase_=3;
  public:
- void reset(){value_=acceleration_=target_=left_=0.;phase_=3;}
+ void reset(double value=0.){value_=target_=value;acceleration_=left_=0.;phase_=3;}
  double value()const{return value_;}
  double acceleration()const{return acceleration_;}
  double step(double target,double dt,double limit,double jerk){
