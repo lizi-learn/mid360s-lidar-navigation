@@ -3,6 +3,20 @@ import unittest,pathlib,tempfile,json,sys,yaml
 sys.path.insert(0,str(pathlib.Path(__file__).resolve().parents[1]/'navigation'))
 from configure import config,apply_runtime_geometry
 class RuntimeCollisionGeometryTests(unittest.TestCase):
+ def test_both_map_live_ray_merges_survive_workflow_regeneration(self):
+  with tempfile.TemporaryDirectory()as d:
+   p=pathlib.Path(d)/'nav2.yaml';p.write_text(yaml.safe_dump(config()))
+   shape=[[.275,.275],[.275,-.275],[-.275,-.275],[-.275,.275]]
+   override=p.with_name('planning_geometry.json')
+   override.write_text(json.dumps(dict(footprint=shape,footprint_padding=0.,global_obstacle_combination=0,local_obstacle_combination=0)))
+   apply_runtime_geometry(p);out=yaml.safe_load(p.read_text())
+   for kind in ('local','global'):
+    layer=out[kind+'_costmap'][kind+'_costmap']['ros__parameters']
+    self.assertEqual(layer['obstacle_layer']['combination_method'],0)
+    self.assertEqual(json.loads(layer['footprint']),shape)
+   before=p.read_bytes();override.write_text(json.dumps(dict(footprint=shape,local_obstacle_combination=True)))
+   with self.assertRaises(ValueError):apply_runtime_geometry(p)
+   self.assertEqual(p.read_bytes(),before)
  def test_requested_55cm_body_preserves_clearances_and_obstacle_action(self):
   with tempfile.TemporaryDirectory()as d:
    p=pathlib.Path(d)/'nav2.yaml';original=config(gait_profile='p2-flat-model',stop_side_margin=.05)

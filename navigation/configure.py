@@ -100,6 +100,11 @@ def config(controller='rpp', tree=None, minimum_speed=.03, footprint_vertices=No
                 # authored keepouts remain; no empty scan is declared free.
                 common['plugins'].insert(0,'static_layer')
                 common['static_layer']['map_topic']='/p2_nav/reception_map'
+                # A finite current ray must clear the same old static mark in
+                # the controller as it does in the planning map. Unknown scan
+                # bins retain the static value; current hit endpoints remain
+                # lethal. Authored keepouts/boundaries are separate filters.
+                common['obstacle_layer']['combination_method']=0
         elif gait_profile=='p2-flat-model':
             common['obstacle_layer'].update(plugin='p2_nav_controller::TemporalObstacleLayer',
                 observation_keep_time=3.,expiration_source_max_age=.3)
@@ -237,10 +242,12 @@ def apply_runtime_geometry(params_file):
     for name in ('local_costmap','global_costmap'):
         grid=params[name][name]['ros__parameters']
         grid['footprint']=json.dumps(vertices);grid['footprint_padding']=float(padding)
-    if 'global_obstacle_combination' in value:
-        method=value['global_obstacle_combination']
+    for kind in ('global','local'):
+        key=kind+'_obstacle_combination'
+        if key not in value:continue
+        method=value[key]
         if type(method) is not int or method not in (0,1):raise ValueError('Invalid obstacle layer combination')
-        params['global_costmap']['global_costmap']['ros__parameters']['obstacle_layer']['combination_method']=method
+        params[kind+'_costmap'][kind+'_costmap']['ros__parameters']['obstacle_layer']['combination_method']=method
     path.write_text(yaml.safe_dump(params,sort_keys=False))
     return True
 

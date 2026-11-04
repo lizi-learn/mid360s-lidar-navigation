@@ -32,10 +32,18 @@ def main():
     m=OccupancyGrid();m.header.frame_id='map';m.header.stamp=n.get_clock().now().to_msg();m.info.resolution=.05;m.info.width=160;m.info.height=160;m.info.origin.position.x=-4.;m.info.origin.position.y=-4.;m.info.origin.orientation.w=1.;m.data=[0]*25600
     def index(x,y):return int((y+4)/.05)*160+int((x+4)/.05)
     m.data[index(0.,1.5)]=-1
+    # An object removed since mapping, and a separate old occupied cell for
+    # which the current scan still has no observation. Neither is a live hit.
+    m.data[index(1.025,.825)]=100
+    m.data[index(1.225,.025)]=100
     for iy in range(160):m.data[iy*160+120]=100
     mp.publish(m)
     def scan():
-        s=LaserScan();s.header.frame_id='base_link';s.header.stamp=n.get_clock().now().to_msg();s.angle_min=-math.pi;s.angle_increment=2*math.pi/720;s.angle_max=math.pi-s.angle_increment;s.range_min=.12;s.range_max=14.;s.ranges=[float('nan')if abs(-math.pi+i*s.angle_increment)<.3 or abs(-math.pi+i*s.angle_increment-math.pi/2)<.2 else 3. for i in range(720)]
+        s=LaserScan();s.header.frame_id='base_link';s.header.stamp=n.get_clock().now().to_msg();s.angle_min=-math.pi;s.angle_increment=2*math.pi/720;s.angle_max=math.pi-s.angle_increment;s.range_min=.12;s.range_max=14.
+        angles=[-math.pi+i*s.angle_increment for i in range(720)]
+        # The wall at x=2 really exists in this synthetic world. Consistent
+        # finite returns hit it; rays must not falsely pass through that wall.
+        s.ranges=[float('nan')if abs(a)<.3 or abs(a-math.pi/2)<.2 else min(3.,2./math.cos(a))if math.cos(a)>1e-8 else 3. for a in angles]
         if obstacle:s.ranges[360]=.6
         sp.publish(s)
     timer=n.create_timer(.05,scan)
@@ -72,27 +80,33 @@ def main():
         return matches
     rows=[]
     try:
-        for variant in ['baseline','candidate']:
+        for variant in ['baseline','static_max_baseline','candidate']:
             p=config(gait_profile='p2-flat-model',footprint_vertices=[[.275,.275],[.275,-.275],[-.275,-.275],[-.275,.275]],footprint_padding=0.)
             if variant=='baseline':p['local_costmap']['local_costmap']['ros__parameters']['plugins'].remove('static_layer')
+            if variant=='static_max_baseline':p['local_costmap']['local_costmap']['ros__parameters']['obstacle_layer']['combination_method']=1
             f=out.parent/(variant+'.yaml');f.write_text(yaml.safe_dump(p,sort_keys=False));log=(out.parent/(variant+'.log')).open('w')
             proc=subprocess.Popen(['/opt/ros/humble/lib/nav2_controller/controller_server','--ros-args','--params-file',str(f)],stdout=log,stderr=subprocess.STDOUT,start_new_session=True)
             spin(1.);transition(1);transition(3);spin(1.5)
-            before=cell(.525,.025);wall=cell(2.025,1.025);unknown=cell(.025,1.525)
+            before=cell(.325,.025);wall=cell(2.025,1.025);unknown=cell(.025,1.525);old_object=cell(1.025,.825);unseen_object=cell(1.225,.025)
             if variant=='baseline':assert before==255,before
             else:
                 assert before<254,before
                 assert wall==254,wall
                 assert unknown==255,unknown
+                assert unseen_object==254,unseen_object
+                assert old_object==254 if variant=='static_max_baseline'else old_object<254,old_object
             obstacle=True;spin(1.)
             hit=obstacle_seen()
             request('/local_costmap/clear_entirely_local_costmap',ClearEntireCostmap,ClearEntireCostmap.Request());spin(1.)
             retained=obstacle_seen()
             obstacle=False;spin(.5)
             request('/local_costmap/clear_entirely_local_costmap',ClearEntireCostmap,ClearEntireCostmap.Request());spin(1.)
-            recovered=cell(.525,.025)
-            assert recovered==(255 if variant=='baseline'else 0),recovered
-            rows.append(dict(variant=variant,partial_scan_known_floor=before,static_wall=wall,static_unknown=unknown,real_obstacle=hit,real_obstacle_rebuilt_after_cache_reset=retained,recovered_floor=recovered))
+            recovered=cell(.325,.025)
+            # The added unobserved static obstacle retains its normal inflated
+            # preference. Recovery restores that SAME initial floor context;
+            # it need not be a zero-cost cell to be traversable.
+            assert recovered==before,(before,recovered)
+            rows.append(dict(variant=variant,partial_scan_known_floor=before,static_wall=wall,static_unknown=unknown,old_object_with_finite_free_rays=old_object,unseen_old_object=unseen_object,real_obstacle=hit,real_obstacle_rebuilt_after_cache_reset=retained,recovered_floor=recovered))
             transition(4);transition(2);os.killpg(proc.pid,signal.SIGTERM);proc.wait(timeout=8);proc=None;log.close();spin(1.)
         result=dict(passed=True,cases=rows,source='Actual Nav2 controller_server and rolling local costmap, fixed synthetic TF/map and partial height-slice rays',static_unknown_preserved=True,actual_obstacle_retained_after_reset=True,hardware_commands=0,navigation_actions=0)
         out.write_text(json.dumps(result,indent=2));print(json.dumps(result))

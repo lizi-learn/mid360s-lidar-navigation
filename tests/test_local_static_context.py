@@ -10,6 +10,7 @@ class LocalStaticContextTests(unittest.TestCase):
         self.assertTrue(p['static_layer']['map_subscribe_transient_local'])
         self.assertTrue(p['track_unknown_space'])
         self.assertEqual(p['obstacle_layer']['plugin'],'nav2_costmap_2d::ObstacleLayer')
+        self.assertEqual(p['obstacle_layer']['combination_method'],0)
         self.assertTrue(p['obstacle_layer']['scan']['marking'])
         self.assertTrue(p['obstacle_layer']['scan']['clearing'])
 
