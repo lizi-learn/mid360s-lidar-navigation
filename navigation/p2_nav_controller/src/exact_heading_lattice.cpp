@@ -39,21 +39,19 @@ class ExactHeadingLattice : public PositionOnlyLattice {
       const double norm=std::sqrt(q.x*q.x+q.y*q.y+q.z*q.z+q.w*q.w);
       if(!std::isfinite(norm)||norm<.8||norm>1.2)throw nav2_core::PlannerException("Invalid directed quaternion");
     }
-    auto samples=terminal_path({start.pose.position.x,start.pose.position.y,tf2::getYaw(start.pose.orientation)},
-      {goal.pose.position.x,goal.pose.position.y,tf2::getYaw(goal.pose.orientation)},std::hypot(_costmap->getSizeInMetersX(),_costmap->getSizeInMetersY()));
-    if(!samples.empty()) {
-      std::unique_lock<nav2_costmap_2d::Costmap2D::mutex_t> lock(*_costmap->getMutex());
-      bool valid=true;for(const auto &p:samples)if(!clear(p[0],p[1],p[2])){valid=false;break;}
-      if(valid) {
-        nav_msgs::msg::Path path;path.header=goal.header;
-        for(const auto &p:samples){geometry_msgs::msg::PoseStamped pose;pose.header=path.header;pose.pose.position.x=p[0];pose.pose.position.y=p[1];pose.pose.orientation=nav2_util::geometry_utils::orientationAroundZAxis(p[2]);path.poses.push_back(pose);}
-        lock.unlock();return exact(std::move(path),goal);
-      }
-    }
-    try {return exact(SmacPlannerLattice::createPlan(start,goal),goal);}
+    // A directed visit uses the same roomier, forward-only route search as a
+    // position visit. That search can include collision-checked zero-translation
+    // pivots; it need not first fail a car-like approach or ask the operator to
+    // turn the robot. Append and check the requested arrival yaw separately.
+    // The former zero-margin straight shortcut bypassed the position planner's
+    // room preference and route memory even when a wider route was available.
+    try {return exact(PositionOnlyLattice::createPlan(start,goal),goal);}
     catch(const nav2_core::PlannerException &error) {
-      RCLCPP_INFO(_logger,"Directed approach retry with filled-body position search: %s",error.what());
-      return exact(PositionOnlyLattice::createPlan(start,goal),goal);
+      RCLCPP_INFO(_logger,"Directed position/pivot route unavailable; checking lattice alternative: %s",error.what());
+      // Keep a genuinely feasible lattice alternative. Both branches retain
+      // the full swept body and exact arrival yaw; neither authorizes movement
+      // through an occupied start, goal or pivot.
+      return exact(SmacPlannerLattice::createPlan(start,goal),goal);
     }
   }
 };
