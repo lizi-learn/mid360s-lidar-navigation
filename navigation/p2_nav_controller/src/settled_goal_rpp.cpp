@@ -68,6 +68,8 @@ class SettledGoalRPP : public nav2_regulated_pure_pursuit_controller::RegulatedP
       nav2_core::GoalChecker *checker) override {
     std::lock_guard<std::mutex> lock(phase_mutex_);
     std::unique_lock<std::mutex> base_lock(mutex_);
+    if(!std::isfinite(speed.linear.y))throw nav2_core::PlannerException("Invalid measured lateral velocity");
+    lateral_velocity_=speed.linear.y;
     geometry_msgs::msg::Pose tolerance; geometry_msgs::msg::Twist velocity_tolerance;
     if (!checker || !checker->getTolerances(tolerance,velocity_tolerance))
       throw nav2_core::PlannerException("Terminal goal tolerance unavailable");
@@ -189,8 +191,8 @@ class SettledGoalRPP : public nav2_regulated_pure_pursuit_controller::RegulatedP
       auto *map=costmap_ros_->getCostmap();std::unique_lock<nav2_costmap_2d::Costmap2D::mutex_t> map_lock(*map->getMutex());
       double best=1e30,best_v=0.,best_w=0.;bool found=false;
       auto score_command=[&](double v,double w) {
-        const double px=std::abs(w)<1e-6?v:v*std::sin(w)/w;
-        const double py=std::abs(w)<1e-6?0.:v*(1.-std::cos(w))/w;
+        const double px=std::abs(w)<1e-6?v:v*std::sin(w)/w+lateral_velocity_*(std::cos(w)-1.)/w;
+        const double py=std::abs(w)<1e-6?lateral_velocity_:v*(1.-std::cos(w))/w+lateral_velocity_*std::sin(w)/w;
         const double heading=std::remainder(angle-w,2*std::acos(-1.));
         return 2.*(std::pow(carrot.pose.position.x-px,2)+std::pow(carrot.pose.position.y-py,2))+.3*heading*heading+.05*w*w+3.*inflation_exposure(pose,v,w,distance);
       };
@@ -219,8 +221,8 @@ class SettledGoalRPP : public nav2_regulated_pure_pursuit_controller::RegulatedP
     double sum=0.,peak=0.;int count=0;
     for(int i=0;i<=15;++i) {
       const double t=max_allowed_time_to_collision_up_to_carrot_*i/15.,a=yaw+w*t;
-      const double px=x+(std::abs(w)<1e-8?v*t*std::cos(yaw):v/w*(std::sin(a)-std::sin(yaw)));
-      const double py=y+(std::abs(w)<1e-8?v*t*std::sin(yaw):v/w*(std::cos(yaw)-std::cos(a)));
+      const double px=x+(std::abs(w)<1e-8?t*(v*std::cos(yaw)-lateral_velocity_*std::sin(yaw)):v/w*(std::sin(a)-std::sin(yaw))+lateral_velocity_/w*(std::cos(a)-std::cos(yaw)));
+      const double py=y+(std::abs(w)<1e-8?t*(v*std::sin(yaw)+lateral_velocity_*std::cos(yaw)):v/w*(std::cos(yaw)-std::cos(a))+lateral_velocity_/w*(std::sin(a)-std::sin(yaw)));
       if(std::hypot(px-x,py-y)>distance)break;
       unsigned ix,iy;if(!map->worldToMap(px,py,ix,iy))return 1.;
       const double cost=std::min(253.,static_cast<double>(map->getCost(ix,iy)))/253.;
@@ -238,8 +240,10 @@ class SettledGoalRPP : public nav2_regulated_pure_pursuit_controller::RegulatedP
     const int steps=std::max({1,int(std::ceil(horizon/.01)),int(std::ceil(std::abs(v)*horizon/.005)),int(std::ceil(std::abs(w)*horizon/.005))});
     for(int i=0;i<=steps;++i) {
       const double t=horizon*static_cast<double>(i)/steps,a=yaw+w*t;
-      const double px=x+(std::abs(w)<1e-8?v*t*std::cos(yaw):v/w*(std::sin(a)-std::sin(yaw)));
-      const double py=y+(std::abs(w)<1e-8?v*t*std::sin(yaw):v/w*(std::cos(yaw)-std::cos(a)));
+      // y commands remain zero. Observed lateral motion is nevertheless real:
+      // a biped can drift toward the obstacle while following a left-side path.
+      const double px=x+(std::abs(w)<1e-8?t*(v*std::cos(yaw)-lateral_velocity_*std::sin(yaw)):v/w*(std::sin(a)-std::sin(yaw))+lateral_velocity_/w*(std::cos(a)-std::cos(yaw)));
+      const double py=y+(std::abs(w)<1e-8?t*(v*std::sin(yaw)+lateral_velocity_*std::cos(yaw)):v/w*(std::cos(yaw)-std::cos(a))+lateral_velocity_/w*(std::sin(a)-std::sin(yaw)));
       if(std::hypot(px-x,py-y)>distance)break;
       if(!filled_footprint_clear(map,body,px,py,a))return true;
     }
@@ -276,7 +280,7 @@ class SettledGoalRPP : public nav2_regulated_pure_pursuit_controller::RegulatedP
     // existing controller projection, not a calibrated physical-speed model.
     // In open space the ordinary continuous forward correction is unchanged.
     if(!use_collision_detection_||out.twist.linear.x<=0.)return;
-    if(!response_braking_&&!response_pivot_.pending()&&std::abs(speed.angular.z-out.twist.angular.z)<=.06)return;
+    if(!response_braking_&&!response_pivot_.pending()&&std::abs(speed.angular.z-out.twist.angular.z)<=.06&&std::abs(speed.linear.y)<=.06)return;
     auto *map=costmap_ros_->getCostmap();
     std::unique_lock<nav2_costmap_2d::Costmap2D::mutex_t> map_lock(*map->getMutex(),std::defer_lock);
     if(acquire_map)map_lock.lock();
@@ -320,6 +324,7 @@ class SettledGoalRPP : public nav2_regulated_pure_pursuit_controller::RegulatedP
     }
   }
   bool response_braking_=false;
+  double lateral_velocity_=0.;
   bool reference_pivot_=false;geometry_msgs::msg::PoseStamped reference_target_;
   int64_t plan_source_ns_=0;
   std::mutex phase_mutex_; TerminalHeading phase_; geometry_msgs::msg::PoseStamped goal_;

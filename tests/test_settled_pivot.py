@@ -28,6 +28,14 @@ int main(){
  // a previous pulse; a settled aligned observation remains zero.
  assert(c.step(.1,0,0,1.)==0.&&!c.pending());
  c.step(1.,0,0,1.05);assert(c.step(.1,0,0,.2)==0.&&!c.pending());
+ // A large initial turn may use the existing three-second bound, rather than
+ // cycling the downstream ramp every two seconds. It must still brake early
+ // when measured angular motion approaches the target.
+ for(double sign:{-1.,1.}) {
+  SettledPivot large;
+  for(int k=0;k<=44;++k)assert(large.step(sign*2.8,0.,0.,k*.05)==sign);
+  assert(large.step(sign*.7,0.,sign*.5,2.25)==0.);
+ }
  bool rejected=false;try{c.step(std::numeric_limits<double>::quiet_NaN(),0,0,2.);}catch(const std::invalid_argument&){rejected=true;}assert(rejected);
  // Gyro vibration without accumulated heading progress is not a successful
  // turn. A deadzone must trigger the existing bounded full-input retry even

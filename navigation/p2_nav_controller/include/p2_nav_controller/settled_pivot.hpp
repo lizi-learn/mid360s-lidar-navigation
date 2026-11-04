@@ -59,7 +59,11 @@ class SettledPivot {
       const bool far=std::abs(error)>1.2;
       near_pulse_=!far;command_=std::copysign(far?1.:near_level_,error);
       const double far_desired=std::min(.9,std::max(.3,std::abs(error)-.7));
-      duration_=far_peak_>.03?std::clamp(far_duration_+(far_desired-far_delta_)/far_peak_,1.4,3.):2.;
+      // A first large turn has not learned this plant's ramp/delay yet. Use
+      // the existing three-second pulse bound so it need not stop and restart
+      // the input ramp while the heading is still far away. Measured-rate
+      // braking, crossing detection and the near-turn behavior stay unchanged.
+      duration_=far_peak_>.03?std::clamp(far_duration_+(far_desired-far_delta_)/far_peak_,1.4,3.):3.;
       if(!far) {
         const double desired=std::min(.5,std::max(.04,std::abs(error)-.07));
         duration_=near_peak_>.03?std::clamp(near_duration_+(desired-near_delta_)/near_peak_,.95,2.5):near_duration_;

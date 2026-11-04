@@ -314,7 +314,7 @@ class PositionOnlyLattice : public nav2_smac_planner::SmacPlannerLattice {
     auto requested=goal;
     const double bearing=std::atan2(gy-y,gx-x);
     auto direct=terminal_path({x,y,yaw},{gx,gy,bearing},std::hypot(_costmap->getSizeInMetersX(),_costmap->getSizeInMetersY()));
-    std::vector<std::array<double,2>> guide;std::vector<std::array<double,3>> pivot;
+    std::vector<std::array<double,2>> guide;std::vector<std::array<double,3>> pivot,narrow_reuse;
     auto seed=start;
     {
       std::unique_lock<nav2_costmap_2d::Costmap2D::mutex_t> lock(*_costmap->getMutex());
@@ -330,13 +330,15 @@ class PositionOnlyLattice : public nav2_smac_planner::SmacPlannerLattice {
         for(const auto &p:stable_path_.poses)stored.push_back({p.pose.position.x,p.pose.position.y,tf2::getYaw(p.pose.orientation)});
         const auto rejoin_deadline=std::min(deadline,std::chrono::steady_clock::now()+std::chrono::milliseconds(100));
         auto joined=route_rejoin({x,y,yaw},stored,route_rejoin_distance_,[&](const auto &samples){
-          // Four centimetres remains a preference; the original complete body
-          // and unknown-cell checks are identical to fresh route acceptance.
-          const bool preferred=swept_clear(samples,.04);
-          if(preferred)return true;
+          // Match the direct-route tracking preference. A merely collision-free
+          // remembered path must not beat a roomier newly observed detour before
+          // we have even searched for it (for example room on the left of a
+          // close obstacle on the right). Keep a fully checked fallback so a
+          // genuinely narrow passage still works with the original body.
+          if(swept_clear(samples,.08))return true;
           if(!swept_clear(samples,0.))return false;
-          RCLCPP_INFO(_logger,"Reusing complete route with original footprint; preferred margin unavailable");
-          return true;
+          if(narrow_reuse.empty())narrow_reuse=samples;
+          return false;
         },rejoin_deadline);
         if(!joined.empty())return remember(message(joined,goal.header),goal);
       }
@@ -350,7 +352,7 @@ class PositionOnlyLattice : public nav2_smac_planner::SmacPlannerLattice {
       // original full footprint. One shared bound covers all preferences. A visibility shortcut must
       // also prefer tracking room, otherwise it can undo the wider point guide
       // and graze the end of a virtual line after ordinary localization error.
-      const auto visibility_deadline=std::min(deadline,std::chrono::steady_clock::now()+std::chrono::milliseconds(900));
+      const auto visibility_deadline=std::min(deadline,std::chrono::steady_clock::now()+std::chrono::milliseconds(narrow_reuse.empty()?900:300));
       // Do not jump from a wide preference straight to a zero-clearance point
       // guide. In ordinary corridors intermediate guides can fit even though
       // the wider preferences are disconnected; the shortest point-only guide
@@ -360,9 +362,14 @@ class PositionOnlyLattice : public nav2_smac_planner::SmacPlannerLattice {
         auto candidate=position_guide(_costmap->getCharMap(),_costmap->getSizeInCellsX(),_costmap->getSizeInCellsY(),_costmap->getResolution(),_costmap->getOriginX(),_costmap->getOriginY(),{x,y},{gx,gy},centre_clearance);
         if(centre_clearance==0.)guide=candidate;
         for(double margin:{.16,.08,.04,0.}) {
+          if(!narrow_reuse.empty()&&margin<.08)continue;
           auto connected=visibility(candidate,yaw,margin,visibility_deadline);
           if(!connected.empty())return remember(message(connected,goal.header),goal);
         }
+      }
+      if(!narrow_reuse.empty()) {
+        RCLCPP_INFO(_logger,"Reusing complete route with original footprint after bounded roomier-detour search");
+        return remember(message(narrow_reuse,goal.header),goal);
       }
       // Recovery references share one budget; they do not recursively start
       // another expensive lattice repair for every possible local anchor.

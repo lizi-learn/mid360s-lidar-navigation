@@ -56,6 +56,8 @@ int main(int argc,char **argv){
  if(argc<5){std::cerr<<"usage: fixture output-prefix path-kind gain delay [--ros-args ...]\n";return 2;}
  const std::string prefix=argv[1],kind=argv[2];const double gain=std::stod(argv[3]),delay=std::stod(argv[4]);
  const double yaw_deadzone=std::getenv("P2_TEST_YAW_DEADZONE")?std::stod(std::getenv("P2_TEST_YAW_DEADZONE")):0.;
+ const double lateral_ratio=std::getenv("P2_TEST_LATERAL_RATIO")?std::stod(std::getenv("P2_TEST_LATERAL_RATIO")):0.;
+ if(!std::isfinite(lateral_ratio)||std::abs(lateral_ratio)>.5)throw std::runtime_error("Invalid synthetic lateral drift");
  if(!std::isfinite(yaw_deadzone)||yaw_deadzone<0.||yaw_deadzone>=1.)throw std::runtime_error("Invalid synthetic yaw deadzone");
  rclcpp::init(argc,argv);
  int result=0;
@@ -114,7 +116,7 @@ int main(int argc,char **argv){
   geometry_msgs::msg::PoseStamped pose;pose.header.frame_id="fixture_world";pose.header.stamp=parent->now();pose.pose.position.x=x;pose.pose.position.y=y;pose.pose.orientation=nav2_util::geometry_utils::orientationAroundZAxis(yaw);
   if(!actual_progress->check(pose)){std::cout<<"Actual configured progress allowance exceeded\n";break;}
   geometry_msgs::msg::TransformStamped tr;tr.header=pose.header;tr.child_frame_id="fixture_base";tr.transform.translation.x=x;tr.transform.translation.y=y;tr.transform.rotation=pose.pose.orientation;if(!tf->setTransform(tr,"synthetic_planar_fixture"))throw std::runtime_error("fixture TF rejected");
-  geometry_msgs::msg::Twist measured;measured.linear.x=v;measured.angular.z=w;
+  geometry_msgs::msg::Twist measured;measured.linear.x=v;measured.linear.y=lateral_ratio*v;measured.angular.z=w;
   if(step%20==0&&!std::getenv("P2_TEST_FIXED_REFERENCE")){try{auto fresh=planner->createPlan(pose,requested_goal);if(fresh.poses.empty())throw std::runtime_error("Empty replan");control->setPlan(fresh);planning_failed=false;++replans;}catch(const std::exception &e){planning_failed=true;++planning_failures;if(++plan_errors[e.what()]==1)diagnostics<<"plan t="<<time<<" "<<e.what()<<std::endl;}}
   if(checker->isGoalReached(pose.pose,requested_goal.pose,measured)){reached=true;break;}
   if(kind=="obstacle"&&!triggered&&x>=6.){triggered=true;obstacle=true;obstacle_at=time;ox=x+.95;oy=0.;paint(true,ox,oy);unsigned ix,iy;if(!map->worldToMap(ox,oy,ix,iy)||map->getCost(ix,iy)!=254)throw std::runtime_error("obstacle did not reach actual costmap");verified_obstacle=true;}
@@ -122,6 +124,7 @@ int main(int argc,char **argv){
   geometry_msgs::msg::Twist raw;bool stopped=false;
   try{if(planning_failed)throw nav2_core::PlannerException("No replay plan");raw=control->computeVelocityCommands(pose,measured,checker.get()).twist;}
   catch(const nav2_core::PlannerException &e){stopped=true;if(++control_errors[e.what()]==1)diagnostics<<"control t="<<time<<" "<<e.what()<<std::endl;if(std::string(e.what()).find("collision")!=std::string::npos)++stops;raw=geometry_msgs::msg::Twist();}
+  if(raw.linear.y!=0.)throw std::runtime_error("Unexpected lateral command");
   auto stamp=static_cast<std::uint64_t>((time+1)*1e9);auto input=native.step(std::min(.75,raw.linear.x),raw.angular.z,v,w,dt,stamp,stamp,true);
   // Already queued physical response drains after a stop. Erasing it hid the
   // overshoot being measured by this delayed-plant regression.
@@ -129,7 +132,7 @@ int main(int argc,char **argv){
   const double response_yaw=std::abs(applied[1])<yaw_deadzone?0.:gain*applied[1];
   v+=(.95*applied[0]-v)*(1-std::exp(-dt/.2));w+=(response_yaw-w)*(1-std::exp(-dt/.15));
   const double old_x=x,old_y=y,old_yaw=yaw;
-  x+=v*dt*std::cos(yaw+w*dt/2);y+=v*dt*std::sin(yaw+w*dt/2);yaw=wrap(yaw+w*dt);
+  x+=v*dt*(std::cos(yaw+w*dt/2)-lateral_ratio*std::sin(yaw+w*dt/2));y+=v*dt*(std::sin(yaw+w*dt/2)+lateral_ratio*std::cos(yaw+w*dt/2));yaw=wrap(yaw+w*dt);
   double best=1e30;size_t nearest=0;for(size_t j=0;j+1<points.size();++j){auto a=points[j],b=points[j+1];double dx=b.x-a.x,dy=b.y-a.y;if(dx*dx+dy*dy<1e-15)continue;double f=std::clamp(((x-a.x)*dx+(y-a.y)*dy)/(dx*dx+dy*dy),0.,1.);double dist=std::hypot(x-a.x-f*dx,y-a.y-f*dy);if(dist<best){best=dist;nearest=j;}}
   progress=points[nearest].x;
   if(time>5.){rms+=best*best;max_error=std::max(max_error,best);++counted;if(std::abs(input.policy_yaw)>.15){double sign=std::copysign(1.,input.policy_yaw);if(last_sign&&sign!=last_sign)++reversals;last_sign=sign;}}
@@ -144,7 +147,7 @@ int main(int argc,char **argv){
   if(intrusion)break;
  }
  double error=std::hypot(x-points.back().x,y-points.back().y),yaw_error=std::abs(wrap(yaw-tf2::getYaw(path.poses.back().pose.orientation)));
- std::ofstream out(prefix+".json");out<<std::boolalpha<<"{\"actual_plugin\":\"p2_nav_controller::SettledGoalRPP\",\"scope\":\"Synthetic planar lag/gain model, no biped dynamics or hardware\",\"seed\":0,\"kind\":\""<<kind<<"\",\"gain\":"<<gain<<",\"delay_s\":"<<delay<<",\"yaw_deadzone\":"<<yaw_deadzone<<",\"dt_s\":"<<dt<<",\"duration_s\":"<<time<<",\"goal_reached\":"<<reached<<",\"goal_error_m\":"<<error<<",\"goal_yaw_error_rad\":"<<yaw_error<<",\"cross_track_rms_m\":"<<std::sqrt(rms/std::max(1,counted))<<",\"cross_track_max_m\":"<<max_error<<",\"yaw_reversals\":"<<reversals<<",\"body_intrusions\":"<<collisions<<",\"controller_collision_stops\":"<<stops<<",\"obstacle_injected\":"<<triggered<<",\"obstacle_verified_in_costmap\":"<<verified_obstacle<<",\"obstacle_cleared_after_two_seconds\":"<<cleared<<",\"progress_x\":"<<progress<<"}\n";
+ std::ofstream out(prefix+".json");out<<std::boolalpha<<"{\"actual_plugin\":\"p2_nav_controller::SettledGoalRPP\",\"scope\":\"Synthetic planar lag/gain model, no biped dynamics or hardware\",\"seed\":0,\"kind\":\""<<kind<<"\",\"gain\":"<<gain<<",\"delay_s\":"<<delay<<",\"yaw_deadzone\":"<<yaw_deadzone<<",\"lateral_ratio\":"<<lateral_ratio<<",\"commanded_y\":0,\"dt_s\":"<<dt<<",\"duration_s\":"<<time<<",\"goal_reached\":"<<reached<<",\"goal_error_m\":"<<error<<",\"goal_yaw_error_rad\":"<<yaw_error<<",\"cross_track_rms_m\":"<<std::sqrt(rms/std::max(1,counted))<<",\"cross_track_max_m\":"<<max_error<<",\"yaw_reversals\":"<<reversals<<",\"body_intrusions\":"<<collisions<<",\"controller_collision_stops\":"<<stops<<",\"obstacle_injected\":"<<triggered<<",\"obstacle_verified_in_costmap\":"<<verified_obstacle<<",\"obstacle_cleared_after_two_seconds\":"<<cleared<<",\"progress_x\":"<<progress<<"}\n";
  std::cout<<kind<<" reached="<<reached<<" error="<<error<<" intrusions="<<collisions<<" reversals="<<reversals<<'\n';
  std::cout<<"replans="<<replans<<" failed="<<planning_failures<<"\n";planner->deactivate();planner->cleanup();planner.reset();
  control->deactivate();control->cleanup();control.reset();actual_progress.reset();checker.reset();cm->on_cleanup(rclcpp_lifecycle::State());cm.reset();parent.reset();
