@@ -53,6 +53,7 @@ ament_target_dependencies(presentation_arrival nav2_core nav2_costmap_2d pluginl
 add_executable(dynamic_map dynamic_map.cpp)
 target_compile_features(dynamic_map PUBLIC cxx_std_17)
 ament_target_dependencies(dynamic_map nav2_costmap_2d pluginlib)
+target_link_libraries(dynamic_map ${CMAKE_DL_LIBS})
 
 add_executable(pivot_observation pivot_observation.cpp)
 target_compile_features(pivot_observation PUBLIC cxx_std_17)

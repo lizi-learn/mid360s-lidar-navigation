@@ -102,3 +102,12 @@ before turning. The tools integration independently audits the synthetic truth
 body against the full authored line rectangle; it does not accept centre-only
 crossing as full-body clearance. Small new plans also clear obsolete reference
 pivot state instead of retaining an older target.
+
+`dynamic_map` also covers delayed buffered observations. A cloud processed400ms
+late can still be marked by the native ObstacleLayer, even though it is too old
+to authorize temporal expiry. Every such mark must retain its original producer
+time; skipping its bookkeeping can leave a permanent dynamic wall. The fixture
+checks delayed marking, offline retention, expiry after a fresh source returns,
+and a delayed refresh retaining its complete source-time lifetime. It reports
+the actual loaded costmap library. Static walls, exterior keepout and unobserved
+interior space remain separate checks; no sensor timestamp is rewritten.

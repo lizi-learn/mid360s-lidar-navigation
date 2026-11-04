@@ -1,4 +1,5 @@
 #include <iostream>
+#include <dlfcn.h>
 #include <memory>
 #include <stdexcept>
 #include <thread>
@@ -21,6 +22,10 @@ int main(int argc,char **argv){
   tf2_ros::Buffer tf(node->get_clock());auto group=node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
   pluginlib::ClassLoader<nav2_costmap_2d::Layer> loader("nav2_costmap_2d","nav2_costmap_2d::Layer");
   auto plugin=loader.createSharedInstance("p2_nav_controller::TemporalObstacleLayer");
+  Dl_info loaded{};
+  require(dladdr(*reinterpret_cast<void **>(plugin.get()),&loaded)&&loaded.dli_fname,
+          "actual dynamic obstacle plugin library identity");
+  const std::string library=loaded.dli_fname;
   plugin->initialize(layered,"dynamic",&tf,node,group);
   auto layer=std::dynamic_pointer_cast<nav2_costmap_2d::ObstacleLayer>(plugin);require(bool(layer),"actual obstacle plugin");
   auto clock=node->get_clock()->get_clock_handle();
@@ -35,6 +40,24 @@ int main(int argc,char **argv){
   };
   auto update=[&](){double ax=1e30,ay=1e30,bx=-1e30,by=-1e30;plugin->updateBounds(0.,0.,0.,&ax,&ay,&bx,&by);return bx>0.;};
   auto cell=[&](){unsigned x,y;layer->worldToMap(1.,0.,x,y);return layer->getCost(x,y);};
+  {
+    // The stock layer still accepts its latest buffered observation when the
+    // producer is briefly late. Its mark needs the ORIGINAL source timestamp,
+    // even when this sample cannot authorize removal of any older obstacle.
+    at(100400000000LL);observe(100000000000LL,true);update();
+    require(cell()==254,"delayed buffered obstacle is really marked");
+    at(104000000000LL);update();
+    require(cell()==254,"delayed/offline source must not clear obstacles");
+    observe(104000000000LL,false);update();
+    require(cell()==255,"delayed mark must expire when a fresh source returns");
+    // A late refresh retains its true source time, not the host processing time.
+    at(110000000000LL);observe(110000000000LL,true);update();
+    at(112800000000LL);observe(112400000000LL,true);update();
+    at(114000000000LL);observe(114000000000LL,false);update();
+    require(cell()==254,"late refresh preserves its full source-time lifetime");
+    at(115500000000LL);observe(115500000000LL,false);update();
+    require(cell()==255,"late refresh cannot become a permanent wall");
+  }
   at(100000000000LL);observe(100000000000LL,true);update();require(cell()==254,"fresh obstacle retained");
   at(104000000000LL);update();require(cell()==254,"stale sensor cannot authorize expiry");
   observe(104000000000LL,false);require(update(),"expired cell update bounds");require(cell()==255,"old dynamic mark expires to unknown, not free");
@@ -75,7 +98,7 @@ int main(int argc,char **argv){
   layer->addStaticObservation(ray,false,true);update();plugin->updateCosts(master,0,0,80,80);
   filter->process(master,0,0,80,80,geometry_msgs::msg::Pose2D());
   require(master.getCost(mx,my)==0&&master.getCost(10,40)==254,"observed interior floor clears while exterior stays protected");
-  std::cout<<"{\"passed\":true,\"cases\":12,\"synthetic_source_time\":true,\"actual_plugins\":true,\"physical_commands\":0}"<<std::endl;
+  std::cout<<"{\"passed\":true,\"cases\":17,\"delayed_mark_cases\":5,\"loaded_costmap_library\":\""<<library<<"\",\"synthetic_source_time\":true,\"actual_plugins\":true,\"physical_commands\":0}"<<std::endl;
   executor.remove_node(node->get_node_base_interface());executor.remove_node(pubnode);filter_plugin->deactivate();filter_plugin.reset();filter.reset();layer.reset();plugin.reset();node->on_cleanup(rclcpp_lifecycle::State());
  }catch(const std::exception &error){std::cerr<<error.what()<<std::endl;result=1;}
  rclcpp::shutdown();return result;

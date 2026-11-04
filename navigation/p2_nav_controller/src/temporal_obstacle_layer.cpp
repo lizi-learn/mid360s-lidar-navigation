@@ -41,9 +41,14 @@ class TemporalObstacleLayer : public nav2_costmap_2d::ObstacleLayer {
     for(const auto &observation:observations) {
       const int64_t stamp=rclcpp::Time(observation.cloud_->header.stamp).nanoseconds();
       const double age=static_cast<double>(now-stamp)/1e9;
-      // Repeated stale observations never refresh a mark or authorize expiry.
-      if(stamp<=0||age<-.05||age>source_age_)continue;
-      fresh=true;
+      // The stock layer can mark its latest buffered cloud even when delayed.
+      // Register that mark using its ORIGINAL producer time. Skipping late
+      // samples here leaves stock-layer marks without an expiry timestamp and
+      // can permanently close a previously traversed corridor. Replaying the
+      // same old stamp cannot make a mark newer; only a genuinely fresh source
+      // below authorizes expiry. Do not treat a late cloud as current health.
+      if(stamp<=0||age<-.05)continue;
+      fresh=fresh||age<=source_age_;
       sensor_msgs::PointCloud2ConstIterator<float> px(*observation.cloud_,"x"),py(*observation.cloud_,"y"),pz(*observation.cloud_,"z");
       for(;px!=px.end();++px,++py,++pz) {
         if(!std::isfinite(*px)||!std::isfinite(*py)||!std::isfinite(*pz)||*pz<min_obstacle_height_||*pz>max_obstacle_height_)continue;
