@@ -90,7 +90,16 @@ def config(controller='rpp', tree=None, minimum_speed=.03, footprint_vertices=No
                     expected_update_rate=.3)),
             inflation_layer=dict(plugin='nav2_costmap_2d::InflationLayer',inflation_radius=.75,cost_scaling_factor=3.),
             always_send_full_costmap=True)
-        if rolling:common.update(rolling_window=True,width=5,height=5)
+        if rolling:
+            common.update(rolling_window=True,width=5,height=5)
+            if gait_profile=='p2-flat-model':
+                # A height-slice scan has genuinely unknown angular bins. They
+                # must not erase or replace the existing mapped floor context.
+                # Reproject the same map into the rolling odom costmap, then
+                # overlay actual dynamic observations. Static unknown/walls and
+                # authored keepouts remain; no empty scan is declared free.
+                common['plugins'].insert(0,'static_layer')
+                common['static_layer']['map_topic']='/p2_nav/reception_map'
         elif gait_profile=='p2-flat-model':
             common['obstacle_layer'].update(plugin='p2_nav_controller::TemporalObstacleLayer',
                 observation_keep_time=3.,expiration_source_max_age=.3)
