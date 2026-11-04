@@ -15,6 +15,7 @@
 #include <sstream>
 #include <map>
 #include <limits>
+#include <dlfcn.h>
 #include "nav2_core/global_planner.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "rcl/time.h"
@@ -57,6 +58,8 @@ int main(int argc,char **argv){
  const std::string prefix=argv[1],kind=argv[2];const double gain=std::stod(argv[3]),delay=std::stod(argv[4]);
  const double yaw_deadzone=std::getenv("P2_TEST_YAW_DEADZONE")?std::stod(std::getenv("P2_TEST_YAW_DEADZONE")):0.;
  const double lateral_ratio=std::getenv("P2_TEST_LATERAL_RATIO")?std::stod(std::getenv("P2_TEST_LATERAL_RATIO")):0.;
+ const double lateral_ripple=std::getenv("P2_TEST_LATERAL_RIPPLE")?std::stod(std::getenv("P2_TEST_LATERAL_RIPPLE")):0.;
+ if(!std::isfinite(lateral_ripple)||lateral_ripple<0.||lateral_ripple>.3)throw std::runtime_error("Invalid synthetic lateral ripple");
  if(!std::isfinite(lateral_ratio)||std::abs(lateral_ratio)>.5)throw std::runtime_error("Invalid synthetic lateral drift");
  if(!std::isfinite(yaw_deadzone)||yaw_deadzone<0.||yaw_deadzone>=1.)throw std::runtime_error("Invalid synthetic yaw deadzone");
  rclcpp::init(argc,argv);
@@ -75,12 +78,23 @@ int main(int argc,char **argv){
   if(obstacle)for(unsigned iy=0;iy<map->getSizeInCellsY();++iy)for(unsigned ix=0;ix<map->getSizeInCellsX();++ix){double x,y;map->mapToWorld(ix,iy,x,y);if(std::abs(x-ox)<.12&&std::abs(y-oy)<.3)map->setCost(ix,iy,254);}
  };
  paint(false,0,0);
+ bool static_probe_verified=false;
+ if(const char *probe=std::getenv("P2_TEST_OBSTACLE_PROBE")){
+   std::istringstream input(probe);double px,py;unsigned ix,iy;
+   if(!(input>>px>>py)||!map->worldToMap(px,py,ix,iy)||map->getCost(ix,iy)!=254)
+     throw std::runtime_error("Static obstacle probe did not reach actual costmap");
+   static_probe_verified=true;
+ }
  auto tf=std::make_shared<tf2_ros::Buffer>(parent->get_clock());
  // A real listener thread satisfies the timed-transform API contract. Direct
  // fixture transforms are still inserted synchronously before every call.
  auto listener=std::make_shared<tf2_ros::TransformListener>(*tf);
  pluginlib::ClassLoader<nav2_core::Controller> loader("nav2_core","nav2_core::Controller");
  auto control=loader.createSharedInstance("p2_nav_controller::SettledGoalRPP");control->configure(parent,"FollowPath",tf,cm);control->activate();
+ Dl_info controller_image{};
+ if(!dladdr(*reinterpret_cast<void **>(control.get()),&controller_image)||!controller_image.dli_fname)
+   throw std::runtime_error("Loaded controller library identity unavailable");
+ const std::string controller_library=controller_image.dli_fname;
  std::ofstream actual(prefix+".actual-parameters.json");actual<<"{";
  const std::vector<std::string> names={"min_lookahead_dist","max_lookahead_dist","lookahead_time","rotate_to_heading_angular_vel","rotate_to_heading_min_angle","regulated_linear_scaling_min_speed","use_collision_detection","allow_reversing","corner_preview","curved_forward_input","minimum_pivot_input","settled_pivot_response"};
  for(size_t i=0;i<names.size();++i){if(i)actual<<",";actual<<"\""<<names[i]<<"\":"<<parent->get_parameter("FollowPath."+names[i]).value_to_string();}
@@ -116,7 +130,8 @@ int main(int argc,char **argv){
   geometry_msgs::msg::PoseStamped pose;pose.header.frame_id="fixture_world";pose.header.stamp=parent->now();pose.pose.position.x=x;pose.pose.position.y=y;pose.pose.orientation=nav2_util::geometry_utils::orientationAroundZAxis(yaw);
   if(!actual_progress->check(pose)){std::cout<<"Actual configured progress allowance exceeded\n";break;}
   geometry_msgs::msg::TransformStamped tr;tr.header=pose.header;tr.child_frame_id="fixture_base";tr.transform.translation.x=x;tr.transform.translation.y=y;tr.transform.rotation=pose.pose.orientation;if(!tf->setTransform(tr,"synthetic_planar_fixture"))throw std::runtime_error("fixture TF rejected");
-  geometry_msgs::msg::Twist measured;measured.linear.x=v;measured.linear.y=lateral_ratio*v;measured.angular.z=w;
+  const double ripple=lateral_ripple*std::sin(4*pi*time);
+  geometry_msgs::msg::Twist measured;measured.linear.x=v;measured.linear.y=lateral_ratio*v+ripple;measured.angular.z=w;
   if(step%20==0&&!std::getenv("P2_TEST_FIXED_REFERENCE")){try{auto fresh=planner->createPlan(pose,requested_goal);if(fresh.poses.empty())throw std::runtime_error("Empty replan");control->setPlan(fresh);planning_failed=false;++replans;}catch(const std::exception &e){planning_failed=true;++planning_failures;if(++plan_errors[e.what()]==1)diagnostics<<"plan t="<<time<<" "<<e.what()<<std::endl;}}
   if(checker->isGoalReached(pose.pose,requested_goal.pose,measured)){reached=true;break;}
   if(kind=="obstacle"&&!triggered&&x>=6.){triggered=true;obstacle=true;obstacle_at=time;ox=x+.95;oy=0.;paint(true,ox,oy);unsigned ix,iy;if(!map->worldToMap(ox,oy,ix,iy)||map->getCost(ix,iy)!=254)throw std::runtime_error("obstacle did not reach actual costmap");verified_obstacle=true;}
@@ -132,7 +147,8 @@ int main(int argc,char **argv){
   const double response_yaw=std::abs(applied[1])<yaw_deadzone?0.:gain*applied[1];
   v+=(.95*applied[0]-v)*(1-std::exp(-dt/.2));w+=(response_yaw-w)*(1-std::exp(-dt/.15));
   const double old_x=x,old_y=y,old_yaw=yaw;
-  x+=v*dt*(std::cos(yaw+w*dt/2)-lateral_ratio*std::sin(yaw+w*dt/2));y+=v*dt*(std::sin(yaw+w*dt/2)+lateral_ratio*std::cos(yaw+w*dt/2));yaw=wrap(yaw+w*dt);
+  const double sideways=lateral_ratio*v+ripple;
+  x+=dt*(v*std::cos(yaw+w*dt/2)-sideways*std::sin(yaw+w*dt/2));y+=dt*(v*std::sin(yaw+w*dt/2)+sideways*std::cos(yaw+w*dt/2));yaw=wrap(yaw+w*dt);
   double best=1e30;size_t nearest=0;for(size_t j=0;j+1<points.size();++j){auto a=points[j],b=points[j+1];double dx=b.x-a.x,dy=b.y-a.y;if(dx*dx+dy*dy<1e-15)continue;double f=std::clamp(((x-a.x)*dx+(y-a.y)*dy)/(dx*dx+dy*dy),0.,1.);double dist=std::hypot(x-a.x-f*dx,y-a.y-f*dy);if(dist<best){best=dist;nearest=j;}}
   progress=points[nearest].x;
   if(time>5.){rms+=best*best;max_error=std::max(max_error,best);++counted;if(std::abs(input.policy_yaw)>.15){double sign=std::copysign(1.,input.policy_yaw);if(last_sign&&sign!=last_sign)++reversals;last_sign=sign;}}
@@ -147,7 +163,7 @@ int main(int argc,char **argv){
   if(intrusion)break;
  }
  double error=std::hypot(x-points.back().x,y-points.back().y),yaw_error=std::abs(wrap(yaw-tf2::getYaw(path.poses.back().pose.orientation)));
- std::ofstream out(prefix+".json");out<<std::boolalpha<<"{\"actual_plugin\":\"p2_nav_controller::SettledGoalRPP\",\"scope\":\"Synthetic planar lag/gain model, no biped dynamics or hardware\",\"seed\":0,\"kind\":\""<<kind<<"\",\"gain\":"<<gain<<",\"delay_s\":"<<delay<<",\"yaw_deadzone\":"<<yaw_deadzone<<",\"lateral_ratio\":"<<lateral_ratio<<",\"commanded_y\":0,\"dt_s\":"<<dt<<",\"duration_s\":"<<time<<",\"goal_reached\":"<<reached<<",\"goal_error_m\":"<<error<<",\"goal_yaw_error_rad\":"<<yaw_error<<",\"cross_track_rms_m\":"<<std::sqrt(rms/std::max(1,counted))<<",\"cross_track_max_m\":"<<max_error<<",\"yaw_reversals\":"<<reversals<<",\"body_intrusions\":"<<collisions<<",\"controller_collision_stops\":"<<stops<<",\"obstacle_injected\":"<<triggered<<",\"obstacle_verified_in_costmap\":"<<verified_obstacle<<",\"obstacle_cleared_after_two_seconds\":"<<cleared<<",\"progress_x\":"<<progress<<"}\n";
+ std::ofstream out(prefix+".json");out<<std::boolalpha<<"{\"loaded_controller_library\":\""<<controller_library<<"\",\"actual_plugin\":\"p2_nav_controller::SettledGoalRPP\",\"scope\":\"Synthetic planar lag/gain model, no biped dynamics or hardware\",\"seed\":0,\"kind\":\""<<kind<<"\",\"gain\":"<<gain<<",\"delay_s\":"<<delay<<",\"yaw_deadzone\":"<<yaw_deadzone<<",\"lateral_ratio\":"<<lateral_ratio<<",\"lateral_ripple_mps\":"<<lateral_ripple<<",\"static_obstacle_probe_verified\":"<<static_probe_verified<<",\"lateral_ripple_hz\":2,\"commanded_y\":0,\"dt_s\":"<<dt<<",\"duration_s\":"<<time<<",\"goal_reached\":"<<reached<<",\"goal_error_m\":"<<error<<",\"goal_yaw_error_rad\":"<<yaw_error<<",\"cross_track_rms_m\":"<<std::sqrt(rms/std::max(1,counted))<<",\"cross_track_max_m\":"<<max_error<<",\"yaw_reversals\":"<<reversals<<",\"body_intrusions\":"<<collisions<<",\"controller_collision_stops\":"<<stops<<",\"obstacle_injected\":"<<triggered<<",\"obstacle_verified_in_costmap\":"<<verified_obstacle<<",\"obstacle_cleared_after_two_seconds\":"<<cleared<<",\"progress_x\":"<<progress<<"}\n";
  std::cout<<kind<<" reached="<<reached<<" error="<<error<<" intrusions="<<collisions<<" reversals="<<reversals<<'\n';
  std::cout<<"replans="<<replans<<" failed="<<planning_failures<<"\n";planner->deactivate();planner->cleanup();planner.reset();
  control->deactivate();control->cleanup();control.reset();actual_progress.reset();checker.reset();cm->on_cleanup(rclcpp_lifecycle::State());cm.reset();parent.reset();

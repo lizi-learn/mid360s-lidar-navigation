@@ -14,6 +14,7 @@
 #include "p2_nav_controller/reference_goal.hpp"
 #include "p2_nav_controller/curved_forward.hpp"
 #include "p2_nav_controller/filled_footprint.hpp"
+#include "p2_nav_controller/lateral_motion.hpp"
 
 namespace p2_nav_controller {
 class SettledGoalRPP : public nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController {
@@ -61,15 +62,17 @@ class SettledGoalRPP : public nav2_regulated_pure_pursuit_controller::RegulatedP
     else reference_pivot_=false;
     goal_=goal; plan_source_ns_=rclcpp::Time(path.header.stamp).nanoseconds(); Base::setPlan(path);
   }
-  void activate() override { response_braking_=false; response_pivot_.reset(); reference_pivot_=false; phase_.reset(); breakaway_.reset(); settled_pivot_.reset(); Base::activate(); }
-  void deactivate() override { response_braking_=false; response_pivot_.reset(); reference_pivot_=false; phase_.reset(); breakaway_.reset(); settled_pivot_.reset(); Base::deactivate(); }
+  void activate() override { lateral_motion_.reset(); response_braking_=false; response_pivot_.reset(); reference_pivot_=false; phase_.reset(); breakaway_.reset(); settled_pivot_.reset(); Base::activate(); }
+  void deactivate() override { lateral_motion_.reset(); response_braking_=false; response_pivot_.reset(); reference_pivot_=false; phase_.reset(); breakaway_.reset(); settled_pivot_.reset(); Base::deactivate(); }
   geometry_msgs::msg::TwistStamped computeVelocityCommands(
       const geometry_msgs::msg::PoseStamped &pose,const geometry_msgs::msg::Twist &speed,
       nav2_core::GoalChecker *checker) override {
     std::lock_guard<std::mutex> lock(phase_mutex_);
     std::unique_lock<std::mutex> base_lock(mutex_);
     if(!std::isfinite(speed.linear.y))throw nav2_core::PlannerException("Invalid measured lateral velocity");
-    lateral_velocity_=speed.linear.y;
+    lateral_velocity_=lateral_motion_.step(speed.linear.y,clock_->now().seconds());
+    if(std::abs(speed.linear.y-lateral_velocity_)>.08)
+      RCLCPP_INFO_THROTTLE(costmap_ros_->get_logger(),*clock_,1000,"Lateral motion evidence: raw=%.3f sustained=%.3f",speed.linear.y,lateral_velocity_);
     geometry_msgs::msg::Pose tolerance; geometry_msgs::msg::Twist velocity_tolerance;
     if (!checker || !checker->getTolerances(tolerance,velocity_tolerance))
       throw nav2_core::PlannerException("Terminal goal tolerance unavailable");
@@ -280,7 +283,7 @@ class SettledGoalRPP : public nav2_regulated_pure_pursuit_controller::RegulatedP
     // existing controller projection, not a calibrated physical-speed model.
     // In open space the ordinary continuous forward correction is unchanged.
     if(!use_collision_detection_||out.twist.linear.x<=0.)return;
-    if(!response_braking_&&!response_pivot_.pending()&&std::abs(speed.angular.z-out.twist.angular.z)<=.06&&std::abs(speed.linear.y)<=.06)return;
+    if(!response_braking_&&!response_pivot_.pending()&&std::abs(speed.angular.z-out.twist.angular.z)<=.06&&std::abs(lateral_velocity_)<=.06)return;
     auto *map=costmap_ros_->getCostmap();
     std::unique_lock<nav2_costmap_2d::Costmap2D::mutex_t> map_lock(*map->getMutex(),std::defer_lock);
     if(acquire_map)map_lock.lock();
@@ -324,6 +327,7 @@ class SettledGoalRPP : public nav2_regulated_pure_pursuit_controller::RegulatedP
     }
   }
   bool response_braking_=false;
+  LateralMotion lateral_motion_;
   double lateral_velocity_=0.;
   bool reference_pivot_=false;geometry_msgs::msg::PoseStamped reference_target_;
   int64_t plan_source_ns_=0;

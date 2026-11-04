@@ -114,6 +114,7 @@ jobs:
           cmake -S experiments/arrival -B /tmp/arrival-build
           cmake --build /tmp/arrival-build -j2
           /tmp/arrival-build/settled_reset
+          /tmp/arrival-build/lateral_motion
           python3 -c "import sys,yaml;sys.path.insert(0,'navigation');from configure import config;print(yaml.safe_dump({'preview_controller':{'ros__parameters':config(gait_profile='p2-flat-model')['controller_server']['ros__parameters']}}))" > /tmp/presentation-arrival.yaml
           /tmp/arrival-build/presentation_arrival --ros-args --params-file /tmp/presentation-arrival.yaml --log-level error
           mkdir -p /tmp/arrival
@@ -125,6 +126,7 @@ jobs:
           python3 experiments/arrival/check_rejoin.py --binary /tmp/arrival-build/route_rejoin_replay --output /tmp/arrival/rejoin
           python3 experiments/arrival/check_turn_response.py --binary /tmp/arrival-build/tracking_replay --output /tmp/arrival/turn-response
           python3 experiments/arrival/check_lateral_tracking.py --binary /tmp/arrival-build/tracking_replay --output /tmp/arrival/lateral-tracking
+          python3 experiments/arrival/check_lateral_ripple.py --binary /tmp/arrival-build/tracking_replay --output /tmp/arrival/lateral-ripple
           python3 experiments/arrival/check_tracking_breakaway.py --binary /tmp/arrival-build/tracking_replay --output /tmp/arrival/tracking-breakaway
           python3 experiments/arrival/check_directed_route.py --binary /tmp/arrival-build/arrival_planner --output /tmp/arrival/directed-route
           python3 experiments/arrival/check.py --binary /tmp/arrival-build/arrival_planner --output /tmp/arrival/planner/comparison.json
