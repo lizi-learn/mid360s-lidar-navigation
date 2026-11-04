@@ -170,7 +170,15 @@ protected:
       }
     }
     if(action.action_type!=robot_action_prev_.action_type)printAction(action,cause);
-    publishVelocity(action);publishPolygons();robot_action_prev_=action;
+    // Each callback just evaluated a NEW real request against current sources.
+    // A valid zero is still a command receipt. The stock publisher suppresses
+    // repeated zeros after stop_pub_timeout, which makes a downstream freshness
+    // gate repeatedly restart its stopped-clear interval during pulse/coast
+    // turns. Publish this evaluated zero without manufacturing any new request
+    // or renewing sensor stamps. No callback means no command receipt.
+    if(action.req_vel.isZero())cmd_vel_out_pub_->publish(geometry_msgs::msg::Twist());
+    else publishVelocity(action);
+    publishPolygons();robot_action_prev_=action;
   }
   nav2_util::CallbackReturn on_activate(const rclcpp_lifecycle::State &s) override {
     state_->on_activate();source_health_->on_activate();

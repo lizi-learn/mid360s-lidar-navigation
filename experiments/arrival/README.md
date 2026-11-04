@@ -111,3 +111,20 @@ checks delayed marking, offline retention, expiry after a fresh source returns,
 and a delayed refresh retaining its complete source-time lifetime. It reports
 the actual loaded costmap library. Static walls, exterior keepout and unobserved
 interior space remain separate checks; no sensor timestamp is rewritten.
+
+`check_handoff.py` combines the actual C++ pivot/input-ramp arithmetic with the
+production Python phase buffer, clear interval and final command gate. Named
+synthetic source ripple and planar delay/deadzone models distinguish phase
+starvation from actual sustained drift. `check_handoff_ros.py` then drives the
+actual buffer, native collision monitor and final ROS gate through the same
+small-turn case. Duplicate phase ownership can reject every pulse even though
+upstream measured-mean motion has already settled. The active buffered/native
+launch therefore delegates phase transitions to that upstream buffer once;
+unbuffered launches retain the final handoff. Final clearance waiting,
+collision stops, invalid-command rejection and original source expiry remain.
+
+The monitor emits a new zero receipt for each actual evaluated zero request,
+including after the stock zero-publication timeout. It emits no command in the
+absence of a request; idle source-health observations stay separate. The source
+component regression checks both behaviors. No laser/odometry stamp is renewed.
+These are isolated component and planar tests, not a physical biped pass.

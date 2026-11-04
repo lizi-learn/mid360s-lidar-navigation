@@ -1,5 +1,8 @@
 cmake_minimum_required(VERSION 3.8)
 project(arrival_fixture)
+add_library(handoff_response SHARED handoff_response.cpp)
+target_compile_features(handoff_response PUBLIC cxx_std_17)
+target_include_directories(handoff_response PRIVATE ../../navigation ../../navigation/p2_nav_controller/include)
 add_executable(lateral_motion lateral_motion.cpp)
 target_compile_features(lateral_motion PUBLIC cxx_std_17)
 target_include_directories(lateral_motion PRIVATE ../../navigation/p2_nav_controller/include)

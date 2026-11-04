@@ -36,7 +36,7 @@ def main():
             t=TransformStamped();t.header.frame_id='fixture_odom';t.child_frame_id='fixture_base';t.transform.rotation.w=1.
             t.header.stamp=rclpy.time.Time(nanoseconds=now.nanoseconds-int(delay*1e9)).to_msg();dynamic_tf.sendTransform(t)
         if not phase['idle']:
-            m=Twist();m.linear.x=.1;cmd.publish(m)
+            m=Twist();m.linear.x=0. if phase.get('zero_command') else .1;cmd.publish(m)
         if phase['name']=='missing':return
         s=LaserScan();now=n.get_clock().now();s.header.stamp=now.to_msg();s.header.frame_id='fixture_laser';s.angle_min=-math.pi;s.angle_increment=2*math.pi/360;s.angle_max=s.angle_min+359*s.angle_increment;s.range_min=.12;s.range_max=14.;s.scan_time=.1;s.ranges=[3.]*360
         if a.delayed_tf:s.header.stamp=rclpy.time.Time(nanoseconds=now.nanoseconds-250_000_000).to_msg()
@@ -49,7 +49,7 @@ def main():
     n.create_timer(.05,publish)
     log=destination.with_suffix('.node.log').open('w')
     process=subprocess.Popen([a.binary,'--ros-args','--params-file',str(paramfile)],stdout=log,stderr=subprocess.STDOUT,start_new_session=True)
-    results=[];baseline=a.expect_idle_health_defect or a.expect_projection_defect;expected_cases=1 if baseline else 7 if a.expect_old_defect else 13 if a.delayed_tf else 11
+    results=[];baseline=a.expect_idle_health_defect or a.expect_projection_defect;expected_cases=1 if baseline else 7 if a.expect_old_defect else 15 if a.delayed_tf else 13
     def spin(seconds):
         until=time.monotonic()+seconds
         while time.monotonic()<until:
@@ -88,6 +88,25 @@ def main():
             elif a.expect_old_defect:assert peak>.05,result
             else:assert peak==0 and decision and all(x==CollisionMonitorState.STOP for x in decision) and valid and not any(valid),result
             result['passed_expected_behavior']=True
+        if not baseline and not a.expect_old_defect:
+            # Current zero requests are real decisions, not missing commands.
+            # A pulse/coast controller can remain at zero longer than the stock
+            # stop_pub_timeout; downstream command expiry must still distinguish
+            # those actual requests from a producer which has disappeared.
+            phase.update(name='clear',idle=False,zero_command=True)
+            spin(2.8);start=time.monotonic();spin(.7)
+            values=[x for x in trace if x[0]>=start]
+            valid=[x[1] for x in health if x[0]>=start]
+            result={'case':'continuous_zero_request_receipts','output_samples':len(values),
+                    'source_health_values':sorted(set(valid)),
+                    'max_abs_velocity':max((abs(v)for x in values for v in x[1:]),default=0.)}
+            results.append(result)
+            assert len(values)>=8 and valid and all(valid) and result['max_abs_velocity']==0.,result
+            result['passed_expected_behavior']=True
+            phase['idle']=True;spin(.4);start=time.monotonic();spin(.5)
+            values=[x for x in trace if x[0]>=start]
+            result={'case':'no_receipts_without_new_requests','output_samples':len(values)}
+            results.append(result);assert not values,result;result['passed_expected_behavior']=True
     finally:
         os.killpg(process.pid,signal.SIGINT)
         try:process.wait(timeout=4)

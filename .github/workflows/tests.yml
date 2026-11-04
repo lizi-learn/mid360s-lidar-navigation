@@ -187,11 +187,20 @@ jobs:
           source /opt/ros/humble/setup.bash
           source nav_controller_ws/install/setup.bash
           python3 experiments/collision_source_guard/check.py --binary "$GITHUB_WORKSPACE/nav_controller_ws/install/p2_nav_controller/lib/p2_nav_controller/observed_collision_monitor" --output /tmp/collision-source-guard.json
+          python3 experiments/arrival/check_handoff.py --library /tmp/arrival-build/libhandoff_response.so --output /tmp/turn-handoff-model
+          python3 experiments/collision_source_guard/check_handoff_ros.py --binary "$GITHUB_WORKSPACE/nav_controller_ws/install/p2_nav_controller/lib/p2_nav_controller/observed_collision_monitor" --library /tmp/arrival-build/libhandoff_response.so --duplicate-owner --output /tmp/turn-handoff-duplicate.json
+          python3 experiments/collision_source_guard/check_handoff_ros.py --binary "$GITHUB_WORKSPACE/nav_controller_ws/install/p2_nav_controller/lib/p2_nav_controller/observed_collision_monitor" --library /tmp/arrival-build/libhandoff_response.so --output /tmp/turn-handoff-single.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: collision-source-component-evidence
           path: /tmp/collision-source-guard*
+          if-no-files-found: ignore
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: turn-handoff-component-evidence
+          path: /tmp/turn-handoff*
           if-no-files-found: ignore
       - name: Preserve every long-path point and original source time across relay
         shell: bash

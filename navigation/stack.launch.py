@@ -43,7 +43,9 @@ def setup(context):
             '--navigation-reference',get('navigation_reference'),'--ground-policy',get('ground_policy'),'--source-domain',get('source_domain'),'--target-domain',os.getenv('ROS_DOMAIN_ID','194')]+
             (['--support-history'] if get('support_history')=='true' else []),output='screen'))
     nodes.append(ExecuteProcess(cmd=['/usr/bin/python3','-S',str(root/'gate_node.py'),'--ros-args',
-        '-p','simulation:='+str(simulation).lower(),'-p','gait_handoff:='+get('gait_handoff'),'-p','require_localization:='+str(mode=='navigation').lower()],output='screen'))
+        '-p','simulation:='+str(simulation).lower(),'-p','gait_handoff:='+get('gait_handoff'),
+        '-p','upstream_motion_handoff:='+str(buffered and native_ramp).lower(),
+        '-p','require_localization:='+str(mode=='navigation').lower()],output='screen'))
     if mode=='mapping':
         slam={'use_sim_time':False,'solver_plugin':'solver_plugins::CeresSolver','ceres_linear_solver':'SPARSE_NORMAL_CHOLESKY',
             'ceres_preconditioner':'SCHUR_JACOBI','ceres_trust_strategy':'LEVENBERG_MARQUARDT','ceres_dogleg_type':'TRADITIONAL_DOGLEG',

@@ -58,16 +58,20 @@ class SchedulingTests(unittest.TestCase):
         self.assertEqual(self.runtime_parameters['collision_monitor']['ros__parameters']['cmd_vel_in_topic'],'/p2_nav/cmd_buffered')
         commands = [x['cmd'] for x in children if 'cmd' in x]
         self.assertTrue(any('gate_node.py' in str(x) for x in commands))
+        self.assertTrue(any('gate_node.py' in str(x) and 'upstream_motion_handoff:=true' in x for x in commands))
         self.assertTrue(any('motion_buffer_node.py' in str(x) and 'native_input_ramp:=true'in x for x in commands))
         self.assertTrue(all(x[0] == '/usr/bin/python3' for x in commands))
 
     def test_generic_launch_keeps_existing_normal_scheduling(self):
-        self.assertTrue(all(not x.get('prefix') for x in self.children(False)))
+        children=self.children(False)
+        self.assertTrue(all(not x.get('prefix') for x in children))
+        self.assertTrue(any('gate_node.py'in str(x.get('cmd'))and'upstream_motion_handoff:=false'in x['cmd']for x in children))
 
     def test_native_unbuffered_path_and_generic_smoothed_path(self):
         physical=self.children(True,False)
         self.assertFalse(any(x.get('name')=='velocity_smoother'for x in physical))
         self.assertEqual(self.runtime_parameters['collision_monitor']['ros__parameters']['cmd_vel_in_topic'],'/p2_nav/cmd_raw')
+        self.assertTrue(any('gate_node.py' in str(x.get('cmd')) and 'upstream_motion_handoff:=false' in x['cmd']for x in physical))
         generic=self.children(False)
         self.assertTrue(any(x.get('name')=='velocity_smoother'for x in generic))
         self.assertEqual(self.runtime_parameters['collision_monitor']['ros__parameters']['cmd_vel_in_topic'],'/p2_nav/cmd_smooth')
