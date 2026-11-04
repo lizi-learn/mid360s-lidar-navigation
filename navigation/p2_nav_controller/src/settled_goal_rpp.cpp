@@ -58,7 +58,12 @@ class SettledGoalRPP : public nav2_regulated_pure_pursuit_controller::RegulatedP
     while(pivot_end+1<path.poses.size()&&std::hypot(path.poses[pivot_end+1].pose.position.x-path.poses.front().pose.position.x,
       path.poses[pivot_end+1].pose.position.y-path.poses.front().pose.position.y)<.005)++pivot_end;
     const double reference_turn=std::abs(std::remainder(tf2::getYaw(path.poses[pivot_end].pose.orientation)-tf2::getYaw(path.poses.front().pose.orientation),2.*std::acos(-1.)));
-    if(pivot_end>0&&(reference_turn>.55||(reference_pivot_&&reference_turn>.15))){reference_pivot_=true;reference_target_=path.poses[pivot_end];reference_target_.header.frame_id=path.header.frame_id;}
+    // The position planner represents each straight rejoin with a pivot. A
+    // modest rejoin is still trackable as a checked forward curve; forcing
+    // every >.55rad prefix to stop also restarted pivot pulses on replans.
+    // Use the configured turn-in-place threshold already used by RPP. Tight
+    // corners can still select a collision-checked pivot in the fallback.
+    if(pivot_end>0&&(reference_turn>rotate_to_heading_min_angle_||(reference_pivot_&&reference_turn>.15))){reference_pivot_=true;reference_target_=path.poses[pivot_end];reference_target_.header.frame_id=path.header.frame_id;}
     else reference_pivot_=false;
     goal_=goal; plan_source_ns_=rclcpp::Time(path.header.stamp).nanoseconds(); Base::setPlan(path);
   }
