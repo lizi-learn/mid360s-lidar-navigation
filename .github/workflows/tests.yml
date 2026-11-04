@@ -219,6 +219,23 @@ jobs:
           name: path-view-component-evidence
           path: /tmp/path-view-component*
           if-no-files-found: ignore
+      - name: Update old map occupancy after a person leaves without learning people permanently
+        shell: bash
+        env:
+          ROS_LOCALHOST_ONLY: '1'
+          ROS_DOMAIN_ID: '225'
+          RMW_IMPLEMENTATION: rmw_cyclonedds_cpp
+        run: |
+          source /opt/ros/humble/setup.bash
+          source nav_controller_ws/install/setup.bash
+          export CYCLONEDDS_URI="file://$PWD/config/cyclonedds-local.xml"
+          timeout 130s python3 experiments/reception/check_native.py --setup "$GITHUB_WORKSPACE/nav_controller_ws/install/setup.bash" --output /tmp/observed-map-native/report.json --scenario map-observations --port 8954 --domain 225
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: observed-map-native-evidence
+          path: /tmp/observed-map-native
+          if-no-files-found: ignore
       - name: Independent right90, observed rotation obstacle and manual takeover
         shell: bash
         env:

@@ -126,6 +126,11 @@ class Console(Node):
         self.reception_voice=VoiceCache(runtime/'reception-voice-cache',tts_command)
         self.reception_transfer.on_saved=self.reception_voice.auto_prepare
         self.reception=MissionService(self,self.reception_catalog)
+        from observed_map import ObservedMap,ObservationWorker
+        self.map_observations=ObservedMap()
+        self.map_observation_worker=ObservationWorker(self.map_observations,
+            lambda:self.mode=='navigation' and bool(self.gate.get('localized') and self.gate.get('data_fresh')),
+            lambda:self.publish_reception_map(self.reception.observation_document()))
         self.trace_active_until=0.;self.create_timer(.2,self.capture_reception_trace)
         self.create_subscription(String,'/p2_nav/door_observations',self.on_door_observation,10)
         from reception_doors import DoorOverlay
@@ -176,6 +181,14 @@ class Console(Node):
         except (ValueError,TypeError,AttributeError):self.flight.errors+=1
     def on_map(self,msg):
         self.grid=msg;self.map_revision+=1
+        if hasattr(self,'map_observations') and self.map_name:
+            q=msg.info.origin.orientation
+            if abs(q.x)+abs(q.y)+abs(q.z)>1e-8:
+                self.map_observations.unbind();self.map_observations.error='rotated_map_unsupported'
+            else:
+                self.map_observations.bind(dict(revision=self.map_revision,width=msg.info.width,height=msg.info.height,
+                    resolution=msg.info.resolution,origin=[msg.info.origin.position.x,msg.info.origin.position.y],cells=msg.data),
+                    self.map_library.directory(self.map_name),force=True)
         if hasattr(self,'door_worker'):self.publish_reception_map(self.reception.observation_document())
     def display_revision(self):return self.map_revision+getattr(self,'overlay_revision',0)
     def on_reception_scan(self,msg):
@@ -198,6 +211,7 @@ class Console(Node):
             if not 0<len(msg.ranges)<=4096:
                 self.pending_reception_scan=None;raise ValueError('scan_size_invalid')
             packet=dict(source_ns=source_ns,source_monotonic=time.monotonic()-age,
+                map_revision=self.map_revision,
                 x=t.translation.x,y=t.translation.y,yaw=yaw,ranges=list(msg.ranges),
                 angle_min=msg.angle_min,angle_increment=msg.angle_increment,range_min=msg.range_min,range_max=msg.range_max)
             # Compact actual finite return overlay; the original ROS header is
@@ -210,6 +224,7 @@ class Console(Node):
             self.scan_preview={'source_ns':source_ns,'frame_id':'map','origin':[t.translation.x,t.translation.y,yaw],
                                'points':pts[::max(1,math.ceil(len(pts)/600))]}
             if self.door_source=='scan':self.door_worker.submit(packet)
+            self.map_observation_worker.submit(packet)
             self.pending_reception_scan=None
         except Exception as error:
             key=str(error)if isinstance(error,ValueError)else type(error).__name__
@@ -226,7 +241,7 @@ class Console(Node):
         if base is None or not hasattr(self,'door_overlay') or document['map_id']!=self.reception.map_id():return
         states=self.reception.decisions.states(document,time.monotonic())
         annotations=document.get('annotations',[])
-        key=(self.map_revision,tuple(sorted(states.items())),tuple((d['id'],d['x'],d['y'],d['width'],d['yaw'])for d in document['doors']),json.dumps(annotations,sort_keys=True))
+        key=(self.map_revision,self.map_observations.revision,tuple(sorted(states.items())),tuple((d['id'],d['x'],d['y'],d['width'],d['yaw'])for d in document['doors']),json.dumps(annotations,sort_keys=True))
         with self._overlay_lock:
             if key==self._overlay_key:return
             q=base.info.origin.orientation
@@ -235,7 +250,8 @@ class Console(Node):
             if abs(q.z)>1e-8 or abs(q.x)>1e-8 or abs(q.y)>1e-8:
                 cells=list(base.data);report={'changed_cells':0,'reason':'rotated_map_overlay_unsupported','original_map_modified':False}
             else:
-                cells,report=self.door_overlay.apply(grid,document,states,self.reception.decisions.observations(document,time.monotonic()))
+                measured=dict(grid,cells=self.map_observations.apply(grid))
+                cells,report=self.door_overlay.apply(measured,document,states,self.reception.decisions.observations(document,time.monotonic()))
                 cells,authored=self.annotation_layer.apply(dict(grid,cells=cells),annotations);report.update(authored)
             msg=copy.deepcopy(base);msg.data=cells
             self.navigation_grid=msg;self.overlay_revision+=1;self.overlay_report=report;self._overlay_key=key
@@ -853,12 +869,23 @@ class Console(Node):
         except (OSError,ValueError):return None
     def reception_status(self,full=False):
         document=self.reception_catalog.read(self.reception.map_id()) if full else self.reception_catalog.summary(self.reception.map_id())
-        result={'map_id':self.reception.map_id(),'revision':document['revision'],'mission':self.reception.engine.status(),'voice_progress':self.reception_voice.summary(self.reception.map_id()),'doors':self.reception.decisions.states(self.reception.observation_document(),time.monotonic()),'route_report':self.reception.route_report,'door_evidence':self.door_worker.summary,'door_overlay':self.overlay_report,'door_scan_rejections':dict(self.door_scan_rejections)}
+        result={'map_id':self.reception.map_id(),'revision':document['revision'],'mission':self.reception.engine.status(),'voice_progress':self.reception_voice.summary(self.reception.map_id()),'doors':self.reception.decisions.states(self.reception.observation_document(),time.monotonic()),'route_report':self.reception.route_report,'door_evidence':self.door_worker.summary,'door_overlay':self.overlay_report,'door_scan_rejections':dict(self.door_scan_rejections),'map_observations':self.map_observations.status()}
         if full:result.update(document=document,voice=self.reception_voice.status(document))
         return result
     def reception_save(self,data):
         if not isinstance(data,dict):raise ValueError('导览配置必须是对象')
         operation=data.get('operation','save')
+        if operation in ('map_observations','map_observations_reset'):
+            if data.get('map_id')!=self.map_name or self.grid is None:raise ValueError('请先载入所选导航地图')
+            if operation=='map_observations':self.map_observations.set_enabled(data['enabled'])
+            else:
+                self.map_library.snapshot(self.map_name,'before_observed_map_reset')
+                self.map_observations.set_enabled(False)
+                self.map_observations.reset()
+                self.publish_reception_map(self.reception.observation_document())
+            return self.map_observations.status()
+        if operation.startswith('bundle_') or operation in ('map_raster','map_snapshot'):
+            self.map_observations.flush(force=True)
         if operation=='map_raster':return self.map_library.raster(data['map_id'])
         if operation=='route_preview':
             from reception_preview import preview_isolated
@@ -869,7 +896,8 @@ class Console(Node):
         if operation=='map_versions':return {'versions':self.map_library.versions(data['map_id'])}
         if operation=='map_snapshot':return self.map_library.snapshot(data['map_id'],'operator_snapshot')
         if operation=='map_restore':
-            if data['map_id']==self.map_name:self.stop_process();self.mode='idle'
+            if data['map_id']==self.map_name:
+                self.stop_process();self.mode='idle';self.map_observations.unbind()
             return self.map_library.restore(data['map_id'],data['version'])
         if operation=='map_load':return self.start('navigation',data['map_id'],self.controller)
         if operation=='map_resume':return self.start('mapping',data['map_id'],self.controller,True,data.get('region'))
@@ -1065,6 +1093,7 @@ def main():
     try:
         while not stopping.is_set():server.handle_request()
     finally:
+        node.map_observation_worker.close()
         node.door_worker.close()
         node.reception.close()
         node.stop_process()

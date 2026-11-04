@@ -23,7 +23,7 @@ from map_persistence import validate_map_metadata
 from reception_catalog import ident, validate
 from reception_annotations import inside
 
-FILES=('mapped.yaml','mapped.pgm','mapped.data','mapped.posegraph')
+FILES=('mapped.yaml','mapped.pgm','mapped.data','mapped.posegraph','observed-map.json')
 MAX_BYTES=64*1024*1024
 
 
@@ -94,9 +94,12 @@ class MapLibrary:
             occupancy=(pixels.astype(float) if metadata.get('negate',0) else 255-pixels.astype(float))/255.
             cells=np.full(pixels.shape,-1,dtype=np.int8)
             cells[occupancy<metadata['free_thresh']]=0;cells[occupancy>metadata['occupied_thresh']]=100
-            return dict(map_id=name,width=pixels.shape[1],height=pixels.shape[0],resolution=metadata['resolution'],
+            grid=dict(map_id=name,width=pixels.shape[1],height=pixels.shape[0],resolution=metadata['resolution'],
                         origin=metadata['origin'][:2],cells=cells[::-1].ravel().tolist(),
                         source='saved_map',image_sha256=sha(image.read_bytes()))
+            from observed_map import saved_cells,FILENAME
+            grid['cells'],grid['map_observations']=saved_cells(directory/FILENAME,grid)
+            return grid
     def versions(self,name):
         directory=self.directory(name)/'versions';rows=[]
         for file in sorted(directory.glob('*/manifest.json'),reverse=True)[:30]:
@@ -182,6 +185,14 @@ class MapLibrary:
                 metadata=validate_map_metadata(temporary/'mapped.yaml')
                 if metadata['image']!='mapped.pgm':raise ValueError('场地包地图只能引用内部mapped.pgm')
                 read_pgm(temporary/'mapped.pgm')
+                # Validate optional measured updates before committing a bundle.
+                from observed_map import read_layer,FILENAME
+                pixels=read_pgm(temporary/'mapped.pgm')
+                occupancy=(pixels.astype(float) if metadata.get('negate',0) else 255-pixels.astype(float))/255.
+                cells=np.full(pixels.shape,-1,dtype=np.int8)
+                cells[occupancy<metadata['free_thresh']]=0;cells[occupancy>metadata['occupied_thresh']]=100
+                read_layer(temporary/FILENAME,dict(width=pixels.shape[1],height=pixels.shape[0],
+                    resolution=metadata['resolution'],origin=metadata['origin'][:2],cells=cells[::-1].ravel().tolist()))
                 atomic_json(temporary/'site-origin.json',{'source_bundle':manifest['bundle_id'],'source_map_id':manifest['map_id'],
                     'new_installation_id':str(uuid.uuid4()),'imported_at':time.time(),'calibration_copied':False,'localization_copied':False})
                 os.replace(temporary,target)

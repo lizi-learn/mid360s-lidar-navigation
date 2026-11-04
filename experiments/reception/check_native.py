@@ -8,7 +8,7 @@ from pathlib import Path
 ROOT=Path(__file__).resolve().parents[2];NAV=ROOT/'navigation';sys.path.insert(0,str(NAV))
 
 def main():
-    ap=argparse.ArgumentParser();ap.add_argument('--output',required=True);ap.add_argument('--setup',required=True);ap.add_argument('--port',type=int,default=8947);ap.add_argument('--domain',type=int,default=208);ap.add_argument('--stop-profile',choices=['baseline-directional','legacy-rectangle'],default='baseline-directional');ap.add_argument('--scenario',choices=['transit','all','obstacle','tools','maps','blockage','followthrough','rotation'],default='all');ap.add_argument('--block-case',choices=['persistent','transient','takeover'],default='persistent');ap.add_argument('--obstacle-offset',type=float,default=0.);ap.add_argument('--source-gap-ms',type=float,default=0.);args=ap.parse_args()
+    ap=argparse.ArgumentParser();ap.add_argument('--output',required=True);ap.add_argument('--setup',required=True);ap.add_argument('--port',type=int,default=8947);ap.add_argument('--domain',type=int,default=208);ap.add_argument('--stop-profile',choices=['baseline-directional','legacy-rectangle'],default='baseline-directional');ap.add_argument('--scenario',choices=['transit','all','obstacle','tools','maps','blockage','followthrough','rotation','map-observations'],default='all');ap.add_argument('--block-case',choices=['persistent','transient','takeover'],default='persistent');ap.add_argument('--obstacle-offset',type=float,default=0.);ap.add_argument('--source-gap-ms',type=float,default=0.);args=ap.parse_args()
     if not 0<=args.source_gap_ms<=1500:raise ValueError('Invalid bounded source gap')
     if not math.isfinite(args.obstacle_offset):raise ValueError('Invalid synthetic obstacle offset')
     out=Path(args.output).resolve().parent
@@ -27,6 +27,15 @@ def main():
     door={'id':'front_door','x':5.9,'y':2.5,'yaw':math.pi/2,'width':2.4,'thickness':.15,'closed':True}
     doors=[door]if args.scenario=='all'else []
     mapdir=runtime/'maps/native_showroom';save_truth(mapdir,doors);(mapdir/'mapped.yaml').write_text((mapdir/'truth.yaml').read_text())
+    if args.scenario=='map-observations':
+        import numpy as np
+        from reception_maps import read_pgm
+        pixels=read_pgm(mapdir/'truth.pgm')[::-1].copy()
+        pixels[47:54,67:74]=0  # Historical obstacle, independent of synthetic world geometry.
+        pixels[62,70]=205  # An interior unknown cell must remain unknown in the map.
+        (mapdir/'mapped.pgm').write_bytes(b'P5\n240 200\n255\n'+pixels[::-1].tobytes())
+        (mapdir/'mapped.yaml').write_text((mapdir/'truth.yaml').read_text().replace('truth.pgm','mapped.pgm'))
+        env['P2_NAV_SIM_INITIAL_OBSTACLE']=json.dumps([3.525,2.525,.28])
     shape=[[.275,.275],[.275,-.275],[-.275,-.275],[-.275,.275]]
     foot=out/'footprint.json';foot.write_text(json.dumps({'schema_version':1,'vertices':shape}))
     (runtime/'planning_geometry.json').write_text(json.dumps({'footprint':shape,'footprint_padding':0,'global_obstacle_combination':0}))
@@ -164,7 +173,51 @@ def main():
             call('/api/sim_operator',dict(mode='navigation_allowed'));time.sleep(.5);d=status()
             assert d['session']['force_navigation_zero']and max(map(abs,d['truth']['command']))<1e-6
             events.append(dict(case='independent_spin_manual_takeover_no_auto_resume',passed=True))
-        if args.scenario not in ('obstacle','tools','maps','blockage','followthrough','rotation'):
+        if args.scenario=='map-observations':
+            ros=ScenarioROS();ghost=(3.525,2.525);base_sha=hashlib.sha256((mapdir/'mapped.pgm').read_bytes()).hexdigest()
+            def cell(grid,x,y):
+                if grid is None:return None
+                m=grid.metadata;ix=math.floor((x-m.origin.position.x)/m.resolution);iy=math.floor((y-m.origin.position.y)/m.resolution)
+                return grid.data[iy*m.size_x+ix]if 0<=ix<m.size_x and 0<=iy<m.size_y else None
+            def displayed(x,y):
+                g=call('/api/map')['map'];return g['cells'][math.floor((y-g['origin'][1])/g['resolution'])*g['width']+math.floor((x-g['origin'][0])/g['resolution'])]
+            wait(lambda d:cell(ros.global_map,*ghost)==254,15)
+            until=time.monotonic()+3.
+            while time.monotonic()<until:status();time.sleep(.1)
+            assert displayed(*ghost)==100,'A person occupying the old cell must veto clearing'
+            rays=ros.obstacle_rays(status(),[3.525,2.525,.28]);assert rays>=2,rays
+            for _ in range(8):ros.control(dict(obstacle=None,control_id='person-left'));status();time.sleep(.1)
+            d=wait(lambda d:d['reception']['map_observations']['cleared_cells']>0 and cell(ros.global_map,*ghost)==0,20)
+            assert displayed(*ghost)==0 and displayed(3.525,3.125)==-1
+            assert cell(ros.global_map,.075,2.525)==254
+            assert hashlib.sha256((mapdir/'mapped.pgm').read_bytes()).hexdigest()==base_sha
+            raster=call('/api/save',{'reception':dict(operation='map_raster',map_id='native_showroom')})
+            index=math.floor(ghost[1]/.05)*240+math.floor(ghost[0]/.05)
+            assert raster['cells'][index]==0 and raster['map_observations']['cleared_cells']>0
+            original=d['reception']['map_observations']['cleared_cells'];surface=(3.375,2.375)
+            assert displayed(*surface)==0
+            for _ in range(15):ros.control(dict(obstacle=[3.525,2.525,.28],control_id='person-returned'));status();time.sleep(.1)
+            # The entire old patch is inside the solid circle. Its actual
+            # surface is outside that patch; test the CURRENT measured returns,
+            # rather than assuming the scan can observe the occluded interior.
+            def marked_returns(d):
+                return sum(abs(math.hypot(p[0]-3.525,p[1]-2.525)-.28)<.12 and cell(ros.global_map,*p)==254
+                           for p in (d.get('scan_overlay')or{}).get('points',[]))
+            d=wait(lambda d:marked_returns(d)>=2 and d['reception']['map_observations']['cleared_cells']<original,10)
+            assert displayed(*surface)==100
+            restored_marks=marked_returns(d)
+            for _ in range(8):ros.control(dict(obstacle=None,control_id='person-left-again'));status();time.sleep(.1)
+            wait(lambda d:cell(ros.global_map,*ghost)==0 and displayed(*ghost)==0,20)
+            events.append(dict(case='person_veto_leave_clear_return_restore_and_clear_again',passed=True,
+                source_obstacle_rays=rays,unknown_source_preserved=True,wall_retained=True,
+                actual_global_costmap_updated=True,returning_obstacle_marked_returns=restored_marks,
+                immutable_base_sha256=base_sha))
+            doc=blank('native_showroom');doc['points']=[point('a',4.8,2.5,'visit')]
+            doc['routes']=[dict(id='tour',name='updated map navigation',mode='showcase',loops=1,description='',steps=[dict(point_id='a',speak=False)])]
+            doc=save(doc);start(doc);d=complete()
+            assert d['truth']['collision_attempts']==0
+            events.append(dict(case='navigate_through_updated_map_goal_complete_no_body_intrusion',passed=True))
+        if args.scenario not in ('obstacle','tools','maps','blockage','followthrough','rotation','map-observations'):
             doc=blank('native_showroom');doc['points']=[point('a',2.8,2.5),point('b',3.6,2.5),point('c',4.4,2.5,'visit')]
             doc['routes']=[{'id':'tour','name':'continuous transit','mode':'showcase','loops':1,'description':'synthetic','steps':[{'point_id':i,'speak':False}for i in ['a','b','c']]}]
             doc=save(doc);start(doc);d=complete();mission=d['reception']['mission']

@@ -57,6 +57,8 @@ class World(Node):
         from synthetic_doors import checked_doors
         self.doors=checked_doors(json.loads(os.getenv('P2_NAV_SIM_DOORS','[]')))
         self.drop_scan=False;self.drop_odom=False;self.ground_ok=True;self.obstacle=None;self.pause=False;self.control_id=''
+        if os.getenv('P2_NAV_SIM_INITIAL_OBSTACLE'):
+            self.obstacle=json.loads(os.environ['P2_NAV_SIM_INITIAL_OBSTACLE'])
         self.odom=self.create_publisher(Odometry,'/odom',10)
         self.scan=self.create_publisher(LaserScan,'/scan',qos_profile_sensor_data)
         self.truth=self.create_publisher(String,'/p2_nav/sim_truth',10)

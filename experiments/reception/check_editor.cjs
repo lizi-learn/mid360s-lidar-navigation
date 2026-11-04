@@ -5,7 +5,7 @@ const fs=require('node:fs'),assert=require('node:assert/strict');
 const input=JSON.parse(fs.readFileSync(0,'utf8'));
 const tick=()=>new Promise(r=>setImmediate(r));
 async function page(html,embedded=false,fixture=input.fixture,overrides={},autoEdit=true){
- const requests=[],missions=[],stops=[],errors=[],intervals=[];let hold=false,release=null,offline=false;
+ const requests=[],missions=[],stops=[],mapOperations=[],errors=[],intervals=[];let hold=false,release=null,offline=false;
  let liveStatus={robot_name:'synthetic editor',simulation:true,maps:['fixture'],reception:{map_id:'fixture'},session:{operator_verified:true,operator_mode:'manual',navigation_permitted:false},gait_transport:{controller_instance:1,readiness:3,phase:'stopped'},request_token:'synthetic',map_revision:-1,...overrides};
  let catalog=structuredClone(fixture);
  const dom=new JSDOM(html,{url:embedded?'http://fixture/api/v1/modules/navigation/workbench?route=tour':'http://fixture/reception?route=tour',runScripts:'dangerously',pretendToBeVisual:true,virtualConsole:new VirtualConsole().on('jsdomError',e=>errors.push(e.message)),beforeParse(w){
@@ -18,6 +18,7 @@ async function page(html,embedded=false,fixture=input.fixture,overrides={},autoE
    if(String(url).endsWith('/api/stop')){stops.push(q);return response({stopped:true})}
    if(r?.operation==='read')return response({document:catalog,voice:{}});
    if(r?.operation==='map_raster')return{ok:false,json:async()=>({error:'synthetic fixture has no raster'})};
+   if(['map_observations','map_observations_reset'].includes(r?.operation)){mapOperations.push(structuredClone(r));liveStatus.reception={...liveStatus.reception,map_observations:r.operation==='map_observations'?{enabled:r.enabled,cleared_cells:7}:{enabled:false,cleared_cells:0}};return response(liveStatus.reception.map_observations)}
    assert.equal(r?.operation,'save','Only content saving is allowed in editor fixture');requests.push(structuredClone(q));
    if(hold)await new Promise(resolve=>release=resolve);
    catalog=structuredClone(r.document);catalog.revision++;
@@ -30,12 +31,23 @@ async function page(html,embedded=false,fixture=input.fixture,overrides={},autoE
  if(autoEdit)d.getElementById('editPoint')?.click();
  function field(id,value,event=true){const e=d.getElementById(id);assert.ok(e,id);e.value=value;if(event)e.dispatchEvent(new dom.window.Event('input',{bubbles:true}));}
  async function save(button='saveButton'){const n=requests.length;d.getElementById(button).click();await until(()=>requests.length>n);for(let i=0;i<8;i++)await tick()}
- return{dom,d,field,save,until,requests,missions,stops,errors,hold(){hold=true},release(){hold=false;release()},async poll(value,disconnect=false){if(value)liveStatus={...liveStatus,...value};offline=disconnect;await intervals.find(x=>x[1]===1000)[0]();for(let i=0;i<8;i++)await tick()},map(){const c=d.getElementById('mapCanvas');Object.defineProperties(c,{clientWidth:{configurable:true,value:800},clientHeight:{configurable:true,value:600}});d.querySelector('[onclick="fitMap()"]').click();return c},close(){dom.window.close()}};
+ return{dom,d,field,save,until,requests,missions,stops,mapOperations,errors,hold(){hold=true},release(){hold=false;release()},async poll(value,disconnect=false){if(value)liveStatus={...liveStatus,...value};offline=disconnect;await intervals.find(x=>x[1]===1000)[0]();for(let i=0;i<8;i++)await tick()},map(){const c=d.getElementById('mapCanvas');Object.defineProperties(c,{clientWidth:{configurable:true,value:800},clientHeight:{configurable:true,value:600}});d.querySelector('[onclick="fitMap()"]').click();return c},close(){dom.window.close()}};
 }
 (async()=>{
  const results=[],payloads=[];
  for(const embedded of [false,true]){
   const variant=embedded?'embedded':'direct';
+  const mapPage=await page(embedded?input.embedded:input.direct,embedded);
+  mapPage.d.querySelector('[data-tab="maps"]').click();
+  await mapPage.until(()=>mapPage.d.getElementById('autoMapUpdate'));
+  const update=mapPage.d.getElementById('autoMapUpdate');assert.equal(update.checked,true);
+  update.checked=false;update.dispatchEvent(new mapPage.dom.window.Event('change',{bubbles:true}));
+  await mapPage.until(()=>mapPage.mapOperations.length===1);await mapPage.poll();
+  assert.equal(mapPage.mapOperations[0].enabled,false);assert.match(mapPage.d.getElementById('observedMapStatus').textContent,/暂停.*7/);
+  mapPage.d.getElementById('resetObservedMap').click();await mapPage.until(()=>mapPage.mapOperations.length===2);await mapPage.poll();
+  assert.equal(mapPage.mapOperations[1].operation,'map_observations_reset');assert.match(mapPage.d.getElementById('observedMapStatus').textContent,/暂停.*0/);
+  assert.equal(mapPage.requests.length,0);assert.equal(mapPage.missions.length,0);assert.equal(mapPage.stops.length,0);
+  results.push({variant,case:'map_auto_update_pause_and_versioned_reset_without_navigation_actions',passed:true});mapPage.close();
   const left={operator_verified:true,operator_mode:'navigation_allowed',navigation_permitted:true};
   let locked=await page(embedded?input.embedded:input.direct,embedded,input.fixture,{},false);
   assert.ok(locked.d.getElementById('pName').readOnly);assert.ok(locked.d.getElementById('pX').readOnly);assert.ok(locked.d.getElementById('fixedYaw').disabled);assert.ok(locked.d.getElementById('deletePoint').classList.contains('hidden'));assert.ok(locked.d.getElementById('applyPoint').classList.contains('hidden'));

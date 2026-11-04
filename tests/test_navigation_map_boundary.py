@@ -7,6 +7,7 @@ from test_console_cancellation import Console
 from reception_annotations import AnnotationLayer
 from configure import config
 from map_boundary import exterior_unknown_mask
+from observed_map import ObservedMap
 
 
 class MapBoundaryTests(unittest.TestCase):
@@ -18,6 +19,7 @@ class MapBoundaryTests(unittest.TestCase):
         c.map_revision=1;c.overlay_revision=0;c._overlay_key=None;c._overlay_lock=threading.Lock()
         c.reception=NS(map_id=lambda:'m',decisions=NS(states=lambda *_:{},observations=lambda *_:{}))
         c.door_overlay=NS(apply=lambda grid,*_: (list(grid['cells']),{}))
+        c.map_observations=ObservedMap()
         c.annotation_layer=AnnotationLayer();c.reception_map=Mock();c.keepout_mask=Mock();c.keepout_info=Mock()
         Console.publish_reception_map.__globals__['CostmapFilterInfo']=NS
         line=dict(id='line',kind='keepout',vertices=[[0.,-.5],[0.,.5]],width=.1)
