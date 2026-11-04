@@ -175,6 +175,16 @@ def main():
             events.append(dict(case='independent_spin_manual_takeover_no_auto_resume',passed=True))
         if args.scenario=='map-observations':
             ros=ScenarioROS();ghost=(3.525,2.525);base_sha=hashlib.sha256((mapdir/'mapped.pgm').read_bytes()).hexdigest()
+            from nav_msgs.msg import OccupancyGrid
+            from rclpy.qos import QoSProfile,DurabilityPolicy,ReliabilityPolicy
+            static_input=[None]
+            static_sub=ros.node.create_subscription(OccupancyGrid,'/p2_nav/reception_map',lambda m:static_input.__setitem__(0,m),
+                QoSProfile(depth=1,durability=DurabilityPolicy.TRANSIENT_LOCAL,reliability=ReliabilityPolicy.RELIABLE))
+            def static_cell():
+                g=static_input[0]
+                if g is None:return None
+                return g.data[math.floor((ghost[1]-g.info.origin.position.y)/g.info.resolution)*g.info.width+
+                              math.floor((ghost[0]-g.info.origin.position.x)/g.info.resolution)]
             def cell(grid,x,y):
                 if grid is None:return None
                 m=grid.metadata;ix=math.floor((x-m.origin.position.x)/m.resolution);iy=math.floor((y-m.origin.position.y)/m.resolution)
@@ -187,7 +197,11 @@ def main():
             assert displayed(*ghost)==100,'A person occupying the old cell must veto clearing'
             rays=ros.obstacle_rays(status(),[3.525,2.525,.28]);assert rays>=2,rays
             for _ in range(8):ros.control(dict(obstacle=None,control_id='person-left'));status();time.sleep(.1)
-            d=wait(lambda d:d['reception']['map_observations']['cleared_cells']>0 and cell(ros.global_map,*ghost)==0,20)
+            fixed_revision=status()['map_revision']
+            d=wait(lambda d:d['reception']['map_observations']['pending_cells']>0 and cell(ros.global_map,*ghost)==0,25)
+            assert displayed(*ghost)==100 and static_cell()==100 and d['map_revision']==fixed_revision,'Collecting must not rewrite or publish the fixed map'
+            call('/api/save',{'reception':dict(operation='map_observations_merge',map_id='native_showroom')})
+            d=wait(lambda d:d['reception']['map_observations']['cleared_cells']>0 and displayed(*ghost)==0 and static_cell()==0,10)
             assert displayed(*ghost)==0 and displayed(3.525,3.125)==-1
             assert cell(ros.global_map,.075,2.525)==254
             assert hashlib.sha256((mapdir/'mapped.pgm').read_bytes()).hexdigest()==base_sha
@@ -203,12 +217,12 @@ def main():
             def marked_returns(d):
                 return sum(abs(math.hypot(p[0]-3.525,p[1]-2.525)-.28)<.12 and cell(ros.global_map,*p)==254
                            for p in (d.get('scan_overlay')or{}).get('points',[]))
-            d=wait(lambda d:marked_returns(d)>=2 and d['reception']['map_observations']['cleared_cells']<original,10)
-            assert displayed(*surface)==100
+            d=wait(lambda d:marked_returns(d)>=2,10)
+            assert displayed(*surface)==0 and d['reception']['map_observations']['cleared_cells']==original
             restored_marks=marked_returns(d)
             for _ in range(8):ros.control(dict(obstacle=None,control_id='person-left-again'));status();time.sleep(.1)
             wait(lambda d:cell(ros.global_map,*ghost)==0 and displayed(*ghost)==0,20)
-            events.append(dict(case='person_veto_leave_clear_return_restore_and_clear_again',passed=True,
+            events.append(dict(case='collect_without_map_publish_idle_merge_person_remains_dynamic',passed=True,
                 source_obstacle_rays=rays,unknown_source_preserved=True,wall_retained=True,
                 actual_global_costmap_updated=True,returning_obstacle_marked_returns=restored_marks,
                 immutable_base_sha256=base_sha))

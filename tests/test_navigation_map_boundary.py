@@ -2,7 +2,7 @@
 from pathlib import Path
 from types import SimpleNamespace as NS
 import threading, unittest
-from unittest.mock import Mock,patch
+from unittest.mock import Mock
 from test_console_cancellation import Console
 from reception_annotations import AnnotationLayer
 from configure import config
@@ -34,19 +34,11 @@ class MapBoundaryTests(unittest.TestCase):
         self.assertEqual(mask.data[20*40+20],100)
         self.assertEqual(c.overlay_report['map_boundary_cells'],400)
         self.assertEqual(c.overlay_report['interior_unknown_cells'],1)
-        # Rapid learned-cell changes share one full-map publish each second;
-        # real obstacle marking is a separate layer, not rate-limited here.
+        # Collecting pending evidence does not change/re-publish the fixed map.
         published=c.reception_map.publish.call_count
-        original=c._observed_publish_at
-        with patch('time.monotonic',return_value=original+.2):
-            c.map_observations.revision+=1;c.publish_reception_map(document)
-            self.assertEqual(c.reception_map.publish.call_count,published)
-            document['annotations']=[];c.publish_reception_map(document)
-            self.assertEqual(c.reception_map.publish.call_count,published+1)
-            c.map_observations.revision+=1
-        with patch('time.monotonic',return_value=original+1.3):
-            c.publish_reception_map(document)
-            self.assertEqual(c.reception_map.publish.call_count,published+2)
+        c.map_observations.pending={1:{'index':1}}
+        c.publish_reception_map(document)
+        self.assertEqual(c.reception_map.publish.call_count,published)
         # A map reload/expanded mapped area produces a new boundary, with no
         # alteration of the underlying sensor map or any point/route catalog.
         c.grid.data=[0]*1600;c.map_revision+=1;c.publish_reception_map(document)

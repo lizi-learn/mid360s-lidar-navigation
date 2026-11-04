@@ -219,7 +219,7 @@ jobs:
           name: path-view-component-evidence
           path: /tmp/path-view-component*
           if-no-files-found: ignore
-      - name: Update old map occupancy after a person leaves without learning people permanently
+      - name: Collect map changes without publishing, merge when idle, and keep people dynamic
         shell: bash
         env:
           ROS_LOCALHOST_ONLY: '1'

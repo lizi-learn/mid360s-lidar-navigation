@@ -33,19 +33,24 @@ def read_layer(path, grid):
     """A changed/reloaded base cannot inherit observations from another map."""
     path = Path(path)
     if not path.exists():
-        return {'enabled': True, 'entries': []}
+        return {'enabled': True, 'entries': [], 'pending': []}
     if path.stat().st_size > 4*1024*1024:
         raise ValueError('Observation layer exceeds 4MiB')
     data = json.loads(path.read_text())
-    if not isinstance(data, dict) or data.get('schema') != 1 or type(data.get('enabled')) is not bool:
+    if not isinstance(data, dict) or data.get('schema') not in (1,2) or type(data.get('enabled')) is not bool:
         raise ValueError('Invalid observation layer schema')
     if data.get('base_sha256') != signature(grid):
-        return {'enabled': data['enabled'], 'entries': []}
+        return {'enabled': data['enabled'], 'entries': [], 'pending': []}
+    data.setdefault('pending', [])
+    if data.get('last_merge_wall') is not None and (type(data['last_merge_wall']) not in (int,float) or
+            not math.isfinite(data['last_merge_wall']) or data['last_merge_wall']<=0):
+        raise ValueError('Invalid map merge time')
     entries = data.get('entries')
-    if not isinstance(entries, list) or len(entries) > len(grid['cells']):
+    pending = data.get('pending')
+    if not isinstance(entries, list) or not isinstance(pending,list) or len(entries)+len(pending) > len(grid['cells']):
         raise ValueError('Invalid observation layer entries')
     seen = set()
-    for item in entries:
+    for item in entries+pending:
         if not isinstance(item, dict):
             raise ValueError('Invalid measured map cell')
         i = item.get('index')
@@ -64,13 +69,13 @@ def saved_cells(path, grid):
     cells = list(grid['cells'])
     for item in data['entries']:
         cells[item['index']] = 0
-    return cells, {'cleared_cells': len(data['entries']), 'enabled': data['enabled'],
+    return cells, {'cleared_cells': len(data['entries']), 'pending_cells': len(data['pending']), 'enabled': data['enabled'],
                    'base_raster_modified': False}
 
 
 class ObservedMap:
     # These are evidence accumulation parameters, not motion permission gates.
-    def __init__(self, minimum_frames=8, minimum_span=2., maximum_gap=1.):
+    def __init__(self, minimum_frames=8, minimum_span=2., maximum_gap=3.):
         self.minimum_frames = minimum_frames
         self.minimum_span = minimum_span
         self.maximum_gap = maximum_gap
@@ -78,6 +83,10 @@ class ObservedMap:
         self.key = None
         self.revision = 0
         self.entries = {}
+        self.pending = {}
+        self.last_merge_wall = time.time()
+        self.merge_interval_s = 86400.
+        self.merge_requested = False
         self.enabled = True
         self.dirty = False
         self.last_flush = 0.
@@ -107,14 +116,20 @@ class ObservedMap:
             self.last_source_ns = 0
             self.frames = 0
             self.error = None
+            self.last_merge_wall = time.time()
+            self.merge_requested = False
             try:
                 data = read_layer(self.path, self.grid)
                 self.enabled = data['enabled']
                 self.entries = {v['index']: dict(v) for v in data['entries']}
+                self.pending = {v['index']: dict(v) for v in data['pending']}
+                self.last_merge_wall = data.get('last_merge_wall') or time.time()
+                self.merge_requested = False
             except (ValueError, OSError, KeyError, TypeError) as error:
                 # Corrupt learned data cannot silently become free space.
                 self.enabled = False
                 self.entries = {}
+                self.pending = {}
                 self.error = type(error).__name__
             self.dirty = False
             self.revision += 1
@@ -150,7 +165,6 @@ class ObservedMap:
             self.last_source_ns = source_ns
             self.frames += 1
             delta = self.centers-[packet['x'], packet['y']]
-            distance = np.linalg.norm(delta, axis=1)
             angle = (np.arctan2(delta[:, 1], delta[:, 0])-packet['yaw']-packet['angle_min']) % (2*math.pi)
             nearest = np.rint(angle/inc).astype(int)
             if abs(len(ranges)*inc-2*math.pi) < 1e-5:
@@ -167,9 +181,9 @@ class ObservedMap:
             # measured at least25cm beyond it. Infinity/empty bins do nothing.
             free = valid & (along > .35) & (across < self.grid['resolution']*.4) & (values > along+.25)
 
-            # All finite endpoints veto nearby clearing, including endpoints in
-            # neighboring angular bins. A returning person restores old static
-            # occupancy immediately; new people on base-free cells stay dynamic.
+            # Current returns veto NEW free evidence. Previously confirmed floor
+            # stays in the fixed map: today's people belong to live avoidance,
+            # not to a permanent map contraction or repeated static-map edits.
             finite = np.isfinite(ranges) & (ranges >= packet['range_min']) & (ranges <= packet['range_max'])
             aa = packet['yaw']+packet['angle_min']+np.flatnonzero(finite)*inc
             ends = np.column_stack((packet['x']+ranges[finite]*np.cos(aa), packet['y']+ranges[finite]*np.sin(aa)))
@@ -185,9 +199,6 @@ class ObservedMap:
             hit = hit_grid[self.indices]
             free &= ~hit
             changed = False
-            for i in self.indices[hit]:
-                if self.entries.pop(int(i), None) is not None:
-                    changed = True
             reset = hit | (stamp-self.last > self.maximum_gap)
             self.counts[reset] = 0
             beginning = free & (self.counts == 0)
@@ -198,15 +209,33 @@ class ObservedMap:
             proven = free & (self.counts >= self.minimum_frames) & (stamp-self.first >= self.minimum_span)
             for k in np.flatnonzero(proven):
                 i = int(self.indices[k])
-                if i not in self.entries:
-                    self.entries[i] = dict(index=i, first_source_ns=int(self.first_ns[k]),
+                if i not in self.entries and i not in self.pending:
+                    self.pending[i] = dict(index=i, first_source_ns=int(self.first_ns[k]),
                                            last_source_ns=source_ns, observations=int(self.counts[k]))
                     changed = True
             if changed:
-                self.revision += 1
                 self.dirty = True
             self.processing_ms = (time.perf_counter()-started)*1000
             return changed
+
+    def request_merge(self):
+        with self.lock:self.merge_requested = True
+
+    def merge_due(self, now_wall=None):
+        with self.lock:
+            now_wall=time.time() if now_wall is None else now_wall
+            return bool(self.key and self.pending and self.enabled and now_wall-self.last_merge_wall>=self.merge_interval_s)
+
+    def merge(self, now_wall=None, manual=False):
+        with self.lock:
+            now_wall=time.time() if now_wall is None else now_wall
+            if not manual and not self.merge_due(now_wall):return False
+            self.merge_requested=False
+            if not self.pending:return False
+            self.entries.update(self.pending);self.pending={}
+            self.last_merge_wall=now_wall;self.revision+=1;self.dirty=True
+            self.flush(force=True)
+            return True
 
     def set_enabled(self, value):
         if type(value) is not bool:
@@ -223,12 +252,17 @@ class ObservedMap:
             self.key = None
             self.path = None
             self.entries = {}
+            self.pending = {}
+            self.merge_requested = False
             self.dirty = False
             self.revision += 1
 
     def reset(self):
         with self.lock:
             self.entries = {}
+            self.pending = {}
+            self.merge_requested = False
+            self.last_merge_wall = time.time()
             self.counts[:] = 0
             self.revision += 1
             self.dirty = True
@@ -236,16 +270,20 @@ class ObservedMap:
 
     def flush(self, force=False):
         with self.lock:
-            if self.path is None or not self.dirty or (not force and time.monotonic()-self.last_flush < 5.):
+            if self.path is None or not self.dirty or (not force and time.monotonic()-self.last_flush < 60.):
                 return
-            atomic_json(self.path, dict(schema=1, base_sha256=self.key, enabled=self.enabled,
-                                       entries=sorted(self.entries.values(), key=lambda v: v['index'])))
+            atomic_json(self.path, dict(schema=2, base_sha256=self.key, enabled=self.enabled,
+                last_merge_wall=self.last_merge_wall,entries=sorted(self.entries.values(), key=lambda v: v['index']),
+                pending=sorted(self.pending.values(), key=lambda v:v['index'])))
             self.last_flush = time.monotonic()
             self.dirty = False
 
     def status(self):
         with self.lock:
             return dict(enabled=self.enabled, cleared_cells=len(self.entries), revision=self.revision,
+                        pending_cells=len(self.pending),merge_requested=self.merge_requested,
+                        last_merge_wall=self.last_merge_wall,next_merge_wall=self.last_merge_wall+self.merge_interval_s,
+                        merge_interval_s=self.merge_interval_s,sample_interval_s=1.,
                         frames=self.frames, source_ns=self.last_source_ns, processing_ms=self.processing_ms,
                         minimum_frames=self.minimum_frames, minimum_span_s=self.minimum_span,
                         error=self.error, base_raster_modified=False,
@@ -254,8 +292,9 @@ class ObservedMap:
 
 class ObservationWorker:
     """One latest slot; bounded background processing, no control-loop disk I/O."""
-    def __init__(self, model, healthy, refresh):
+    def __init__(self, model, healthy, refresh, idle=lambda:True):
         self.model, self.healthy, self.refresh = model, healthy, refresh
+        self.idle=idle
         self.lock = threading.Lock()
         self.packet = None
         self.event = threading.Event()
@@ -271,16 +310,20 @@ class ObservationWorker:
     def run(self):
         last = -math.inf
         while not self.closed.is_set():
-            self.event.wait(.3)
+            self.event.wait(1.)
             self.event.clear()
-            if time.monotonic()-last < .25:
-                self.closed.wait(.25-(time.monotonic()-last))
+            if time.monotonic()-last < 1.:
+                self.closed.wait(1.-(time.monotonic()-last))
+            if self.closed.is_set():break
             with self.lock:
                 packet, self.packet = self.packet, None
             try:
                 last = time.monotonic()
-                if packet and self.model.observe(packet, last, self.healthy()):
-                    self.refresh()
+                if packet:self.model.observe(packet, last, self.healthy())
+                # Collecting evidence never publishes a full map. Merge once
+                # per24h, or on an explicit request, only when navigation is idle.
+                if self.idle() and (self.model.merge_requested or (self.healthy() and self.model.merge_due())):
+                    if self.model.merge(manual=self.model.merge_requested):self.refresh()
                 self.model.flush()
             except Exception as error:
                 self.model.error = type(error).__name__

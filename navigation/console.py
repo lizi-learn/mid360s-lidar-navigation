@@ -130,7 +130,10 @@ class Console(Node):
         self.map_observations=ObservedMap()
         self.map_observation_worker=ObservationWorker(self.map_observations,
             lambda:self.mode=='navigation' and bool(self.gate.get('localized') and self.gate.get('data_fresh')),
-            lambda:self.publish_reception_map(self.reception.observation_document()))
+            lambda:self.publish_reception_map(self.reception.observation_document()),
+            lambda:self.session.phase not in ('planning','ready','starting','executing','replanning') and
+                not self.session.manual_activity and self.reception.engine.status()['phase'] not in
+                ('dispatching','navigating','rerouting','waiting_route','presenting','guest_wait','dwell'))
         self.trace_active_until=0.;self.create_timer(.2,self.capture_reception_trace)
         self.create_subscription(String,'/p2_nav/door_observations',self.on_door_observation,10)
         from reception_doors import DoorOverlay
@@ -235,7 +238,7 @@ class Console(Node):
         self.reception.decisions.bind(document)
         from reception_door_worker import accept_rows
         accept_rows(self.reception.decisions,document,rows,time.monotonic())
-    def publish_reception_map(self,document,force=False):
+    def publish_reception_map(self,document):
         import copy
         base=self.grid
         if base is None or not hasattr(self,'door_overlay') or document['map_id']!=self.reception.map_id():return
@@ -244,12 +247,6 @@ class Console(Node):
         key=(self.map_revision,self.map_observations.revision,tuple(sorted(states.items())),tuple((d['id'],d['x'],d['y'],d['width'],d['yaw'])for d in document['doors']),json.dumps(annotations,sort_keys=True))
         with self._overlay_lock:
             if key==self._overlay_key:return
-            # Coalesce background learning into at most one full map/s update.
-            # Real scan marking/clearing remains independent and immediate;
-            # authored lines, door changes and a new base bypass this throttle.
-            structural=(key[0],*key[2:]);now=time.monotonic()
-            if (not force and getattr(self,'_observed_structural',None)==structural and
-                    now-getattr(self,'_observed_publish_at',-float('inf'))<1.):return
             q=base.info.origin.orientation
             grid={'revision':self.map_revision,'width':base.info.width,'height':base.info.height,'resolution':base.info.resolution,
                   'origin':[base.info.origin.position.x,base.info.origin.position.y],'cells':base.data}
@@ -261,7 +258,6 @@ class Console(Node):
                 cells,authored=self.annotation_layer.apply(dict(grid,cells=cells),annotations);report.update(authored)
             msg=copy.deepcopy(base);msg.data=cells
             self.navigation_grid=msg;self.overlay_revision+=1;self.overlay_report=report;self._overlay_key=key
-            self._observed_structural=structural;self._observed_publish_at=now
             self.reception_map.publish(msg)
             # Preserve the saved map's EXTERIOR unknown boundary after live obstacle
             # clearing. A long laser ray is not evidence of navigable floor
@@ -882,14 +878,15 @@ class Console(Node):
     def reception_save(self,data):
         if not isinstance(data,dict):raise ValueError('导览配置必须是对象')
         operation=data.get('operation','save')
-        if operation in ('map_observations','map_observations_reset'):
+        if operation in ('map_observations','map_observations_reset','map_observations_merge'):
             if data.get('map_id')!=self.map_name or self.grid is None:raise ValueError('请先载入所选导航地图')
             if operation=='map_observations':self.map_observations.set_enabled(data['enabled'])
+            elif operation=='map_observations_merge':self.map_observations.request_merge()
             else:
                 self.map_library.snapshot(self.map_name,'before_observed_map_reset')
                 self.map_observations.set_enabled(False)
                 self.map_observations.reset()
-                self.publish_reception_map(self.reception.observation_document(),force=True)
+                self.publish_reception_map(self.reception.observation_document())
             return self.map_observations.status()
         if operation.startswith('bundle_') or operation in ('map_raster','map_snapshot'):
             self.map_observations.flush(force=True)

@@ -18,7 +18,7 @@ async function page(html,embedded=false,fixture=input.fixture,overrides={},autoE
    if(String(url).endsWith('/api/stop')){stops.push(q);return response({stopped:true})}
    if(r?.operation==='read')return response({document:catalog,voice:{}});
    if(r?.operation==='map_raster')return{ok:false,json:async()=>({error:'synthetic fixture has no raster'})};
-   if(['map_observations','map_observations_reset'].includes(r?.operation)){mapOperations.push(structuredClone(r));liveStatus.reception={...liveStatus.reception,map_observations:r.operation==='map_observations'?{enabled:r.enabled,cleared_cells:7}:{enabled:false,cleared_cells:0}};return response(liveStatus.reception.map_observations)}
+   if(['map_observations','map_observations_reset','map_observations_merge'].includes(r?.operation)){mapOperations.push(structuredClone(r));liveStatus.reception={...liveStatus.reception,map_observations:r.operation==='map_observations'?{enabled:r.enabled,cleared_cells:7,pending_cells:3}:r.operation==='map_observations_merge'?{enabled:false,cleared_cells:7,pending_cells:3,merge_requested:true}:{enabled:false,cleared_cells:0,pending_cells:0}};return response(liveStatus.reception.map_observations)}
    assert.equal(r?.operation,'save','Only content saving is allowed in editor fixture');requests.push(structuredClone(q));
    if(hold)await new Promise(resolve=>release=resolve);
    catalog=structuredClone(r.document);catalog.revision++;
@@ -44,8 +44,10 @@ async function page(html,embedded=false,fixture=input.fixture,overrides={},autoE
   update.checked=false;update.dispatchEvent(new mapPage.dom.window.Event('change',{bubbles:true}));
   await mapPage.until(()=>mapPage.mapOperations.length===1);await mapPage.poll();
   assert.equal(mapPage.mapOperations[0].enabled,false);assert.match(mapPage.d.getElementById('observedMapStatus').textContent,/暂停.*7/);
-  mapPage.d.getElementById('resetObservedMap').click();await mapPage.until(()=>mapPage.mapOperations.length===2);await mapPage.poll();
-  assert.equal(mapPage.mapOperations[1].operation,'map_observations_reset');assert.match(mapPage.d.getElementById('observedMapStatus').textContent,/暂停.*0/);
+  mapPage.d.getElementById('mergeObservedMap').click();await mapPage.until(()=>mapPage.mapOperations.length===2);await mapPage.poll();
+  assert.equal(mapPage.mapOperations[1].operation,'map_observations_merge');assert.match(mapPage.d.getElementById('observedMapStatus').textContent,/已安排空闲/);
+  mapPage.d.getElementById('resetObservedMap').click();await mapPage.until(()=>mapPage.mapOperations.length===3);await mapPage.poll();
+  assert.equal(mapPage.mapOperations[2].operation,'map_observations_reset');assert.match(mapPage.d.getElementById('observedMapStatus').textContent,/暂停.*0/);
   assert.equal(mapPage.requests.length,0);assert.equal(mapPage.missions.length,0);assert.equal(mapPage.stops.length,0);
   results.push({variant,case:'map_auto_update_pause_and_versioned_reset_without_navigation_actions',passed:true});mapPage.close();
   const left={operator_verified:true,operator_mode:'navigation_allowed',navigation_permitted:true};
