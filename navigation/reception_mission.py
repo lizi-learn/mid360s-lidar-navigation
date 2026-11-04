@@ -360,7 +360,15 @@ class MissionService:
             if len(points)>1:
                 data['_route_goals']=poses
             starting_generation=self.node.session.generation if command.get('source_recovery')else None
-            result = self.node.set_goal(data)
+            try:
+                result = self.node.set_goal(data)
+            except ValueError as plan_error:
+                from heading_recovery import no_route, plan_after_turn
+                if (getattr(self.node, 'gait_profile', None) != 'p2-flat-model' or
+                        command.get('source_recovery') or not no_route(plan_error)):
+                    raise
+                result = plan_after_turn(self.node, self.engine, epoch, data, plan_error)
+                if result is None:return
             # Allow the existing observations/lifecycle to finish initializing.
             # Do not change freshness requirements or resume after takeover.
             deadline=time.monotonic()+8.
