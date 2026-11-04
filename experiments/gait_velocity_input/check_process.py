@@ -105,7 +105,23 @@ def scenario(args):
             assert abs(transport.status()['velocity'][0]-.5)<1e-6;result['stick_manual_priority']=True
             control(activity=False,mode=3);wait(lambda:transport.status()['operator_mode']==3 and not transport.status()['force_zero']);result['right_factory_manual']=True
             control(mode=1);time.sleep(.1);rearm(4);control(native=False)
-            wait(lambda:transport.status()['cancel_pending']and not transport.status()['navigation_owned']);result['original_native_expiry_revokes']=True
+            # Only the original receiver producer pauses. ROS health and
+            # command evaluations keep arriving with their own real stamps.
+            time.sleep(.06);original_stamp=transport.operator_authority()['stamp']
+            while time.monotonic()-original_stamp<1.:
+                status=transport.status();authority=transport.operator_authority()
+                assert status['navigation_owned']and not status['cancel_pending']
+                assert authority['verified']and authority['connected']and authority['stamp']==original_stamp
+                assert authority['reply_stamp']is None
+                time.sleep(.01)
+            result['snapshot_and_native_loop_hold_original_sample_through_one_second']=True
+            wait(lambda:transport.status()['cancel_pending']and not transport.status()['navigation_owned'],3.)
+            expired=transport.status();assert expired['native_source_age_ms']>2000.
+            result['original_native_expiry_revokes']=True
+            result['native_expiry_observed_age_ms']=expired['native_source_age_ms']
+            control(native=True);wait(lambda:transport.status()['readiness']&128)
+            assert not transport.status()['navigation_owned']
+            result['native_recovery_never_auto_rearms']=True
             # Close the actual parent lifeline without an orderly worker RPC.
             os.close(transport.lifeline);transport.lifeline=None;transport.process.wait(timeout=3)
             assert transport.process.returncode==0;result['parent_exit_closes_native_socket']=True

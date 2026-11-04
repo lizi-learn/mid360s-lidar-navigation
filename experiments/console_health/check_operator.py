@@ -32,7 +32,11 @@ try:
         node.simulation_operator(dict(mode='manual'));time.sleep(.06);assert node.session_state()['operator_mode']=='manual'
         node.simulation_operator(dict(mode='navigation_allowed',connected=False));time.sleep(.06);assert not node.session_state()['navigation_permitted']
         node.simulation_operator(dict(mode='navigation_allowed'));time.sleep(.06);assert node.session_state()['navigation_permitted']
-        node.virtual_stop.set();node.virtual_thread.join(timeout=1.);stamp=node.session.source_time;time.sleep(.13)
+        node.virtual_stop.set();node.virtual_thread.join(timeout=1.);stamp=node.session.source_time
+        while time.monotonic()-stamp<1.:
+            assert node.session.source_time==stamp and node.session_state()['navigation_permitted']
+            time.sleep(.01)
+        while time.monotonic()-stamp<=node.session.authority_timeout+.03:time.sleep(.01)
         assert node.session.source_time==stamp and not node.session_state()['navigation_permitted'],'Stopped source was renewed by status reads'
     print(json.dumps(dict(passed=True,expected_original_failure=a.expect_old_failure,lost_samples=lost,source_stamps_advance_independently=not a.expect_old_failure,original_expiry_preserved=True,hardware_commands=0,scope='Actual Console simulation producer, no navigation workflow or actuator access')))
 finally:

@@ -21,15 +21,19 @@ def scenario(binary,commissioned):
                 try:source.connect(path+'.operator');return True
                 except (FileNotFoundError,ConnectionRefusedError):return False
             wait(connected)
-            state={'mode':1,'activity':False,'pause':False,'instance':40,'stale_command':False,'target':(.4,0.,0.)}
+            state={'mode':1,'activity':False,'pause':False,'instance':40,'stale_command':False,'target':(.4,0.,0.),'last_native_ns':0}
+            paused=threading.Event()
             def publish():
                 seq=0
                 while not stopping.is_set():
                     if not state['pause']:
                         seq+=1;flags=3|(4 if state['activity'] else 0)
-                        packet=NATIVE.pack(0x4e4f5031,1,state['instance'],seq,time.monotonic_ns(),time.time_ns()//1000,state['mode'],flags,
+                        state['last_native_ns']=time.monotonic_ns()
+                        packet=NATIVE.pack(0x4e4f5031,1,state['instance'],seq,state['last_native_ns'],time.time_ns()//1000,state['mode'],flags,
                             .5 if state['activity'] else 0.,0.,0.,0)
                         source.send(packet)
+                        paused.clear()
+                    else:paused.set()
                     if transport:
                         stamp=time.monotonic_ns()
                         transport.update({'evaluated_monotonic_ns':stamp,'data_fresh':True,'calibration_ready':True,'ground_ok':True,'localized':True,'command':state['target'],'body_velocity_feedback':(0.,0.,0.),'velocity_source_monotonic_ns':stamp},True)
@@ -81,7 +85,17 @@ def scenario(binary,commissioned):
             transport.acknowledge_cancel();wait(lambda:not transport.feedback.cancel_pending);wait(transport.ready)
             transport.arm(103);wait(lambda:transport.feedback.navigation_owned)
             state['pause']=True
-            wait(lambda:transport.feedback and transport.feedback.cancel_pending and not transport.feedback.navigation_owned)
+            assert paused.wait(1.),'Source publisher did not acknowledge pause'
+            original_stamp=state['last_native_ns']
+            wait(lambda:transport.feedback.native_stamp==original_stamp)
+            while time.monotonic_ns()-original_stamp<1_000_000_000:
+                assert transport.feedback.navigation_owned and not transport.feedback.cancel_pending
+                assert transport.feedback.native_stamp==original_stamp
+                time.sleep(.01)
+            result['original_sample_gap_160ms_through_one_second_keeps_ownership']=True
+            wait(lambda:transport.feedback and transport.feedback.cancel_pending and not transport.feedback.navigation_owned,timeout=2.)
+            assert transport.feedback.native_stamp==original_stamp
+            assert transport.status()['native_source_age_ms']>2000.
             result['native_source_expiry_cannot_be_restamped_by_rpc']=True
             state['pause']=False;transport.stop();wait(lambda:transport.feedback.operator_verified)
             transport.acknowledge_cancel();wait(lambda:not transport.feedback.cancel_pending);wait(transport.ready)
