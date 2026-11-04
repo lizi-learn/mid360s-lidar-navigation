@@ -13,17 +13,17 @@ class NativeInputModelTests(unittest.TestCase):
     def tearDownClass(cls):cls.tmp.cleanup()
     def model(self):
         model=NativeInputModel(self.library);self.addCleanup(model.close);return model
-    def test_single_curve_after_scale_uses_same_initial_jerk(self):
+    def test_forward_curve_after_scale_and_original_yaw_slew(self):
         full=self.model();half=self.model();now=10**9
         for i in range(25):
             stamp=now+i*20_000_000;a=full.step((.75,.8),(0.,0.),.02,stamp,stamp);b=half.step((.375,.4),(0.,0.),.02,stamp,stamp)
         self.assertAlmostEqual(a[0],.05);self.assertAlmostEqual(b[0],.05)
-        self.assertAlmostEqual(a[1],.25-1./48.);self.assertAlmostEqual(b[1],.25-1./48.)
+        self.assertAlmostEqual(a[1],.25);self.assertAlmostEqual(b[1],.25)
     def test_unclassified_zero_immediately_resets_like_production(self):
         m=self.model()
         for i in range(60):m.step((.75,.8),(0.,0.),.02,10**9,10**9)
         self.assertEqual(m.step((0.,0.),(.4,.3),.02,10**9,10**9),(0.,0.))
-        self.assertEqual(m.step((.75,.8),(0.,0.),.02,10**9,10**9),(.00008,.0012))
+        self.assertEqual(m.step((.75,.8),(0.,0.),.02,10**9,10**9),(.00008,.01))
     def test_original_feedback_expiry_and_takeover_are_not_refreshed(self):
         m=self.model();self.assertEqual(m.step((.75,.8),(0.,0.),.02,10**9,1_600_000_000),(0.,0.));self.assertEqual(m.reason,2)
         self.assertEqual(m.step((.75,.8),(0.,0.),.02,10**9,10**9,owned=False),(0.,0.))

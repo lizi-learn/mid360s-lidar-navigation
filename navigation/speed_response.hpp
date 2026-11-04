@@ -20,11 +20,12 @@ enum SpeedTrackingReason : std::uint32_t {
   speed_invalid_input=3, speed_overspeed=4
 };
 class SpeedResponse {
-  SmoothInputAxis axes_[2];
+  SmoothInputAxis forward_;
+  double yaw_=0.;
   SpeedTrackingState state_{};
  public:
   void reset(){
-    for(auto& axis:axes_)axis.reset();
+    forward_.reset();yaw_=0.;
     state_={};
   }
   const SpeedTrackingState& state()const{return state_;}
@@ -45,18 +46,15 @@ class SpeedResponse {
     state_.target_x=vx;state_.target_yaw=wz;
     state_.measured_x=measured_x;state_.measured_yaw=measured_yaw;
     state_.source_ns=source_ns;state_.valid=1;state_.reason=speed_tracking;
-    // One finite jerk-constrained input trajectory at the original native tick.
-    // Nonzero target changes retain the current derivative. Yaw keeps the
-    // original .5 input/s slope, with a short finite slope transition: a slow
-    // steering filter adds closed-loop phase lag and destabilizes pursuit.
-    // An axis explicitly withdrawn by the controller is zero immediately,
-    // including translation withdrawn for a collision-checked pivot. Such a
-    // zero must not acquire a hidden coast-down tail.
-    const double target[2]={vx,wz}, acceleration[2]={.30,.50}, jerk[2]={.40,6.};
-    if(target[0]==0.)axes_[0].reset();
-    state_.policy_x=axes_[0].step(target[0],dt,acceleration[0],jerk[0]);
-    if(target[1]==0.)axes_[1].reset();
-    state_.policy_yaw=axes_[1].step(target[1],dt,acceleration[1],jerk[1]);
+    // Forward starts and nonzero speed changes use the finite S trajectory.
+    // Keep the original yaw slew exactly: replacing that closed-loop steering
+    // response with a slower filter changes both pursuit and pivot pulse area.
+    // Explicit axis withdrawal keeps the original immediate-zero contract.
+    if(vx==0.)forward_.reset();
+    state_.policy_x=forward_.step(vx,dt,.30,.40);
+    if(wz==0.)yaw_=0.;
+    else yaw_=std::clamp(wz,yaw_-.5*dt,yaw_+.5*dt);
+    state_.policy_yaw=yaw_;
     return state_;
   }
 };
