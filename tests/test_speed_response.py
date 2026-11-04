@@ -11,7 +11,7 @@ int main(){
  double measured=.02, previous=0.;
  // Same manual maximum0.8, exactly one upstream half multiplier.
  // A different measured speed is reported, not mistaken for this input.
- for(int k=0;k<200;++k){
+ for(int k=0;k<400;++k){
   now+=10000000;s=c.step(.8*.5,0.,measured,0.,.01,now-100000000,now,true);
   assert(s.valid&&s.policy_x>=previous&&s.policy_x-previous<=.00400001);
   previous=s.policy_x;
@@ -36,7 +36,7 @@ int main(){
 '''
 class SpeedResponseTests(unittest.TestCase):
  @unittest.skipUnless(shutil.which('g++'),'C++ compiler required')
- def test_manual_half_input_slew_and_immediate_stop(self):
+ def test_manual_half_input_curve_and_immediate_stop(self):
   with tempfile.TemporaryDirectory() as d:
    p=pathlib.Path(d);(p/'test.cpp').write_text(SOURCE)
    subprocess.run(['g++','-std=c++17','-Wall','-Wextra','-Werror','-fsanitize=undefined','-fno-sanitize-recover=all','-I'+str(ROOT/'navigation'),str(p/'test.cpp'),'-o',str(p/'test')],check=True,capture_output=True)

@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include "input_s_curve.hpp"
 
 namespace p2_nav {
 struct SpeedTrackingState {
@@ -19,15 +20,12 @@ enum SpeedTrackingReason : std::uint32_t {
   speed_invalid_input=3, speed_overspeed=4
 };
 class SpeedResponse {
-  double integral_[2]{}, output_[2]{}, filtered_[2]{};
-  double moving_time_[2]{};
-  bool started_[2]{};
-  bool initialized_=false;
+  SmoothInputAxis axes_[2];
   SpeedTrackingState state_{};
  public:
   void reset(){
-    for(unsigned i=0;i<2;++i){integral_[i]=output_[i]=filtered_[i]=moving_time_[i]=0.;started_[i]=false;}
-    initialized_=false;state_={};
+    for(auto& axis:axes_)axis.reset();
+    state_={};
   }
   const SpeedTrackingState& state()const{return state_;}
   SpeedTrackingState step(double vx,double wz,double measured_x,double measured_yaw,
@@ -47,19 +45,14 @@ class SpeedResponse {
     state_.target_x=vx;state_.target_yaw=wz;
     state_.measured_x=measured_x;state_.measured_yaw=measured_yaw;
     state_.source_ns=source_ns;state_.valid=1;state_.reason=speed_tracking;
-    // A zero on takeover, collision or cancellation clears immediately above.
-    // Other input changes are slewed; measured velocity never rescales this
-    // explicit manual-equivalent command or silently multiplies half twice.
-    const double target[2]={vx,wz}, slew[2]={.4,.5};
-    for(unsigned i=0;i<2;++i){
-      if(target[i]==0.)output_[i]=0.;
-      else {
-        const double rate=i==0 && target[i]<output_[i]?.8:slew[i];
-        output_[i]=std::clamp(target[i],output_[i]-rate*dt,output_[i]+rate*dt);
-      }
-    }
-    initialized_=true;
-    state_.policy_x=output_[0];state_.policy_yaw=output_[1];return state_;
+    // One finite jerk-constrained input trajectory at the original native tick.
+    // Ordinary lower targets and changing turn direction retain the current
+    // acceleration. A full zero remains the unclassified collision/cancel stop
+    // contract above; it must never acquire a coast-down tail.
+    const double target[2]={vx,wz}, acceleration[2]={.30,.40}, jerk[2]={.40,.60};
+    state_.policy_x=axes_[0].step(target[0],dt,acceleration[0],jerk[0]);
+    state_.policy_yaw=axes_[1].step(target[1],dt,acceleration[1],jerk[1]);
+    return state_;
   }
 };
 } // namespace p2_nav
