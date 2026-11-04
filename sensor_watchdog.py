@@ -8,7 +8,7 @@ def main():
     while True:
         time.sleep(1)
         try:
-            with opener.open('http://127.0.0.1:'+str(int(os.environ.get('VIEW_PORT','8920')))+'/api/status',timeout=3) as response:s=json.load(response)
+            with opener.open('http://127.0.0.1:'+str(int(os.environ.get('VIEW_PORT','8920')))+'/api/status?summary=1',timeout=3) as response:s=json.load(response)
             seen=seen or s['counts']['imu']>0
             failures=failures+1 if seen and data_stale(s) else 0
             if failures>=3:

@@ -10,11 +10,12 @@ def local_floor(points, center, radius=4., expected_height=0.):
     if len(near)<80:raise ValueError('insufficient nearby ground observations')
     # Low points in XY cells are candidates; high walls and furniture do not vote.
     cells=np.floor((near[:,:2]-np.asarray(center))/.35).astype(int)
-    order=np.argsort(near[:,2]);unique={}
-    for i in order:
-        key=tuple(cells[i])
-        if key not in unique:unique[key]=near[i]
-    candidates=np.asarray(list(unique.values()))
+    order=np.argsort(near[:,2])
+    # Select exactly the same first/lowest point and preserve the old insertion
+    # order. Avoid a Python tuple/dictionary operation for every nearby return;
+    # the unchanged order also preserves the seeded RANSAC samples below.
+    _,first=np.unique(cells[order],axis=0,return_index=True)
+    candidates=near[order[np.sort(first)]]
     # Restrict to the expected ground band in the already gravity-levelled frame.
     candidates=candidates[(candidates[:,2]>expected_height-.45)&(candidates[:,2]<expected_height+.45)]
     if len(candidates)<25:raise ValueError('nearby ground is not sufficiently observed')

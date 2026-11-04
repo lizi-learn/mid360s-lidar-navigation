@@ -53,7 +53,7 @@ class FootprintTests(unittest.TestCase):
   stop=c['collision_monitor']['ros__parameters']['StopZone']['points']
   self.assertGreaterEqual(max(p[0] for p in global_shape),max(stop[::2]));self.assertGreaterEqual(max(p[1] for p in global_shape),max(stop[1::2]))
   self.assertLess(max(p[1] for p in local_shape),max(p[1] for p in global_shape))
-  smoother=c['velocity_smoother']['ros__parameters'];self.assertEqual(smoother['max_velocity'][1],0.);self.assertEqual(smoother['min_velocity'][0],0.);self.assertLessEqual(smoother['max_accel'][2],.5)
+  smoother=c['velocity_smoother']['ros__parameters'];self.assertEqual(smoother['max_velocity'][1],0.);self.assertEqual(smoother['min_velocity'][0],0.);self.assertEqual(smoother['max_accel'][2],.5);self.assertEqual(config()['velocity_smoother']['ros__parameters']['max_accel'][2],.5)
   self.assertFalse(c['controller_server']['ros__parameters']['FollowPath']['allow_reversing'])
   self.assertEqual(smoother['max_velocity'][0],.8);self.assertEqual(c['controller_server']['ros__parameters']['FollowPath']['desired_linear_vel'],.8)
   self.assertGreaterEqual(max(stop[::2]),1.0)

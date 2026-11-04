@@ -1,0 +1,494 @@
+{
+  "base_commit": "a55634c81f2b37ff261c6b075f58fd141b807e7a",
+  "unit_tests": 387,
+  "regression_before": {
+    "cases": 8,
+    "failed": 7,
+    "scope": "Baseline task/audio/heading regressions; original failures retained"
+  },
+  "progress": {
+    "passed": true,
+    "baseline_pivot_timeout_reproduced": true,
+    "measured_pivot_passed": true,
+    "stationary_timeout_preserved": true,
+    "jitter_timeout_preserved": true,
+    "translation_preserved": true,
+    "timeout_s": 40,
+    "radius_m": 0.1,
+    "angle_rad": 0.1,
+    "clock": "explicit synthetic ROS test clock, not sensor stamps",
+    "hardware_commands": 0
+  },
+  "native_flow": {
+    "passed": true,
+    "cases": [
+      {
+        "case": "native_heading_then_same_product_twice_guest_continue_dwell_return",
+        "passed": true,
+        "first_yaw_error": 0.024493219413448286,
+        "actual_playback_processes": 2,
+        "guest_wait_held": true,
+        "dwell_observed": true,
+        "audio_scope": "Synthetic silent WAV and fake paplay; not a physical speaker test"
+      }
+    ],
+    "final_pose": [
+      2.1466139171371785,
+      2.501840541389977,
+      -3.1121922170779004
+    ],
+    "truth": {
+      "loop_profile": {
+        "step_gap_max_ms": 24.610115999621485,
+        "sense_work_max_ms": 5.680279999978666
+      },
+      "pose": [
+        2.1659151134006085,
+        2.5251813261765914,
+        3.1700592843169244
+      ],
+      "collision_attempts": 0,
+      "controls": {
+        "control_id": "",
+        "drop_scan": false,
+        "drop_odom": false,
+        "ground_ok": true,
+        "pause": false,
+        "obstacle": null,
+        "doors": []
+      },
+      "travelled_m": 3.1953147673443785,
+      "command": [
+        0.0,
+        0.0
+      ],
+      "elapsed_s": 76.50851646499996,
+      "simulation": "planar kinematics + ray-cast scan; not a humanoid dynamics validation"
+    },
+    "elapsed_s": 77.85283552100009,
+    "stop_profile": "baseline-directional",
+    "obstacle_offset": 0.0,
+    "fixture_seed": 0,
+    "amcl_seed": "Nav2 default; stochastic localization is not forced to match one successful run",
+    "hardware_commands": 0,
+    "interfaces": [
+      "lo"
+    ],
+    "source_sha": {
+      "navigation/console.py": "091c26754f32e41b3b94c8cfccaf5343c71e8da26d955cbdc17a075d046fdce1",
+      "navigation/reception_mission.py": "39c4081fa6aba5c164e7136ba624b4bee651483ab879ee74e14d26e8da822837",
+      "navigation/reception_doors.py": "42a5d3698d7378039442e028fe365f6cd9e9899fbd6f26c54e62ef401d758ef3",
+      "navigation/sim_world.py": "a9be636c11f1a4f411f1302ecc86842fc0bfc0ca29d9b3d093cdb28a6fcbc902"
+    },
+    "scope": "Actual Console, ROS2/Nav2 actions and projected-ray plant, unchanged55cm full-body model. No RL or physical robot acceptance.",
+    "curved_forward_receipts": 2
+  },
+  "voice": {
+    "passed": true,
+    "cases": [
+      "background_cache_subprocess",
+      "playback_completion_and_volume",
+      "worker_restart_no_replay",
+      "interrupt_reconnect_no_replay",
+      "missing_not_success",
+      "four_visits_same_content_actual_playback_and_continue"
+    ],
+    "hardware_commands": 0,
+    "scope": "Actual subprocesses and 0.5s silent synthetic WAV; fake paplay. Not subjective speech or physical speaker proof."
+  },
+  "failures_retained": [
+    {
+      "case": "Fast DDS reception integration",
+      "result": "Cancelled after fresh scan/odom observations stopped arriving; plant step gap max41.3ms and sense work max5.95ms",
+      "limit": "One comparison is insufficient to establish transport root cause. Production DDS unchanged."
+    },
+    {
+      "case": "Discarded first rotation plugin build",
+      "result": "Runtime undefined tf2 symbol, repaired with definition include; final link uses no-undefined and native comparison passed"
+    },
+    {
+      "case": "First local harness launch",
+      "result": "Domain235 exceeded Fast DDS UDP port range; corrected local test domain225"
+    },
+    {
+      "case": "Frozen predicted headings as mandatory intermediate poses",
+      "result": "Found15 swept intrusion samples; rejected. Search centre exclusions, position-only final-pivot fallback and behind-goal candidates did not complete this overconstrained segment; none deployed.",
+      "resolution": "Distinguish action-free transit from final arrival heading, use filled sweep verification; complete12point route passes."
+    },
+    {
+      "case": "CI41592102396 of759318b",
+      "result": "3/4 jobs passed; native pivots could not load SimpleProgressChecker after RPP because inheriting and linking an upstream plugin preloaded its factory through DT_NEEDED.",
+      "resolution": "Independent measured-progress implementation removes plugin-to-plugin linkage; selected progress plugin is now used by native fixture.204 pure-yaw cases and obstacle/cancel checks pass locally. Exact-source CI pending."
+    },
+    {
+      "case": "Production-profile UDP before recovery fix",
+      "result": "Mission/session executing with a path while gate stayed disarmed at the revoked generation. Original stale-source revocation was correct; failure to coordinate a newer authorization caused permanent zero.",
+      "resolution": "Persistent fault generation, real cancel receipts, source-health wait, remaining-route replan and renewed existing handshake. Original source and time criteria retained."
+    },
+    {
+      "case": "CI41596706396",
+      "result": "Run cancelled after15minutes;3jobs successful, controller job not declared passed. CI budget expanded to25minutes for the added native workflows; no test removed.",
+      "scope": "CI execution budget only; navigation wait policy unchanged."
+    }
+  ],
+  "unresolved": [
+    "No new full physical office roundtrip has run; historical route deviation, endpoint turning and planning failures remain field regression cases.",
+    "No physical gait, motor, neck, battery or bus command issued."
+  ],
+  "source_sha": {
+    "navigation/console.py": "904982fbd90d6dd090b354481a6039ec9f3b0fba62e6cd7ba7e873e89f1cad78",
+    "navigation/reception_mission.py": "39c4081fa6aba5c164e7136ba624b4bee651483ab879ee74e14d26e8da822837",
+    "navigation/reception_doors.py": "42a5d3698d7378039442e028fe365f6cd9e9899fbd6f26c54e62ef401d758ef3",
+    "navigation/sim_world.py": "a9be636c11f1a4f411f1302ecc86842fc0bfc0ca29d9b3d093cdb28a6fcbc902"
+  },
+  "controller_sources_sha": {
+    "navigation/p2_nav_controller/p2_nav_controller.xml": "a110d8d4af9c558355523b3dbbef5e313f61b0811e327f77a0393a42b84acff4",
+    "navigation/p2_nav_controller/p2_nav_planner.xml": "cf99b75d8bc2c9c61c1e35cddaca523638c8d3e733b83ec16b4301af3d820207",
+    "navigation/p2_nav_controller/CMakeLists.txt": "ce8ae71698403cbb8a2b725efeb997c70ee920f44961afc7147efc4e90544189",
+    "navigation/p2_nav_controller/p2_nav_goal_checker.xml": "43129303f1367dd85f100ccea21b988d5a16107c1dfb968609e0efd15d45e30b",
+    "navigation/p2_nav_controller/package.xml": "04b680a0c613219ce298321da1bcbfc8ab7e3a6ac0b3fe080c9d9d3907d4ad68",
+    "navigation/p2_nav_controller/p2_nav_progress_checker.xml": "ffabf8ac37dec43dbee8d4c5fbcb03e3647b34b1531513e5339ce8dec41b8e6d",
+    "navigation/p2_nav_controller/include/p2_nav_controller/terminal_heading.hpp": "9e44297249c60352f35f8478eb3906db6610df779d6241e02ef44b82658b056e",
+    "navigation/p2_nav_controller/include/p2_nav_controller/settled_arrival.hpp": "a72de111b652343cd3c5df137d15aa3392d5a6753173e167d811974edb552b3a",
+    "navigation/p2_nav_controller/include/p2_nav_controller/filled_footprint.hpp": "b8dae3285cabcce8a740ec3c5745da3f2f7a48e149da5727c478af33fc6469dc",
+    "navigation/p2_nav_controller/include/p2_nav_controller/curved_forward.hpp": "b1457f8eecab369b05ee37593403f4f399c47a97552fdb25e068c91afdb86658",
+    "navigation/p2_nav_controller/include/p2_nav_controller/settled_pivot.hpp": "15a5b908ef75ba0743c74e362c2b84ca209beebfc424beae74efd4e4ba7c393a",
+    "navigation/p2_nav_controller/include/p2_nav_controller/terminal_path.hpp": "bc0819893e5b20391889578144d70c5784a0ac2502eadc2111f5b34a61234c11",
+    "navigation/p2_nav_controller/include/p2_nav_controller/reference_goal.hpp": "a2e49870901f26ab9bddf0e7d9c80bbf88b0493d2a8c0e5af9205bc458975e32",
+    "navigation/p2_nav_controller/include/p2_nav_controller/terminal_velocity.hpp": "c31ff0bac992a49e5ec5175ff66bf95258220577f1426625f70c71bc3a3e6ab7",
+    "navigation/p2_nav_controller/include/p2_nav_controller/position_guide.hpp": "1fa15e5e22eff74a10296d89fe2d561417b94d8a9744c056aea5b4652ce90abd",
+    "navigation/p2_nav_controller/include/p2_nav_controller/pivot_breakaway.hpp": "6ca5ac1fde6d8ffaf3d06a461a0bfb70f7efe202b9be36c06a8332fc3e47c4f8",
+    "navigation/p2_nav_controller/include/p2_nav_controller/position_only_lattice.hpp": "7e55970eec820b8504c59be60af5cf2c3056c0be513e98fcb76f848833ef6da0",
+    "navigation/p2_nav_controller/src/settled_goal_rpp.cpp": "2c1c1564233f5b1af4cff0858961ac01fc4d4617409f35c830613440dcb04fac",
+    "navigation/p2_nav_controller/src/rotation_progress_checker.cpp": "7fa47ed85945711d3fb168567a9b12a15e5148f0d1991ca3cf15ff5ec86d5a5b",
+    "navigation/p2_nav_controller/src/observed_collision_monitor.cpp": "6c0b32da82c95aea9808211556cdb6a3cb6001ada98df4d66464328fa90b61fd",
+    "navigation/p2_nav_controller/src/exact_heading_lattice.cpp": "c6160c5cb9b49f87ee955f2bc161ca1652646e7fb8fd814b21c5fb4ac85ec059",
+    "navigation/p2_nav_controller/src/settled_heading_goal_checker.cpp": "390e0d92f84fa0f31eac94fd3fa117c8cc81af9a7a7e234fcf169dcb56d2c0fc",
+    "navigation/p2_nav_controller/src/position_only_lattice.cpp": "53d3f5eea2abcb6ae478dbc6aa34ef5f83f19c7a68f39a222de8d23c0acb4611",
+    "navigation/p2_nav_controller/src/position_goal_checker.cpp": "337c31bdc67809b9894d76150aec4b79a7320ad433a9229d49fc0b7de1e3013e"
+  },
+  "native_flow_note": "Actual four-point route includes a continuous transit before the directed product visit. Final exact-source CI will rerun this case.",
+  "native_route_semantics": {
+    "passed": true,
+    "cases": [
+      {
+        "planned": true,
+        "points": 53,
+        "input_goal_stamp_s": 1793690232.0514145,
+        "path_stamp_s": 1793690237.0514946,
+        "path_age_at_result_s": 6.0788e-05,
+        "seconds": 0.000136367,
+        "case": "transit_same_coordinates_as_final",
+        "body_intrusions": 0,
+        "final_yaw": 0.0,
+        "request_is_final": false
+      },
+      {
+        "planned": true,
+        "points": 132,
+        "input_goal_stamp_s": 1793690232.4723353,
+        "path_stamp_s": 1793690237.4728117,
+        "path_age_at_result_s": 0.000110941,
+        "seconds": 0.000568008,
+        "case": "actual_final_heading",
+        "body_intrusions": 0,
+        "final_yaw": 1.57079632679,
+        "request_is_final": true
+      }
+    ],
+    "hardware_commands": 0,
+    "scope": "Actual RouteDirectedLattice and native parameters on synthetic55cm planar grid. Request header unchanged; same XY alone does not request a final turn."
+  },
+  "filled_body": {
+    "passed": true,
+    "outline_interior_miss_reproduced": true,
+    "filled_obstacle_and_unknown_rejected": true,
+    "empty_rotation_passes": 72,
+    "map_boundary_preserved": true,
+    "footprint_side_m": 0.55
+  },
+  "planner_time": {
+    "passed": true,
+    "cases": 4,
+    "receipt": "local verify-final-group.log"
+  },
+  "frozen_office_directed_route": {
+    "scope": "One asynchronous frozen office map,12 recorded points, synthetic directed final request; not a physical roundtrip or exact live planning snapshot",
+    "before": {
+      "complete": true,
+      "length_m": 46.71494491241246,
+      "total_turn_rad": 40.45850782950935,
+      "full_body_intrusions": 0
+    },
+    "after": {
+      "complete": true,
+      "length_m": 42.98284169858326,
+      "total_turn_rad": 9.446631163874,
+      "full_body_intrusions": 0
+    },
+    "failed_derived_heading_candidate": {
+      "accepted_for_deployment": false,
+      "intrusion_samples": 15,
+      "segment_index": 9
+    },
+    "planner": "RouteDirectedLattice: position-only transit, exact final visit",
+    "source_request_stamps_unchanged": true,
+    "private_map_uploaded": false
+  },
+  "native_pivot_summary": {
+    "1-original_large": {
+      "cases": 12,
+      "failed": 0,
+      "maximum_duration_s": 13.6
+    },
+    "1-half_scale": {
+      "cases": 48,
+      "failed": 0,
+      "maximum_duration_s": 41
+    },
+    "1-sweep_a": {
+      "cases": 72,
+      "failed": 0,
+      "maximum_duration_s": 31.9
+    },
+    "1-sweep_b": {
+      "cases": 72,
+      "failed": 0,
+      "maximum_duration_s": 27.25
+    }
+  },
+  "native_pivot_obstacle_cancel": [
+    {
+      "cohort": "blocked",
+      "candidate": true,
+      "kind": "blocked",
+      "returncode": 0,
+      "goal_reached": false,
+      "error_rad": 0.5615,
+      "duration_s": 8,
+      "goal_accepted": false,
+      "goal_checker": "p2_nav_controller::SettledHeadingGoalChecker",
+      "progress_failed": false,
+      "body_intrusions": 0,
+      "obstacle_verified": true,
+      "collision_stops": 102,
+      "cancelled": false,
+      "post_cancel_nonzero": false,
+      "final_measured_rate": 8.79053259536e-18,
+      "operator_scale": 1,
+      "max_policy_input": 0.5,
+      "settled_pivot_response": true,
+      "movement_time_allowance": 40,
+      "actual_footprint": [
+        [
+          0.27500000596,
+          0.27500000596
+        ],
+        [
+          0.27500000596,
+          -0.27500000596
+        ],
+        [
+          -0.27500000596,
+          -0.27500000596
+        ],
+        [
+          -0.27500000596,
+          0.27500000596
+        ]
+      ],
+      "passed": true
+    },
+    {
+      "cohort": "cancel",
+      "candidate": true,
+      "kind": "cancel",
+      "returncode": 0,
+      "goal_reached": false,
+      "error_rad": 0.5615,
+      "duration_s": 8,
+      "goal_accepted": false,
+      "goal_checker": "p2_nav_controller::SettledHeadingGoalChecker",
+      "progress_failed": false,
+      "body_intrusions": 0,
+      "obstacle_verified": false,
+      "collision_stops": 0,
+      "cancelled": true,
+      "post_cancel_nonzero": false,
+      "final_measured_rate": 8.79053259536e-18,
+      "operator_scale": 1,
+      "max_policy_input": 0.5,
+      "settled_pivot_response": true,
+      "movement_time_allowance": 40,
+      "actual_footprint": [
+        [
+          0.27500000596,
+          0.27500000596
+        ],
+        [
+          0.27500000596,
+          -0.27500000596
+        ],
+        [
+          -0.27500000596,
+          -0.27500000596
+        ],
+        [
+          -0.27500000596,
+          0.27500000596
+        ]
+      ],
+      "passed": true
+    }
+  ],
+  "source_recovery": {
+    "before": {
+      "commit": "d3f80d3e13ced307621b050c6eb63d3127869449",
+      "passed": false,
+      "actual_scan_drop_observed": true,
+      "receipt": "private source-gap-before/report.json retained"
+    },
+    "after": {
+      "passed": true,
+      "cases": [
+        {
+          "case": "actual_scan_gap_cancel_receipt_replan_reauthorize_same_task",
+          "passed": true,
+          "original_generation": 1,
+          "new_generation": 2,
+          "gap_ms": 650.0,
+          "observed_fault_samples": 3,
+          "stopped_samples": 4,
+          "user_start_requests": 1
+        },
+        {
+          "case": "native_heading_then_same_product_twice_guest_continue_dwell_return",
+          "passed": true,
+          "first_yaw_error": 0.057124055533659845,
+          "actual_playback_processes": 2,
+          "guest_wait_held": true,
+          "dwell_observed": true,
+          "audio_scope": "Synthetic silent WAV and fake paplay; not a physical speaker test"
+        }
+      ],
+      "final_pose": [
+        2.1484357885283503,
+        2.494131668671652,
+        3.125751336994903
+      ],
+      "truth": {
+        "loop_profile": {
+          "step_gap_max_ms": 25.400989999980084,
+          "sense_work_max_ms": 5.905343999984325
+        },
+        "pose": [
+          2.1707980465526804,
+          2.5350935864001407,
+          -3.1606618895626104
+        ],
+        "collision_attempts": 0,
+        "controls": {
+          "control_id": "reception-source-restored",
+          "drop_scan": false,
+          "drop_odom": false,
+          "ground_ok": true,
+          "pause": false,
+          "obstacle": null,
+          "doors": []
+        },
+        "travelled_m": 3.2147705486350793,
+        "command": [
+          0.0,
+          0.0
+        ],
+        "elapsed_s": 76.2111716849995,
+        "simulation": "planar kinematics + ray-cast scan; not a humanoid dynamics validation"
+      },
+      "elapsed_s": 77.47335714400106,
+      "stop_profile": "baseline-directional",
+      "obstacle_offset": 0.0,
+      "fixture_seed": 0,
+      "amcl_seed": "Nav2 default; stochastic localization is not forced to match one successful run",
+      "hardware_commands": 0,
+      "interfaces": [
+        "lo"
+      ],
+      "source_sha": {
+        "navigation/console.py": "2c66f39ccb1c69a2f57df74066ad18d50950c6be50387e6a953539ab989f8f06",
+        "navigation/reception_mission.py": "ce37d561df64ee63efdf8065e99f6819b8ce0b5356a9a19d619e043fe27a5e76",
+        "navigation/reception_doors.py": "42a5d3698d7378039442e028fe365f6cd9e9899fbd6f26c54e62ef401d758ef3",
+        "navigation/sim_world.py": "a9be636c11f1a4f411f1302ecc86842fc0bfc0ca29d9b3d093cdb28a6fcbc902"
+      },
+      "scope": "Actual Console, ROS2/Nav2 actions and projected-ray plant, unchanged55cm full-body model. No RL or physical robot acceptance.",
+      "curved_forward_receipts": 2
+    },
+    "production_udp_profile": {
+      "passed": true,
+      "cases": [
+        {
+          "case": "native_heading_then_same_product_twice_guest_continue_dwell_return",
+          "passed": true,
+          "first_yaw_error": 0.013143135462515332,
+          "actual_playback_processes": 2,
+          "guest_wait_held": true,
+          "dwell_observed": true,
+          "audio_scope": "Synthetic silent WAV and fake paplay; not a physical speaker test"
+        }
+      ],
+      "final_pose": [
+        2.1422652434427136,
+        2.5032000968899233,
+        -3.12255501003376
+      ],
+      "truth": {
+        "loop_profile": {
+          "step_gap_max_ms": 82.71070499904454,
+          "sense_work_max_ms": 69.52293099857343
+        },
+        "pose": [
+          2.1627023826774963,
+          2.5358700689963074,
+          3.1566808812562
+        ],
+        "collision_attempts": 0,
+        "controls": {
+          "control_id": "",
+          "drop_scan": false,
+          "drop_odom": false,
+          "ground_ok": true,
+          "pause": false,
+          "obstacle": null,
+          "doors": []
+        },
+        "travelled_m": 3.1868970891319677,
+        "command": [
+          0.0,
+          0.0
+        ],
+        "elapsed_s": 73.71375124800034,
+        "simulation": "planar kinematics + ray-cast scan; not a humanoid dynamics validation"
+      },
+      "elapsed_s": 75.73863065600017,
+      "stop_profile": "baseline-directional",
+      "obstacle_offset": 0.0,
+      "fixture_seed": 0,
+      "amcl_seed": "Nav2 default; stochastic localization is not forced to match one successful run",
+      "hardware_commands": 0,
+      "interfaces": [
+        "lo"
+      ],
+      "source_sha": {
+        "navigation/console.py": "3fb357df183cbbca81a5cc33d2e98f48bd3245ea72d8af7d88549c2ba912374b",
+        "navigation/reception_mission.py": "7610e55f39bc4647ee286c7604d7ddd0bc123aefe494297979be307e4cf4c1d5",
+        "navigation/reception_doors.py": "42a5d3698d7378039442e028fe365f6cd9e9899fbd6f26c54e62ef401d758ef3",
+        "navigation/sim_world.py": "a9be636c11f1a4f411f1302ecc86842fc0bfc0ca29d9b3d093cdb28a6fcbc902"
+      },
+      "scope": "Actual Console, ROS2/Nav2 actions and projected-ray plant, unchanged55cm full-body model. No RL or physical robot acceptance.",
+      "curved_forward_receipts": 1
+    },
+    "udp_profile_sha256": "7ea5d3f98e0bd15680a6d6fde92edc233c12220386226b35639e8e209f0f8f86",
+    "scope": "Same authorized task: actual stop/cancel, original health recovery, replan and newer authorization. No source timestamp changes or driver/policy restart. Simulation only.",
+    "pause_regression": "Pause during a replacement plan preserves only remaining route references and removes the old automatic-recovery deadline before explicit Continue."
+  },
+  "latest_ci": "pending exact source revision"
+}

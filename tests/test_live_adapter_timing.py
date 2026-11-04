@@ -2,13 +2,14 @@
 Fresh source poses retain their original stamps; polling a cached pose is not
 new evidence, and expiration/invalid data must suppress TF output.
 """
-import ast,json,math,sys,threading,unittest
+import ast,json,math,sys,threading,time,unittest
 from pathlib import Path
 from types import SimpleNamespace as NS
 import numpy as np
 from scipy.spatial.transform import Rotation
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'navigation'))
 from odometry_velocity import PlanarVelocity
+from pose_history import PoseHistory
 from navigation_reference import reference_status
 
 def vector():return NS(x=0.,y=0.,z=0.)
@@ -25,16 +26,17 @@ class String:
     def __init__(self):self.data=''
 p=Path(__file__).resolve().parents[1]/'navigation/live_adapter.py'
 cls=next(n for n in ast.parse(p.read_text()).body if isinstance(n,ast.ClassDef) and n.name=='Adapter')
-scope={'np':np,'math':math,'json':json,'Rotation':Rotation,'Bool':Bool,'String':String,'TransformStamped':transform,'Odometry':odometry,'reference_status':reference_status}
+scope={'np':np,'math':math,'json':json,'time':time,'Rotation':Rotation,'Bool':Bool,'String':String,'TransformStamped':transform,'Odometry':odometry,'reference_status':reference_status}
 exec(compile(ast.Module(body=[cls],type_ignores=[]),str(p),'exec'),scope)
 
 class AdapterTimingTests(unittest.TestCase):
     def fixture(self):
-        n=scope['Adapter'].__new__(scope['Adapter']);n.lock=threading.Lock();n.body_reference=None;n.reference_fault='';n.previous=None
+        n=scope['Adapter'].__new__(scope['Adapter']);n.lock=threading.Lock();n.odom=None;n.pose_history=PoseHistory();n.body_reference=None;n.reference_fault='';n.previous=None
         n.rotation=np.eye(3);n.initial_height=0.;n.velocity=PlanarVelocity();n.published_odom_stamp=None
         n.alignment_mtime=1;n.alignment_path=NS(stat=lambda:NS(st_mtime_ns=1));n.now=1.01
         n.navigation_reference='lidar_projection';n.references=[];n.reference_pub=NS(publish=n.references.append)
         n.sink=NS(get_clock=lambda:NS(now=lambda:NS(nanoseconds=round(n.now*1e9))))
+        n.source=n.sink
         n.transforms=[];n.odometry=[];n.ground=[];n.status=[]
         n.tf=NS(sendTransform=n.transforms.append);n.odom_pub=NS(publish=n.odometry.append);n.ground_pub=NS(publish=n.ground.append);n.status_pub=NS(publish=n.status.append)
         self.sample(n,1.,0.);n.tick();return n
@@ -73,5 +75,13 @@ class AdapterTimingTests(unittest.TestCase):
         n.on_odom(odometry(1.3,.03));n.now=1.31;n.tick()
         self.assertEqual(len(n.transforms),2);self.assertEqual(n.transforms[-1].header.stamp,n.odom.header.stamp)
         self.assertEqual(n.processed_stamp,1.2)
+
+    def test_receive_diagnostics_cannot_renew_original_cloud_stamp(self):
+        n=self.fixture();self.sample(n,1.2,.02);n.now=1.35
+        msg=NS(header=header(1.2));n.on_cloud(msg)
+        self.assertIs(n.cloud,msg);self.assertAlmostEqual(n.cloud_received[1],.15)
+        self.assertEqual(n.cloud.header.stamp,header(1.2).stamp)
+        n.now=1.71;n.tick()
+        self.assertEqual(len(n.odometry),0);self.assertFalse(n.ground[-1].data)
 
 if __name__=='__main__':unittest.main()

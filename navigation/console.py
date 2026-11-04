@@ -12,10 +12,12 @@ from geometry_msgs.msg import PoseStamped,PoseWithCovarianceStamped,Twist
 from nav_msgs.msg import OccupancyGrid,Path as RosPath
 from sensor_msgs.msg import LaserScan
 from nav2_msgs.action import NavigateToPose,ComputePathToPose,NavigateThroughPoses,ComputePathThroughPoses
-from nav2_msgs.msg import SpeedLimit,CollisionMonitorState,CostmapFilterInfo,BehaviorTreeLog
+from nav2_msgs.msg import SpeedLimit,CollisionMonitorState,CostmapFilterInfo,BehaviorTreeLog,Costmap
 from slam_toolbox.srv import SerializePoseGraph
 from nav2_msgs.srv import SaveMap
 from lifecycle_msgs.srv import GetState
+from rcl_interfaces.srv import SetParametersAtomically
+from rcl_interfaces.msg import Parameter,ParameterValue,ParameterType
 from std_msgs.msg import String
 from tf2_ros import Buffer,TransformListener
 from map_persistence import configure_save_request,validate_map_metadata
@@ -25,14 +27,37 @@ from urllib.parse import urlsplit,parse_qs
 ROOT=Path(__file__).resolve().parent
 SAFE_NAME=re.compile(r'[A-Za-z0-9_-]{1,48}\Z')
 
+class GateHealthNode(Node):
+    def __init__(self,consume):
+        super().__init__('navigation_workflow_health_forwarder')
+        # A dedicated executor receives only original gate evaluations. It must
+        # not queue behind path/map callbacks or a shared executor worker pool.
+        self.create_subscription(String,'/p2_nav/gate_status',consume,1)
+
+
+class ConsoleExecutors:
+    def __init__(self,node):
+        self.node=node
+        self.work=SingleThreadedExecutor();self.work.add_node(node)
+        self.health=SingleThreadedExecutor();self.health.add_node(node.health_node)
+        self.health_thread=threading.Thread(target=self.health.spin,daemon=True,name='original_gate_evaluations')
+    def spin(self):
+        self.health_thread.start()
+        self.work.spin()
+    def shutdown(self):
+        self.work.shutdown();self.health.shutdown()
+        self.health_thread.join(timeout=3.)
+        self.node.health_node.destroy_node()
+
+
 class Console(Node):
     def __init__(self,runtime,simulation,minimum_speed,footprint=None,odometry_model='differential',gait_profile='generic',gait_socket=''):
         super().__init__('navigation_workflow_console')
         self.gait=None
         if gait_socket:
             if simulation:raise ValueError('Physical gait transport requires a separate explicit contract fixture, never normal simulation')
-            from gait_transport import GaitTransport
-            self.gait=GaitTransport(gait_socket,trace_path=runtime/'gait-velocity.private.jsonl')
+            from gait_transport_process import GaitTransportProcess
+            self.gait=GaitTransportProcess(gait_socket,trace_path=runtime/'gait-velocity.private.jsonl')
         self.robot_name=None;self.runtime=runtime;self.simulation=simulation;self.mode='idle';self.controller='rpp';self.process=None
         from audio_feedback import AudioSettings
         self.audio=AudioSettings(runtime/'audio-settings.json')
@@ -47,7 +72,11 @@ class Console(Node):
         self.collision_stop=False;self.path_revision=0;self.obstacle_path_revision=0
         self.bt_goal_source_ns=0;self.bt_recovery_report={}
         self.virtual_operator=None;self.virtual_sequence=0;self.virtual_source=secrets.randbits(63)+1
+        self.virtual_stop=threading.Event();self.virtual_thread=None
         self.request_token=secrets.token_urlsafe(24)
+        from flight_recorder import FlightRecorder
+        self.flight=FlightRecorder(runtime/'planning-evidence.private.jsonl.gz')
+        self.flight_costmap_at=0.
         self.navigation_grid=None;self.overlay_revision=0;self.overlay_report={};self._overlay_key=None;self._overlay_lock=threading.Lock()
         self.speed_value=.8 if gait_profile=='p2-flat-model' else min(.20,self.maximum_speed)
         self.velocity_scale=.5 if gait_profile=='p2-flat-model' else 1.
@@ -56,12 +85,14 @@ class Console(Node):
         self.keepout_mask=self.create_publisher(OccupancyGrid,'/p2_nav/keepout_mask',qos)
         self.keepout_info=self.create_publisher(CostmapFilterInfo,'/p2_nav/keepout_filter_info',qos)
         self.create_subscription(OccupancyGrid,'/map',self.on_map,qos)
+        self.create_subscription(RosPath,'/plan',self.record_source_path,10)
+        self.create_subscription(Costmap,'/global_costmap/costmap_raw',self.record_source_costmap,10)
         if self.gait:self.create_subscription(String,'/p2_nav/path_view',self.on_path_view,10)
         else:self.create_subscription(RosPath,'/plan',self.on_path,10)
         self.create_subscription(CollisionMonitorState,'/p2_nav/collision_state',self.on_collision,10)
         self.create_subscription(BehaviorTreeLog,'/behavior_tree_log',self.on_bt_log,10)
         self.create_subscription(String,'/p2_nav/operator_authority',self.on_authority,10)
-        self.create_subscription(String,'/p2_nav/gate_status',self.on_gate,10)
+        self.health_node=GateHealthNode(self.on_gate)
         self.create_subscription(String,'/p2_nav/sim_truth',lambda m:setattr(self,'truth',json.loads(m.data)),10)
         self.operator=self.create_publisher(String,'/p2_nav/operator',10)
         self.limiter=self.create_publisher(SpeedLimit,'/speed_limit',10)
@@ -70,6 +101,8 @@ class Console(Node):
         self.planner=ActionClient(self,ComputePathToPose,'compute_path_to_pose')
         self.nav_through=ActionClient(self,NavigateThroughPoses,'navigate_through_poses')
         self.planner_through=ActionClient(self,ComputePathThroughPoses,'compute_path_through_poses')
+        self.goal_request_lock=threading.RLock()
+        self.route_parameters=self.create_client(SetParametersAtomically,'/planner_server/set_parameters_atomically')
         self.buffer=Buffer();self.listener=TransformListener(self.buffer,self)
         self.create_timer(.5,self.publish_speed)
         self.create_timer(.02,self.poll_session)
@@ -93,6 +126,14 @@ class Console(Node):
         self.reception_voice=VoiceCache(runtime/'reception-voice-cache',tts_command)
         self.reception_transfer.on_saved=self.reception_voice.auto_prepare
         self.reception=MissionService(self,self.reception_catalog)
+        from observed_map import ObservedMap,ObservationWorker
+        self.map_observations=ObservedMap()
+        self.map_observation_worker=ObservationWorker(self.map_observations,
+            lambda:self.mode=='navigation' and bool(self.gate.get('localized') and self.gate.get('data_fresh')),
+            lambda:self.publish_reception_map(self.reception.observation_document()),
+            lambda:self.session.phase not in ('planning','ready','starting','executing','replanning') and
+                not self.session.manual_activity and self.reception.engine.status()['phase'] not in
+                ('dispatching','navigating','rerouting','waiting_route','presenting','guest_wait','dwell'))
         self.trace_active_until=0.;self.create_timer(.2,self.capture_reception_trace)
         self.create_subscription(String,'/p2_nav/door_observations',self.on_door_observation,10)
         from reception_doors import DoorOverlay
@@ -103,8 +144,54 @@ class Console(Node):
         self.pending_reception_scan=None;self.door_scan_rejections={}
         self.create_subscription(LaserScan,'/scan',self.on_reception_scan,qos_profile_sensor_data)
         self.create_timer(.05,self.process_reception_scan)
+        if self.simulation:
+            self.virtual_thread=threading.Thread(target=self.produce_simulation_operator,daemon=True,name='simulation_operator_source')
+            self.virtual_thread.start()
+    def produce_simulation_operator(self):
+        # The simulated receiver is a producer, not a status-read timestamp.
+        # Its cadence must not depend on UI/ROS work holding Console.lock.
+        while not self.virtual_stop.wait(.02):
+            v=self.virtual_operator
+            if v is None:continue
+            with self.session.lock:
+                now=time.monotonic();self.virtual_sequence+=1
+                self.session.operator(v['mode'],True,v['connected'],v['activity'],
+                    self.virtual_source,self.virtual_sequence,now,now)
+    def destroy_node(self):
+        self.virtual_stop.set()
+        if self.virtual_thread:self.virtual_thread.join(timeout=3.)
+        return super().destroy_node()
+    def record_source_path(self,msg):
+        if self.session.phase not in ('planning','ready','starting','executing','replanning'):return
+        try:
+            self.flight.submit('path',dict(source_ros_ns=msg.header.stamp.sec*10**9+msg.header.stamp.nanosec,
+                frame_id=msg.header.frame_id,generation=self.session.generation,phase=self.session.phase,
+                poses=[[p.pose.position.x,p.pose.position.y,p.pose.position.z,p.pose.orientation.x,
+                        p.pose.orientation.y,p.pose.orientation.z,p.pose.orientation.w]for p in msg.poses]))
+        except (ValueError,TypeError,AttributeError):self.flight.errors+=1
+    def record_source_costmap(self,msg):
+        now=time.monotonic()
+        if self.session.phase not in ('planning','ready','starting','executing','replanning')or now-self.flight_costmap_at<1.:return
+        self.flight_costmap_at=now
+        try:
+            m=msg.metadata;p=m.origin
+            self.flight.submit('costmap',dict(source_ros_ns=msg.header.stamp.sec*10**9+msg.header.stamp.nanosec,
+                update_ros_ns=m.update_time.sec*10**9+m.update_time.nanosec,
+                frame_id=msg.header.frame_id,generation=self.session.generation,phase=self.session.phase,
+                size_x=m.size_x,size_y=m.size_y,resolution=m.resolution,
+                origin=[p.position.x,p.position.y,p.position.z,p.orientation.x,p.orientation.y,p.orientation.z,p.orientation.w],
+                cells=bytes(msg.data),provenance='asynchronous raw global costmap; not an atomic planner snapshot'))
+        except (ValueError,TypeError,AttributeError):self.flight.errors+=1
     def on_map(self,msg):
         self.grid=msg;self.map_revision+=1
+        if hasattr(self,'map_observations') and self.map_name:
+            q=msg.info.origin.orientation
+            if abs(q.x)+abs(q.y)+abs(q.z)>1e-8:
+                self.map_observations.unbind();self.map_observations.error='rotated_map_unsupported'
+            else:
+                self.map_observations.bind(dict(revision=self.map_revision,width=msg.info.width,height=msg.info.height,
+                    resolution=msg.info.resolution,origin=[msg.info.origin.position.x,msg.info.origin.position.y],cells=msg.data),
+                    self.map_library.directory(self.map_name),force=True)
         if hasattr(self,'door_worker'):self.publish_reception_map(self.reception.observation_document())
     def display_revision(self):return self.map_revision+getattr(self,'overlay_revision',0)
     def on_reception_scan(self,msg):
@@ -127,6 +214,7 @@ class Console(Node):
             if not 0<len(msg.ranges)<=4096:
                 self.pending_reception_scan=None;raise ValueError('scan_size_invalid')
             packet=dict(source_ns=source_ns,source_monotonic=time.monotonic()-age,
+                map_revision=self.map_revision,
                 x=t.translation.x,y=t.translation.y,yaw=yaw,ranges=list(msg.ranges),
                 angle_min=msg.angle_min,angle_increment=msg.angle_increment,range_min=msg.range_min,range_max=msg.range_max)
             # Compact actual finite return overlay; the original ROS header is
@@ -139,6 +227,7 @@ class Console(Node):
             self.scan_preview={'source_ns':source_ns,'frame_id':'map','origin':[t.translation.x,t.translation.y,yaw],
                                'points':pts[::max(1,math.ceil(len(pts)/600))]}
             if self.door_source=='scan':self.door_worker.submit(packet)
+            self.map_observation_worker.submit(packet)
             self.pending_reception_scan=None
         except Exception as error:
             key=str(error)if isinstance(error,ValueError)else type(error).__name__
@@ -155,7 +244,7 @@ class Console(Node):
         if base is None or not hasattr(self,'door_overlay') or document['map_id']!=self.reception.map_id():return
         states=self.reception.decisions.states(document,time.monotonic())
         annotations=document.get('annotations',[])
-        key=(self.map_revision,tuple(sorted(states.items())),tuple((d['id'],d['x'],d['y'],d['width'],d['yaw'])for d in document['doors']),json.dumps(annotations,sort_keys=True))
+        key=(self.map_revision,self.map_observations.revision,tuple(sorted(states.items())),tuple((d['id'],d['x'],d['y'],d['width'],d['yaw'])for d in document['doors']),json.dumps(annotations,sort_keys=True))
         with self._overlay_lock:
             if key==self._overlay_key:return
             q=base.info.origin.orientation
@@ -164,15 +253,28 @@ class Console(Node):
             if abs(q.z)>1e-8 or abs(q.x)>1e-8 or abs(q.y)>1e-8:
                 cells=list(base.data);report={'changed_cells':0,'reason':'rotated_map_overlay_unsupported','original_map_modified':False}
             else:
-                cells,report=self.door_overlay.apply(grid,document,states,self.reception.decisions.observations(document,time.monotonic()))
+                measured=dict(grid,cells=self.map_observations.apply(grid))
+                cells,report=self.door_overlay.apply(measured,document,states,self.reception.decisions.observations(document,time.monotonic()))
                 cells,authored=self.annotation_layer.apply(dict(grid,cells=cells),annotations);report.update(authored)
             msg=copy.deepcopy(base);msg.data=cells
             self.navigation_grid=msg;self.overlay_revision+=1;self.overlay_report=report;self._overlay_key=key
             self.reception_map.publish(msg)
-            # A filter mask is an authored instruction layer, not a free-space
-            # measurement. Use the standard KeepoutFilter in BOTH costmaps so
-            # local tracking cannot cut across a globally planned virtual wall.
-            mask=copy.deepcopy(base);mask.data=[0]*len(base.data)
+            # Preserve the saved map's EXTERIOR unknown boundary after live obstacle
+            # clearing. A long laser ray is not evidence of navigable floor
+            # outside this map (for example a stairwell beside a corridor).
+            # The same standard filter also applies authored virtual walls in
+            # BOTH costmaps. No source map or measured timestamp is rewritten.
+            # Isolated unknown holes inside the mapped floor are not virtual
+            # walls. They remain unknown in the source map until real laser
+            # clearing; masking them lethal would override that live evidence.
+            from map_boundary import exterior_unknown_mask
+            boundary_key=(self.map_revision,id(base))
+            cache=getattr(self,'_boundary_cache',None)
+            if cache is None or cache[0]!=boundary_key:
+                boundary,counts=exterior_unknown_mask(base.data,base.info.width,base.info.height)
+                self._boundary_cache=(boundary_key,boundary,counts)
+            _,boundary,counts=self._boundary_cache
+            mask=copy.deepcopy(base);mask.data=list(boundary);report.update(counts)
             if abs(q.z)<=1e-8 and abs(q.x)<=1e-8 and abs(q.y)<=1e-8:
                 mask.data=self.annotation_layer.apply(dict(grid,cells=mask.data),annotations)[0]
             self.keepout_mask.publish(mask)
@@ -229,22 +331,39 @@ class Console(Node):
         with self.lock:
             self.collision_stop=msg.action_type==CollisionMonitorState.STOP
             if self.collision_stop and self.session.phase=='executing':
+                if getattr(self.session,'task_kind','navigation')=='rotation':
+                    self.session.finished(self.session.generation,False)
+                    self.session._notice('原地转向受阻，速度已归零')
+                    self.op(armed=False,paused=True);self.stop_actions();return
                 self.obstacle_path_revision=self.path_revision;self.session.obstacle(time.monotonic())
     def execution_ready(self):
         gait=getattr(self,'gait',None)
         return self.simulation or bool(gait and gait.ready())
+    def source_recovery_eligible(self):
+        # Last evidence only selects a stopped wait. It does not make stale
+        # ground/localization valid; health_ready still requires fresh inputs.
+        return (self.gate.get('ground_evidence',self.gate.get('ground_ok')) is True and
+                self.gate.get('localization_evidence_ok',self.gate.get('localized')) is True)
     def on_gate(self,msg):
         with self.lock:
             try:self.gate=json.loads(msg.data)
             except (ValueError,TypeError):self.gate={}
-            if self.gate.get('collision_source_valid') is not True and self.session.phase in ('starting','executing','replanning'):
+            fault=self.gate.get('collision_fault_generation',-1)
+            revoked=type(fault)is int and fault>=self.session.generation
+            if (self.gate.get('collision_source_valid') is not True or revoked) and self.session.phase in ('starting','executing','replanning'):
+                # The gate's revocation persists even when a brief invalid
+                # status was dropped by DDS. Never show executing/zero forever.
+                recover=getattr(getattr(self,'reception',None),'source_fault',None)
+                eligible=self.source_recovery_eligible()
+                scheduled=bool(getattr(self.session,'task_kind','navigation')!='rotation' and eligible and recover and recover('避障观测暂时中断'))
+                self.source_revoked_generation=self.session.generation
                 self.session.cancel();self.stop_actions()
-                self.session._notice('避障观测失效，导航已停止；恢复后请重新确认目标')
+                self.session._notice('观测暂时中断：已停车，等待原任务重新规划'if scheduled else '避障观测失效，导航已停止')
             # Forward this original health evaluation as soon as it arrives,
             # instead of waiting for a separate session timer and RPC cycle.
             gait=getattr(self,'gait',None)
             if gait:
-                status=self.session.status(time.monotonic())
+                status=self.session_state(refresh=False)
                 gait.update(self.gate,self.session.phase=='executing' and not status['force_navigation_zero'])
     def health_ready(self):
         g=self.gate
@@ -253,41 +372,71 @@ class Console(Node):
     def poll_gait_authority(self,now):
         gait=getattr(self,'gait',None)
         if gait is None:return
-        d=gait.operator_authority()
+        for attempt in range(2):
+            with self.session.lock:
+                # Wait for the session before reading the original packet.
+                # An intervening callback must not age an already-read packet
+                # while a newer receiver observation is available.
+                d=gait.operator_authority()
+                now=max(now,time.monotonic())
+                source_fresh=bool(d and -.005<=now-d['stamp']<=self.session.authority_timeout)
+                reply_fresh=bool(d and(d.get('source_transport')=='native_packet_snapshot' or -.005<=now-d['reply_stamp']<=.1))
+                if not source_fresh or not reply_fresh:
+                    # One UI read may be descheduled while the independent
+                    # receiver keeps advancing. Re-read the actual packet;
+                    # never relabel the old sample or extend its deadline.
+                    if attempt==0:continue
+                    self.session.operator('unknown',False,False,False,0,0,0.,now);return
+                if d['source']==self.session.source and d['sequence']<=self.session.sequence:return
+                self.session.operator(d['mode'],d['verified'],d['connected'],d['activity'],
+                    d['source'],d['sequence'],d['stamp'],now)
+                return
+    def session_state(self,poll=False,refresh=True):
+        # A UI RPC or path callback may delay this decision past its earlier
+        # read-only observation. Consume the latest ORIGINAL packet first.
+        if refresh and getattr(self,'gait',None):self.poll_gait_authority(time.monotonic())
+        # Evaluate after acquiring the same lock as the native observer.
+        # A caller timestamp taken before waiting can predate a fresh packet.
         with self.session.lock:
-            if not d or not (-.005<=now-d['stamp']<=.1 and -.005<=now-d['reply_stamp']<=.1):
-                self.session.operator('unknown',False,False,False,0,0,0.,now);return
-            key=(d['source'],d['sequence'])
-            # Cached replies cannot renew source time. Fresh replies are also
-            # observed by the ordinary RPC thread, independent of ROS timers.
-            if getattr(self,'gait_authority_key',None)==key:return
-            self.gait_authority_key=key
-            self.session.operator(d['mode'],d['verified'],d['connected'],d['activity'],
-                d['source'],d['sequence'],d['stamp'],now)
+            now=time.monotonic()
+            result=self.session.poll(now)if poll else self.session.status(now)
+            reception=getattr(self,'reception',None)
+            if (reception and getattr(reception,'source_recovery_active',False) and result['navigation_permitted'] and result['phase']=='cancelled'):
+                result=dict(result,source_recovery=True,notice='观测暂时中断：已停车，等待原任务重新规划')
+            return result
     def poll_session(self):
         with self.lock:
             now=time.monotonic()
             if getattr(self,'gait',None) is not None:self.poll_gait_authority(now)
-            if self.simulation and self.virtual_operator:
-                v=self.virtual_operator;self.virtual_sequence+=1
-                self.session.operator(v['mode'],True,v['connected'],v['activity'],self.virtual_source,self.virtual_sequence,now,now)
-            status=self.session.poll(now)
+            now=time.monotonic()
+            status=self.session_state(poll=True)
             gait=getattr(self,'gait',None)
             if gait:
                 state=gait.status()
                 if (state['cancel_pending'] or state['phase'] in ('failed','disconnected')) and self.session.phase in ('starting','executing','replanning'):
-                    self.session.cancel();self.session._notice('步态已撤销导航控制，请重新确认目标')
+                    recover=getattr(getattr(self,'reception',None),'source_fault',None)
+                    eligible=(state.get('native_reason')=='navigation_health_not_ready' and
+                              self.source_recovery_eligible())
+                    scheduled=bool(eligible and recover and recover('原始导航健康数据间断'))
+                    if scheduled:self.source_revoked_generation=self.session.generation
+                    self.session.cancel();self.session._notice('观测暂时中断：已停车，等待原任务重新规划'if scheduled else '步态已撤销导航控制')
                 gait.update(self.gate,self.session.phase=='executing' and not status['force_navigation_zero'])
                 if self.session.phase in ('manual','paused','stopped','cancelled','blocked','arrived') and gait.phase not in ('stopped','idle','disconnected'):
                     gait.stop()
                 self.acknowledge_if_quiet(self.session.cancel_generation)
-            status=self.session.status(now)
+            status=self.session_state()
             if status['cancel_pending']:
                 self.stop_actions()
-            if self.session.phase=='replanning':self.session.reroute(now,False,not self.collision_stop and self.health_ready())
+            if self.session.phase=='replanning':self.session.reroute(time.monotonic(),False,not self.collision_stop and self.health_ready())
             if self.session.phase in ('starting','executing','replanning'):
-                if not self.health_ready():self.session.cancel();self.session._notice('地面、定位或传感器未就绪，导航已停止')
-                self.op(armed=not self.session.status(now)['force_navigation_zero'],paused=self.session.status(now)['force_navigation_zero'],arm_generation=self.session.generation)
+                if not self.health_ready():
+                    recover=getattr(getattr(self,'reception',None),'source_fault',None)
+                    eligible=self.source_recovery_eligible()
+                    scheduled=bool(eligible and recover and recover('定位/雷达观测时间间断'))
+                    self.source_revoked_generation=self.session.generation
+                    self.session.cancel();self.session._notice('观测暂时中断：已停车，等待原任务重新规划'if scheduled else '地面、定位或传感器未就绪，导航已停止')
+                current=self.session_state()
+                self.op(armed=not current['force_navigation_zero'],paused=current['force_navigation_zero'],arm_generation=self.session.generation)
     def stop_actions(self):
         gait=getattr(self,'gait',None)
         if gait and gait.phase!='stopped':gait.stop()
@@ -500,20 +649,71 @@ class Console(Node):
                 if self.session.finished(generation,status==4):
                     self.op(armed=False,paused=True);self.last_action=self.session.message
             self.acknowledge_if_quiet(generation)
+    def route_final_goal(self,data,final_pose,prefix="RouteDirected"):
+        from planning_requests import wait_route_reply
+        # Publish the actual final request coordinates atomically before either
+        # preview or navigation replans; never encode task flags in pose stamps.
+        if not self.route_parameters.wait_for_service(timeout_sec=2.):raise ValueError('路线规划参数服务尚未响应')
+        request=SetParametersAtomically.Request()
+        request.parameters=[Parameter(name=prefix+'.final_'+k,value=ParameterValue(type=ParameterType.PARAMETER_DOUBLE,double_value=float(data[k])))for k in ('x','y')]
+        stamp=final_pose.header.stamp
+        request.parameters.append(Parameter(name=prefix+'.final_request_ns',value=ParameterValue(type=ParameterType.PARAMETER_INTEGER,integer_value=stamp.sec*10**9+stamp.nanosec)))
+        generation=self.session.generation
+        def current():
+            with self.lock:return self.session.generation==generation and self.session.phase=='planning'
+        # A just-cancelled through-poses plan can still occupy the planner's
+        # parameter callback. Wait for its real response without dropping the
+        # mission after two seconds, and stop waiting immediately on takeover.
+        response=wait_route_reply(self.route_parameters.call_async(request),self.route_parameters,current)
+        if not response.result.successful:raise ValueError('路线终点参数未应用：'+response.result.reason)
     def set_goal(self,data):
+        reception=getattr(self,'reception',None)
+        if (reception and getattr(reception,'source_recovery_active',False) and data.get('_mission_epoch')!=reception.engine.epoch):
+            reception.engine.cancel('cancelled');reception.pending_source_command=None;reception.source_recovery_active=False
+        # Serialize goal-specific planner parameters with their preview request;
+        # stop/manual callbacks do not acquire this planning lock.
+        with self.goal_request_lock:return self._set_goal(data)
+    def prepare_rotation(self,data):
+        from rotation_intent import rotation_goal
+        if self.mode!='navigation':raise ValueError('请先载入地图进入导航模式')
+        radians=data.get('radians')
+        with self.goal_request_lock:
+            goal=rotation_goal(self.reception_pose(),radians)
+            # The current measured centre stays fixed. Spin uses the live local
+            # costmap/footprint and odometry; no global path is invented here.
+            self.checked_pose(goal,require_free=False)
+            with self.lock:
+                generation=self.session.prepare(goal,time.monotonic())
+                self.goal_rotation=radians;self.goal_route=[];self.goal_route_guided=False
+                self.goal_heading_mode='pose';self.path=[];self.goal=[goal['x'],goal['y']];self.feedback={}
+                self.pending_plan_accept=False;self.op(armed=False,paused=True)
+                if not self.session.rotation_ready(generation):raise ValueError('原地转向已取消')
+            return dict(rotation_prepared=True,global_path_planned=False,generation=generation,
+                radians=radians,translation=[0.,0.],hardware_execution_enabled=False)
+    def _set_goal(self,data):
         if self.mode!='navigation':raise ValueError('请先载入地图进入导航模式')
         pose=self.checked_pose(data)
         raw_route=data.get('_route_goals')
         if raw_route is not None and (not isinstance(raw_route,list)or not 2<=len(raw_route)<=100):raise ValueError('连续途经点数量无效')
         route_poses=[self.checked_pose(p)for p in raw_route]if raw_route else []
         if raw_route and any(abs(float(raw_route[-1][k])-float(data[k]))>1e-6 for k in ('x','y','yaw')):raise ValueError('连续路线终点与任务终点不一致')
+        reference_mode=data.get('_route_reference_mode','corridor')
+        if reference_mode not in ('corridor','exact'):raise ValueError('未知通道参考模式')
+        guided=bool(route_poses and self.gait_profile=='p2-flat-model' and reference_mode=='corridor')
         heading_mode=data.get('heading_mode','pose')
         if heading_mode not in ('pose','position'):raise ValueError('未知目标朝向模式')
+        arrival_profile=data.get('_arrival_profile','standard')
+        if arrival_profile not in ('standard','presentation'):raise ValueError('未知到点停靠方式')
+        if arrival_profile=='presentation'and self.gait_profile!='p2-flat-model':raise ValueError('当前配置不支持讲解停靠方式')
         if heading_mode=='position' and self.gait_profile!='p2-flat-model':raise ValueError('当前配置不支持位置目标规划')
         if not self.gate.get('localized'):raise ValueError('定位尚未就绪，请先设置初始位置')
         with self.lock:
+            # A recovered source needs a genuinely newer gate authorization,
+            # including when its persistent revocation status was received late.
+            fault=self.gate.get('collision_fault_generation',-1)
+            if type(fault)is int:self.session.generation=max(self.session.generation,fault)
             generation=self.session.prepare(data,time.monotonic());self.path=[];self.goal=None;self.feedback={}
-            self.goal_heading_mode=heading_mode;self.goal_route=route_poses
+            self.goal_heading_mode=heading_mode;self.goal_arrival_profile=arrival_profile;self.goal_route=route_poses;self.goal_route_guided=guided;self.goal_rotation=None
             self.pending_plan_accept=True
             self.op(armed=False,paused=True)
         try:self.wait_planner_active()
@@ -530,7 +730,16 @@ class Console(Node):
             request=ComputePathThroughPoses.Goal();request.goals=route_poses
         else:
             request=ComputePathToPose.Goal();request.goal=pose
-        request.planner_id='PositionOnly' if heading_mode=='position' else 'GridBased'
+        directed_route=bool(route_poses and heading_mode=='pose' and self.gait_profile=='p2-flat-model')
+        if guided or directed_route:
+            try:
+                if guided:self.route_final_goal(data,route_poses[-1],'GuidePosition' if heading_mode=='position' else 'GuideDirected')
+                else:self.route_final_goal(data,route_poses[-1])
+            except (ValueError,TimeoutError):
+                with self.lock:
+                    self.pending_plan_accept=False;self.session.planned(generation,0,time.monotonic());self.acknowledge_if_quiet(generation)
+                raise
+        request.planner_id=('GuidePosition' if heading_mode=='position' else 'GuideDirected') if guided else ('PositionOnly' if heading_mode=='position' else ('RouteDirected' if directed_route else 'GridBased'))
         with self.lock:
             if self.session.generation!=generation or self.session.phase!='planning':
                 self.pending_plan_accept=False;self.acknowledge_if_quiet(generation);raise ValueError('规划已取消')
@@ -543,7 +752,10 @@ class Console(Node):
         try:result=self.wait_future(self.action_results[('plan',generation)],10)
         except TimeoutError:self.session.cancel();self.stop_actions();raise
         path=[[p.pose.position.x,p.pose.position.y] for p in result.result.path.poses] if result.status==4 else []
-        if not self.session.planned(generation,len(path),time.monotonic()):raise ValueError('路径未完成或已取消，请重新选择目标')
+        if not self.session.planned(generation,len(path),time.monotonic()):
+            with self.session.lock:
+                if self.session.generation==generation and self.session.phase=='blocked':raise ValueError(self.session.message)
+            raise ValueError('规划已取消或目标已更新，请重新选择目标')
         self.path=path;self.goal=[data['x'],data['y']];self.last_action='路径已预览；确认开始前不会行走'
         return {'planned':True,'generation':generation,'path_points':len(path),'hardware_execution_enabled':False}
     def confirm_goal(self,data):
@@ -554,7 +766,8 @@ class Console(Node):
             gait=getattr(self,'gait',None);ready=self.execution_ready()
             reason=gait.status().get('blockers','') if gait and not ready else ''
             self.session.start(generation,time.monotonic(),ready,self.health_ready(),execution_reason=reason)
-            self.goal_generation=generation;pose=self.checked_pose(self.session.goal)
+            self.goal_generation=generation
+            pose=self.checked_pose(self.session.goal,require_free=False) if getattr(self,'goal_rotation',None)is not None else self.checked_pose(self.session.goal)
             self.pending_nav_accept=True
         gait=getattr(self,'gait',None)
         if gait:
@@ -569,13 +782,22 @@ class Console(Node):
             self.pending_nav_accept=False;self.session.cancel();self.stop_actions();self.acknowledge_if_quiet(generation);raise ValueError('导航服务未就绪')
         if route_poses:
             goal=NavigateThroughPoses.Goal();goal.poses=route_poses
-            goal.behavior_tree=str(Path(__file__).with_name('forward_position_through_poses.xml' if getattr(self,'goal_heading_mode','pose')=='position' else 'forward_through_poses.xml'))
+            guided=getattr(self,'goal_route_guided',False);position=getattr(self,'goal_heading_mode','pose')=='position'
+            tree=('forward_corridor_position.xml' if position else 'forward_corridor_directed.xml') if guided else ('forward_position_through_poses.xml' if position else ('forward_directed_route.xml' if self.gait_profile=='p2-flat-model' else 'forward_through_poses.xml'))
+            goal.behavior_tree=str(Path(__file__).with_name(tree))
         else:
             goal=NavigateToPose.Goal();goal.pose=pose
             if getattr(self,'goal_heading_mode','pose')=='position':goal.behavior_tree=str(Path(__file__).with_name('forward_position_navigation.xml'))
-        from recovery_tree import recovery_tree
-        base_tree=getattr(goal,'behavior_tree','') or str(Path(__file__).with_name('forward_navigation.xml'))
-        goal.behavior_tree=recovery_tree(base_tree,self.runtime/'recovery-trees',self.session.replan_timeout)
+        rotation=getattr(self,'goal_rotation',None)
+        if rotation is not None:
+            from rotation_intent import rotation_tree
+            goal.behavior_tree=rotation_tree(self.runtime/'rotation-trees',rotation)
+        else:
+            from recovery_tree import recovery_tree
+            base_tree=getattr(goal,'behavior_tree','') or str(Path(__file__).with_name('forward_navigation.xml'))
+            checker=None
+            if getattr(self,'goal_arrival_profile','standard')=='presentation':checker='presentation_position_goal_checker'if getattr(self,'goal_heading_mode','pose')=='position'else'presentation_goal_checker'
+            goal.behavior_tree=recovery_tree(base_tree,self.runtime/'recovery-trees',self.session.replan_timeout,checker)
         with self.lock:
             self.bt_goal_source_ns=self.get_clock().now().nanoseconds;self.bt_recovery_report={}
             if self.session.generation!=generation or self.session.phase!='starting':
@@ -606,10 +828,10 @@ class Console(Node):
                 'mission_phase':mission['phase'],'session_phase':self.session.phase,'pose':None,
                 'pose_valid':self.health_ready(),'collision_stop':self.collision_stop,
                 'goal_generation':self.goal_generation,'path_revision':self.path_revision,
-                'control_recovery':self.bt_recovery_report,'path_source':self.path_source_report,'feedback':self.feedback,'speed_zones':self.speed_zone_status,
+                'control_recovery':self.bt_recovery_report,'path_source':self.path_source_report,'planning_evidence':self.flight.status(),'feedback':self.feedback,'speed_zones':self.speed_zone_status,
                 'gate':{k:self.gate.get(k)for k in ('evaluated_monotonic_ns','velocity_source_monotonic_ns','reason',
                     'command','body_velocity_feedback','velocity_stages','scan_age','odom_age','localized','ground_ok')},
-                'session_notice':self.session.status(now).get('notice')}
+                'session_notice':self.session_state().get('notice')}
         try:
             t=self.buffer.lookup_transform('map','base_link',rclpy.time.Time());q=t.transform.rotation
             sample.update(pose=[t.transform.translation.x,t.transform.translation.y,math.atan2(2*q.w*q.z,1-2*q.z*q.z)],
@@ -628,7 +850,7 @@ class Console(Node):
         deadline=time.monotonic()+8.
         while True:
             if not self.reception.engine.valid(epoch):return False
-            if not self.session.status(time.monotonic())['navigation_permitted']:return False
+            if not self.session_state()['navigation_permitted']:return False
             with self.lock:
                 quiet=not self.session.cancel_pending and self.goal_handle is None and self.plan_handle is None and not self.pending_nav_accept and not self.pending_plan_accept
             if quiet:return True
@@ -650,19 +872,37 @@ class Console(Node):
         except (OSError,ValueError):return None
     def reception_status(self,full=False):
         document=self.reception_catalog.read(self.reception.map_id()) if full else self.reception_catalog.summary(self.reception.map_id())
-        result={'map_id':self.reception.map_id(),'revision':document['revision'],'mission':self.reception.engine.status(),'voice_progress':self.reception_voice.summary(self.reception.map_id()),'doors':self.reception.decisions.states(self.reception.observation_document(),time.monotonic()),'route_report':self.reception.route_report,'door_evidence':self.door_worker.summary,'door_overlay':self.overlay_report,'door_scan_rejections':dict(self.door_scan_rejections)}
+        result={'map_id':self.reception.map_id(),'revision':document['revision'],'mission':self.reception.engine.status(),'voice_progress':self.reception_voice.summary(self.reception.map_id()),'doors':self.reception.decisions.states(self.reception.observation_document(),time.monotonic()),'route_report':self.reception.route_report,'door_evidence':self.door_worker.summary,'door_overlay':self.overlay_report,'door_scan_rejections':dict(self.door_scan_rejections),'map_observations':self.map_observations.status()}
         if full:result.update(document=document,voice=self.reception_voice.status(document))
         return result
     def reception_save(self,data):
         if not isinstance(data,dict):raise ValueError('导览配置必须是对象')
         operation=data.get('operation','save')
+        if operation in ('map_observations','map_observations_reset','map_observations_merge'):
+            if data.get('map_id')!=self.map_name or self.grid is None:raise ValueError('请先载入所选导航地图')
+            if operation=='map_observations':self.map_observations.set_enabled(data['enabled'])
+            elif operation=='map_observations_merge':self.map_observations.request_merge()
+            else:
+                self.map_observations.flush(force=True)
+                self.map_library.snapshot(self.map_name,'before_observed_map_reset')
+                self.map_observations.set_enabled(False)
+                self.map_observations.reset()
+                self.publish_reception_map(self.reception.observation_document())
+            return self.map_observations.status()
+        if operation.startswith('bundle_') or operation in ('map_raster','map_snapshot'):
+            self.map_observations.flush(force=True)
+        if operation=='map_raster':return self.map_library.raster(data['map_id'])
+        if operation=='route_preview':
+            from reception_preview import preview_isolated
+            return preview_isolated(self.map_library.raster(data['document']['map_id']),data['document'],data['route_id'])
         if operation=='trace_runs':return self.reception.history.runs(data['map_id'])
         if operation=='trace_read':return self.reception.history.trace(data['map_id'],data['run_id'],data.get('after',0),data.get('limit',200))
         if operation.startswith('bundle_'):return self.bundle_transfer.request(data)
         if operation=='map_versions':return {'versions':self.map_library.versions(data['map_id'])}
         if operation=='map_snapshot':return self.map_library.snapshot(data['map_id'],'operator_snapshot')
         if operation=='map_restore':
-            if data['map_id']==self.map_name:self.stop_process();self.mode='idle'
+            if data['map_id']==self.map_name:
+                self.stop_process();self.mode='idle';self.map_observations.unbind()
             return self.map_library.restore(data['map_id'],data['version'])
         if operation=='map_load':return self.start('navigation',data['map_id'],self.controller)
         if operation=='map_resume':return self.start('mapping',data['map_id'],self.controller,True,data.get('region'))
@@ -750,11 +990,12 @@ class Console(Node):
             pose=[t.transform.translation.x,t.transform.translation.y,math.atan2(2*q.w*q.z,1-2*q.z*q.z)]
         except Exception:pass
         grid=getattr(self,'navigation_grid',None)or self.grid
+        if getattr(self,'gait',None):self.poll_gait_authority(time.monotonic())
         return {'robot_name':self.robot_name,'gait_profile':self.gait_profile,'request_token':self.request_token,'mode':self.mode,'simulation':self.simulation,'controller':self.controller,'message':self.last_action,
             'minimum_speed':self.minimum_speed,'maximum_speed':self.maximum_speed,'velocity_scale':self.velocity_scale,
             'effective_speed_cap':self.speed_value*self.velocity_scale,'simulation_kind':'native_dynamics' if os.getenv('P2_NAV_NATIVE_EXEC') else 'planar',
             'process_alive':self.process is not None and self.process.poll() is None,'gate':self.gate,'pose':pose,
-            'session':self.session.status(time.monotonic()),'map_revision':self.display_revision(),'neck':head_feedback,
+            'session':self.session_state(),'map_revision':self.display_revision(),'neck':head_feedback,
             'execution_ready':self.execution_ready(),'gait_transport':getattr(self,'gait',None).status() if getattr(self,'gait',None) else None,'map':None if grid is None else {'width':grid.info.width,'height':grid.info.height,'resolution':grid.info.resolution,
                 'origin':[grid.info.origin.position.x,grid.info.origin.position.y],**({'cells':list(grid.data)} if include_cells else {})},
             'path':self.path,'goal':self.goal,'feedback':self.feedback,'speed_zones':self.speed_zone_status,
@@ -763,8 +1004,12 @@ class Console(Node):
             'maps':sorted(p.parent.name for p in (self.runtime/'maps').glob('*/mapped.yaml')),
             'hardware_execution_enabled':bool(getattr(self,'gait',None) and self.gait.status()['navigation_owned']),
             'audio_feedback':self.audio.status(),
-            'reception':self.reception_status(),'control_recovery':self.bt_recovery_report,'path_source':self.path_source_report,
+            'reception':self.reception_status(),'control_recovery':self.bt_recovery_report,'path_source':self.path_source_report,'planning_evidence':self.flight.status(),
             'scope':'平面导航仿真' if self.simulation else ('雷达中心坐标导航；定位、传感器和步态状态见实时数据' if self.gate.get('navigation_reference')=='lidar_projection' else ('实机步态接口已连接；坐标与控制状态见实时数据' if self.gait else '实机导航预演'))}
+
+def console_executor(node):
+    return ConsoleExecutors(node)
+
 
 def main():
     parser=argparse.ArgumentParser();parser.add_argument('--simulation',action='store_true');parser.add_argument('--port',type=int,default=8930)
@@ -808,7 +1053,7 @@ def main():
         if data.get('hardware_verified') is True:
             from robot_profile import check_calibration
             check_calibration(profile,data)
-    rclpy.init();node=Console(runtime,args.simulation,args.minimum_speed,vertices,args.odometry_model,args.gait_profile,args.gait_socket);node.robot_name=profile['name'] if selected else None;node.robot_identity=identity(profile) if selected else None;executor=SingleThreadedExecutor();executor.add_node(node)
+    rclpy.init();node=Console(runtime,args.simulation,args.minimum_speed,vertices,args.odometry_model,args.gait_profile,args.gait_socket);node.robot_name=profile['name'] if selected else None;node.robot_identity=identity(profile) if selected else None;executor=console_executor(node)
     thread=threading.Thread(target=executor.spin,daemon=True);thread.start()
     from audio_feedback import save_resource
     class Handler(BaseHTTPRequestHandler):
@@ -839,7 +1084,7 @@ def main():
                 if not isinstance(d,dict):raise ValueError('请求必须是JSON对象')
                 routes={'/api/audio':lambda:node.audio.update(d),'/api/start':lambda:node.start(d['mode'],d.get('name','office'),d.get('controller','rpp')),
                     '/api/sim_mapping_route':lambda:node.simulated_mapping_route(d['name']),
-                    '/api/save':lambda:save_resource(node,d),'/api/goal':lambda:node.reception_api_goal(d),
+                    '/api/save':lambda:save_resource(node,d),'/api/goal':lambda:node.reception_api_goal(d),'/api/rotate':lambda:node.prepare_rotation(d),
                     '/api/confirm':lambda:node.reception_api_confirm(d),'/api/sim_operator':lambda:node.simulation_operator(d),
                     '/api/initialpose':lambda:node.set_pose(d),'/api/speed':lambda:node.speed(d['speed'],d.get('velocity_scale')),
                     '/api/stop':lambda:(node.stop() or {'stopped':True})}
@@ -853,9 +1098,10 @@ def main():
     try:
         while not stopping.is_set():server.handle_request()
     finally:
+        node.map_observation_worker.close()
         node.door_worker.close()
         node.reception.close()
         node.stop_process()
         if node.gait:node.gait.close()
-        server.server_close();executor.shutdown();node.destroy_node();rclpy.shutdown()
+        server.server_close();executor.shutdown();node.flight.close();node.destroy_node();rclpy.shutdown()
 if __name__=='__main__':main()

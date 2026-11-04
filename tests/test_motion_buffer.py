@@ -2,9 +2,26 @@ import unittest,math
 import sys
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'navigation'))
-from motion_buffer import MotionBuffer
+from motion_buffer import MotionBuffer, MeasuredMotionMean
 
 class BufferTest(unittest.TestCase):
+    def test_motion_mean_rejects_brief_ripple_and_keeps_source_time(self):
+        mean=MeasuredMotionMean();self.assertEqual(mean.step((0,0,0),1.),(0,0,0))
+        v=mean.step((0,0,.08),1.1);self.assertLess(v[2],.06)
+        self.assertEqual(mean.step((0,0,1.),1.1),v)
+        self.assertEqual(mean.source,1.1)
+        self.assertGreater(mean.step((0,0,.3),1.2)[2],.06)
+        self.assertEqual(mean.step((.2,0,.3),2.),(.2,0,.3))
+
+    def test_native_ramp_mode_only_performs_phase_transitions(self):
+        b=MotionBuffer(ramp_enabled=False)
+        self.assertEqual(b.step((.75,0.,.4),(0,0,0),1.,.02,frame_verified=True),(.75,0.,.4))
+        self.assertEqual(b.step((.6,0.,.8),(.2,0,.1),1.02,.02,frame_verified=True),(.6,0.,.8))
+        self.assertEqual(b.step((0,0,1),(.2,0,0),1.04,.02,frame_verified=True),(0,0,0))
+        for i in range(20):out=b.step((0,0,1),(0,0,0),1.06+i*.02,.02,frame_verified=True)
+        self.assertEqual(out,(0,0,1))
+        self.assertEqual(b.step((0,0,1),(0,0,0),1.46,.02,hard_stop=True,frame_verified=True),(0,0,0))
+
     def test_forward_steering_correction_does_not_enter_pivot_settling(self):
         b=MotionBuffer(accel=.4,decel=.8);values=[]
         for i in range(250):

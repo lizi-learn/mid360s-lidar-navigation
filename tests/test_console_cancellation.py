@@ -21,7 +21,7 @@ class Result:
     status=5
 
 def fixture():
-    c=Console.__new__(Console);c.lock=threading.RLock();c.session=NavigationSession()
+    c=Console.__new__(Console);c.lock=threading.RLock();c.goal_request_lock=threading.RLock();c.session=NavigationSession()
     now=time.monotonic();c.session.operator('navigation_allowed',True,True,False,1,1,now,now)
     g=c.session.prepare({'x':1,'y':1,'yaw':0},now)
     c.goal_handle=c.plan_handle=None;c.pending_nav_accept=c.pending_plan_accept=False

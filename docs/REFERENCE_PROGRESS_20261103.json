@@ -1,0 +1,29 @@
+{
+  "scope": "Navigation reference progress and repeated route-leg planning; synthetic software regression only until CI/ARM results recorded",
+  "problems": [
+    "Optional intermediate passage was checked inside the1Hz slow-planning sequence, so its radial passage window could be missed",
+    "An in-flight planning result still targeted the deleted reference prefix",
+    "One stable-path slot was overwritten by each other route leg",
+    "Analysis sweep checker omitted single-pose inputs; corrected and covered by a regression"
+  ],
+  "changes": [
+    "Run passed-reference removal every behavior-tree tick; unchanged0.75m reference radius and final goal tolerance",
+    "Reissue only the remaining reference list before accepting a stale in-flight result; retain normal cancel/manual/obstacle behavior",
+    "Bounded per-leg route memory:8legs,32000poses total; each reuse checks the current filled/swept footprint; real new obstacles still invalidate it",
+    "Report the actual failed endpoint in planner errors; no obstacle clearing or robot geometry changes"
+  ],
+  "validation": {
+    "local_tests": 393,
+    "native_initial_slow_planner_old_remaining": 2,
+    "native_initial_slow_planner_fixed_remaining": 1,
+    "native_candidate_replanning_before_inflight_fix": "Passed existing5replan cases and8planning cases; this is not final candidate validation",
+    "final_native_runtime": "PENDING: fixture initialization corrected; isolated local container runtime stuck during next startup",
+    "ARM": "PENDING: SSH banner unavailable on first staging attempt; production not changed"
+  },
+  "limits": [
+    "No new physical walking",
+    "No motor/driver/neck/battery changes",
+    "No claim that whole-office autonomy is fixed or physically accepted",
+    "Frozen costmaps are asynchronous observations, not atomic planner input snapshots"
+  ]
+}

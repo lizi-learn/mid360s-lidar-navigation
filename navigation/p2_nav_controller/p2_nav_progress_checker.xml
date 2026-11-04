@@ -1,0 +1,1 @@
+<library path="p2_nav_controller"><class name="p2_nav_controller::RotationProgressChecker" type="p2_nav_controller::RotationProgressChecker" base_class_type="nav2_core::ProgressChecker"><description>Humble translational progress plus measured rotation, preserving movement radius and timeout.</description></class></library>

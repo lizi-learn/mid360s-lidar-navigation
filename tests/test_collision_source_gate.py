@@ -18,7 +18,7 @@ class CollisionSourceGateTests(unittest.TestCase):
     def fixture(self):
         n=scope['GateNode'].__new__(scope['GateNode']);now=time.monotonic()
         n.gate=ForwardGate();n.gate.armed=True;n.simulation=False;n.require_localization=False
-        n.handoff=n.recovery=None;n.recovery_wait=False;n.collision_stop=False
+        n.handoff=n.recovery=None;n.upstream_handoff=False;n.recovery_wait=False;n.collision_stop=False
         n.last=now-.05;n.command_time=now;n.command=(.1,0.,0.);n.invalid_command_until=0.
         n.scan_stamp=n.odom_stamp=100.;n.velocity_source_ns=0;n.velocity_stages={};n.calibration_ready=True;n.calibration_time=now
         n.ground=True;n.ground_time=now;n.paused=False;n.measured=(0,0,0);n.covariance=None
@@ -52,5 +52,21 @@ class CollisionSourceGateTests(unittest.TestCase):
             with self.subTest(generation=generation):
                 n=self.fixture();n.on_operator(NS(data=json.dumps({'armed':True,'arm_generation':generation})));n.tick()
                 self.assertFalse(n.gate.armed);self.assertEqual(n.sent[-1].linear.x,0)
+    def test_upstream_handoff_retains_final_clear_hold_and_rejection(self):
+        from clearance_recovery import ClearanceRecovery
+        from unittest.mock import patch
+        n=self.fixture();n.upstream_handoff=True;n.recovery=ClearanceRecovery();n.command=(0.,0.,.3)
+        base=time.monotonic()
+        for i in range(60):
+            now=base+i*.02;n.command_time=n.ground_time=n.collision_source_time=now
+            with patch.object(time,'monotonic',return_value=now):n.tick()
+            if i<35:self.assertEqual(n.sent[-1].angular.z,0.)
+        self.assertGreater(n.sent[-1].angular.z,0.)
+        n.collision_stop=True;now=base+1.2;n.command_time=n.ground_time=n.collision_source_time=now
+        with patch.object(time,'monotonic',return_value=now):n.tick()
+        self.assertEqual(n.sent[-1].angular.z,0.)
+        n.command=(.1,.01,0.);now+=.02;n.command_time=now
+        with patch.object(time,'monotonic',return_value=now):n.tick()
+        self.assertEqual(n.gate.reason,'lateral_command_rejected')
 
 if __name__=='__main__':unittest.main()

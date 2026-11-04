@@ -8,7 +8,8 @@ from configure import config
 
 def intrusions(cells,r,origin,path):
     h,w=cells.shape;ox,oy=origin;total=0
-    for a,b in zip(path,path[1:]):
+    if not len(path):return 1
+    for a,b in zip([path[0],*path],path):
         angle=math.remainder(b[2]-a[2],2*math.pi);n=max(1,math.ceil(math.hypot(b[0]-a[0],b[1]-a[1])/.01),math.ceil(abs(angle)/.01))
         for k in range(n+1):
             f=k/n;x=a[0]+f*(b[0]-a[0]);y=a[1]+f*(b[1]-a[1]);yaw=a[2]+f*angle;c,s=math.cos(yaw),math.sin(yaw)
@@ -29,6 +30,10 @@ def main():
     cases.append(dict(name='closed_wall',cells=blocked,r=r,origin=origin,start=[0.,0.,0.],goal=[6.025,1.675,math.pi/4],expected=False))
     inside=cells.copy();inside[60,41]=254
     cases.append(dict(name='interior_start_obstacle',cells=inside,r=r,origin=origin,start=[0.,0.,0.],goal=[6.025,1.675,math.pi/4],expected=False))
+    pivot=np.full((100,140),254);pivot[30:50,10:130]=0
+    cases.append(dict(name='directed_in_place_start',cells=pivot,r=r,origin=(0.,0.),start=[1.,2.,math.pi],goal=[5.,2.,0.],expected=True,check_directed=True,require_initial_pivot=True))
+    no_pivot=np.full((100,140),254);no_pivot[36:49,10:130]=0
+    cases.append(dict(name='directed_pivot_does_not_fit',cells=no_pivot,r=r,origin=(0.,0.),start=[1.,2.125,math.pi],goal=[5.,2.125,0.],expected=False,check_directed=True))
     if a.private_replays:
         for item in json.loads(Path(a.private_replays).read_text()):
             d=json.loads(Path(item['snapshot']).read_text());m=d['maps']['global'];cases.append(dict(name=item['name'],cells=np.array(m['cells']).reshape(m['height'],m['width']),r=m['resolution'],origin=m['origin'],start=item.get('start',d['pose']),goal=item['goal'],expected=item.get('expected',True),snapshot_sha256=hashlib.sha256(Path(item['snapshot']).read_bytes()).hexdigest(),private=True))
@@ -51,7 +56,18 @@ def main():
                 if plugin=='PositionOnlyLattice':
                     assert row['path_stamp_s']-row['input_goal_stamp_s']>=4.9,'output reused old goal request time'
                     assert -.01<=row['path_age_at_result_s']<=.5,'newly computed path source stamp invalid'
-            if plugin=='PositionOnlyLattice':
+                if case.get('require_initial_pivot'):
+                    prefix=[]
+                    for pose in path:
+                        if math.dist(pose[:2],case['start'][:2])>1e-6:break
+                        prefix.append(pose)
+                    row['initial_pivot_translation_m']=max((math.dist(q[:2],case['start'][:2])for q in prefix),default=None)
+                    row['initial_pivot_angle_rad']=max((abs(math.remainder(q[2]-case['start'][2],2*math.pi))for q in prefix),default=0.)
+                    assert row['initial_pivot_angle_rad']>math.pi/2,'reverse-facing route omitted its actual zero-translation pivot'
+                if plugin=='ExactHeadingLattice':
+                    row['arrival_yaw_error_rad']=abs(math.remainder(path[-1][2]-case['goal'][2],2*math.pi))
+                    assert row['arrival_yaw_error_rad']<.02,'directed fallback lost the requested arrival heading'
+            if plugin=='PositionOnlyLattice' or case.get('check_directed'):
                 row['passed']=row['planned']==case['expected'] and (not row['planned']or row['body_intrusions']==0 and row['endpoint_error_m']<=.15) and proc.returncode==0;ok=ok and row['passed']
             rows.append(row);out.write_text(json.dumps({'complete':False,'cases':rows},indent=2));print(json.dumps(row),flush=True)
     out.write_text(json.dumps({'complete':True,'candidate_checks_passed':ok,'seed':0,'hardware_commands':0,'identity':'Actual own Humble lattice plugins; full55cm square with zero padding; original unknown and actual occupied cells retained; synthetic grids or explicitly private frozen costmap replay. Planning verification only, not perception or biped dynamics.','cases':rows},indent=2))

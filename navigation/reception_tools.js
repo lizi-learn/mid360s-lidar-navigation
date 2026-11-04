@@ -7,7 +7,7 @@ const originalCatalogLoad=loadCatalog;
 loadCatalog=async function(mapId){if(doc?.map_id!==mapId){temporaryTarget=null;tool=null;toolVertices=[];correction=null;updateRegion=null;mapVersions=[];replayRuns=[];replaySamples=[];replayEvents=[];replayIndex=0;replayPlaying=false;replayMapId=mapId;selectedReplayRun='';replayLoadGeneration++;selectedDock=null;nearbyPoses=[];}return originalCatalogLoad(mapId);};
 const originalRender=render,originalInspector=renderInspector,originalDraw=draw,originalStatus=renderStatus;
 const voiceChip=document.createElement('span');voiceChip.className='chip';voiceChip.id='voiceStatus';$('revisionBadge').after(voiceChip);
-renderStatus=function(){originalStatus();const v=state?.reception?.voice_progress;voiceChip.textContent=!v?.configured?'介绍：文字模式':v.busy?'音频准备 '+v.ready+'/'+v.total:v.failed?'音频 '+v.failed+' 段未生成':v.total?'音频已备好 '+v.ready+' 段':'';};
+renderStatus=function(){originalStatus();const v=state?.reception?.voice_progress;voiceChip.textContent=!v?.configured?'介绍：文字模式':v.busy?'音频准备 '+v.ready+'/'+v.total:v.failed?'音频 '+v.failed+' 段未生成':v.total?'音频已备好 '+v.ready+' 段':'';const m=state?.reception?.map_observations,active=doc?.map_id===state?.reception?.map_id;if($('observedMapStatus'))$('observedMapStatus').textContent=!active?'载入这张地图后可学习':m?.error?'地图学习暂不可用，固定底图保留':m?`${m.enabled?'低频学习中':'学习已暂停'} · 待融合 ${m.pending_cells||0} 格 · 已融合 ${m.cleared_cells} 格${m.merge_requested?' · 已安排空闲时融合':''}`:'等待地图观测';if($('autoMapUpdate')){$('autoMapUpdate').disabled=!active;if(m&&active)$('autoMapUpdate').checked=m.enabled;}if($('resetObservedMap'))$('resetObservedMap').disabled=!active;if($('mergeObservedMap'))$('mergeObservedMap').disabled=!active;};
 render=function(){
     if(['maps','replay'].includes(tab)&&!operator){
         if(!doc)return;
@@ -42,6 +42,10 @@ renderInspector=function(){
 function renderMapTools(){
     $('inspector').innerHTML=`<div class="pane-title"><h3>地图工具</h3></div><div class="pane">
     <label class="inline-check"><input type="checkbox" id="scanVisible" ${scanVisible?'checked':''}>实时激光叠加</label>
+    <label class="inline-check"><input type="checkbox" id="autoMapUpdate" ${state?.reception?.map_observations?.enabled!==false?'checked':''}>低频学习 · 每日融合</label>
+    <p class="small muted" id="observedMapStatus"></p><p class="small muted">平时使用固定底图，人群只参与实时避障。路过发现旧位置已扫通时低频记录，每24小时在导航空闲时统一融合；也可手动安排融合。原底图和版本保留。</p>
+    <button class="quiet wide" id="mergeObservedMap">空闲时融合已观测变化</button>
+    <button class="quiet wide" id="resetObservedMap">恢复原底图并暂停更新</button>
     <div class="grid2"><button id="correctPose">拖动校正位置</button><button id="rotateMap">地图转 90°</button></div>
     <div class="section-note" id="toolNote">拖动校正：从真实位置拖向机身朝向，激光副本随之移动；提交后只更新定位。</div>
     <div class="row" style="margin-top:8px"><button id="applyCorrection" ${correction?'':'disabled'}>应用校正</button><button id="cancelTool">取消操作</button></div>
@@ -58,6 +62,10 @@ function renderMapTools(){
     <input id="siteName" placeholder="导入为新地图名称，例如 office_1005" style="margin-top:8px"><button id="importSite" class="wide" style="margin-top:8px">导入场地包</button><input id="siteFile" type="file" accept=".zip" hidden>
     <p class="small muted" id="transferProgress">地图、位姿图、产品话术和通行标注同包校验。换机不复制旧机器的标定和实时定位。</p></div>`;
     $('scanVisible').onchange=e=>{scanVisible=e.target.checked;draw();};
+    $('autoMapUpdate').onchange=async e=>{try{await mapCall('map_observations',{map_id:doc.map_id,enabled:e.target.checked});await refresh();}catch(error){e.target.checked=!e.target.checked;toast(error.message);}};
+    $('mergeObservedMap').onclick=async()=>{try{await mapCall('map_observations_merge',{map_id:doc.map_id});toast('已安排在导航空闲时融合，不中断当前任务');await refresh();}catch(error){toast(error.message);}};
+    $('resetObservedMap').onclick=async()=>{try{await mapCall('map_observations_reset',{map_id:doc.map_id});toast('已保留版本，恢复原底图并暂停自动更新');await refresh();}catch(error){toast(error.message);}};
+    renderStatus();
     $('rotateMap').onclick=()=>{mapRotation=(mapRotation+Math.PI/2)%(2*Math.PI);fitMap();};
     $('correctPose').onclick=()=>activateTool('correct');$('cancelTool').onclick=clearTool;
     $('drawKeepout').onclick=()=>activateTool('keepout');$('drawSpeed').onclick=()=>activateTool('speed');$('drawRegion').onclick=()=>activateTool('region');

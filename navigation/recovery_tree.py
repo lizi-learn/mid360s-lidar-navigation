@@ -2,9 +2,14 @@
 from pathlib import Path
 import hashlib,math,os,xml.etree.ElementTree as ET
 
-def recovery_tree(base,directory,max_wait):
+def recovery_tree(base,directory,max_wait,goal_checker_id=None):
     if type(max_wait)not in(int,float)or not math.isfinite(max_wait)or not .1<=max_wait<=600:raise ValueError('Invalid recovery wait duration')
     base=Path(base);tree=ET.parse(base);root=tree.getroot()
+    if goal_checker_id is not None:
+        if goal_checker_id not in ('presentation_goal_checker','presentation_position_goal_checker'):raise ValueError('Unknown presentation goal checker')
+        followers=root.findall('.//FollowPath')
+        if len(followers)!=1:raise ValueError('Expected one navigation path controller')
+        followers[0].set('goal_checker_id',goal_checker_id)
     recoveries=root.findall('.//RecoveryNode')
     if len(recoveries)!=1:raise ValueError('Expected one navigation recovery node')
     waits=recoveries[0].findall('.//Wait')

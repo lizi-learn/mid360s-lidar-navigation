@@ -23,7 +23,7 @@ from map_persistence import validate_map_metadata
 from reception_catalog import ident, validate
 from reception_annotations import inside
 
-FILES=('mapped.yaml','mapped.pgm','mapped.data','mapped.posegraph')
+FILES=('mapped.yaml','mapped.pgm','mapped.data','mapped.posegraph','observed-map.json')
 MAX_BYTES=64*1024*1024
 
 
@@ -81,6 +81,25 @@ class MapLibrary:
     def __init__(self,root,catalog):
         self.root=Path(root);self.catalog=catalog;self.lock=threading.RLock()
     def directory(self,name):return self.root/ident(name)
+    def raster(self,name):
+        """Read a saved map for editing without starting ROS or localization."""
+        with self.lock:
+            directory=self.directory(name);metadata=validate_map_metadata(directory/'mapped.yaml')
+            if abs(metadata['origin'][2])>1e-8:raise ValueError('地图编辑暂不支持旋转的栅格原点')
+            image=directory/metadata['image']
+            if image.resolve().parent!=directory.resolve():raise ValueError('地图图像必须位于场地目录中')
+            if not math.isfinite(metadata['resolution'])or metadata['resolution']<=0:raise ValueError('地图分辨率无效')
+            if len(metadata['origin'])!=3 or not all(math.isfinite(v)for v in metadata['origin']):raise ValueError('地图原点无效')
+            pixels=read_pgm(image)
+            occupancy=(pixels.astype(float) if metadata.get('negate',0) else 255-pixels.astype(float))/255.
+            cells=np.full(pixels.shape,-1,dtype=np.int8)
+            cells[occupancy<metadata['free_thresh']]=0;cells[occupancy>metadata['occupied_thresh']]=100
+            grid=dict(map_id=name,width=pixels.shape[1],height=pixels.shape[0],resolution=metadata['resolution'],
+                        origin=metadata['origin'][:2],cells=cells[::-1].ravel().tolist(),
+                        source='saved_map',image_sha256=sha(image.read_bytes()))
+            from observed_map import saved_cells,FILENAME
+            grid['cells'],grid['map_observations']=saved_cells(directory/FILENAME,grid)
+            return grid
     def versions(self,name):
         directory=self.directory(name)/'versions';rows=[]
         for file in sorted(directory.glob('*/manifest.json'),reverse=True)[:30]:
@@ -166,6 +185,14 @@ class MapLibrary:
                 metadata=validate_map_metadata(temporary/'mapped.yaml')
                 if metadata['image']!='mapped.pgm':raise ValueError('场地包地图只能引用内部mapped.pgm')
                 read_pgm(temporary/'mapped.pgm')
+                # Validate optional measured updates before committing a bundle.
+                from observed_map import read_layer,FILENAME
+                pixels=read_pgm(temporary/'mapped.pgm')
+                occupancy=(pixels.astype(float) if metadata.get('negate',0) else 255-pixels.astype(float))/255.
+                cells=np.full(pixels.shape,-1,dtype=np.int8)
+                cells[occupancy<metadata['free_thresh']]=0;cells[occupancy>metadata['occupied_thresh']]=100
+                read_layer(temporary/FILENAME,dict(width=pixels.shape[1],height=pixels.shape[0],
+                    resolution=metadata['resolution'],origin=metadata['origin'][:2],cells=cells[::-1].ravel().tolist()))
                 atomic_json(temporary/'site-origin.json',{'source_bundle':manifest['bundle_id'],'source_map_id':manifest['map_id'],
                     'new_installation_id':str(uuid.uuid4()),'imported_at':time.time(),'calibration_copied':False,'localization_copied':False})
                 os.replace(temporary,target)

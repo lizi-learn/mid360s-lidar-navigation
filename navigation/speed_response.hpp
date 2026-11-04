@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include "input_s_curve.hpp"
 
 namespace p2_nav {
 struct SpeedTrackingState {
@@ -19,15 +20,13 @@ enum SpeedTrackingReason : std::uint32_t {
   speed_invalid_input=3, speed_overspeed=4
 };
 class SpeedResponse {
-  double integral_[2]{}, output_[2]{}, filtered_[2]{};
-  double moving_time_[2]{};
-  bool started_[2]{};
-  bool initialized_=false;
+  SmoothInputAxis forward_;
+  double yaw_=0.;
   SpeedTrackingState state_{};
  public:
   void reset(){
-    for(unsigned i=0;i<2;++i){integral_[i]=output_[i]=filtered_[i]=moving_time_[i]=0.;started_[i]=false;}
-    initialized_=false;state_={};
+    forward_.reset();yaw_=0.;
+    state_={};
   }
   const SpeedTrackingState& state()const{return state_;}
   SpeedTrackingState step(double vx,double wz,double measured_x,double measured_yaw,
@@ -47,19 +46,21 @@ class SpeedResponse {
     state_.target_x=vx;state_.target_yaw=wz;
     state_.measured_x=measured_x;state_.measured_yaw=measured_yaw;
     state_.source_ns=source_ns;state_.valid=1;state_.reason=speed_tracking;
-    // A zero on takeover, collision or cancellation clears immediately above.
-    // Other input changes are slewed; measured velocity never rescales this
-    // explicit manual-equivalent command or silently multiplies half twice.
-    const double target[2]={vx,wz}, slew[2]={.4,.5};
-    for(unsigned i=0;i<2;++i){
-      if(target[i]==0.)output_[i]=0.;
-      else {
-        const double rate=i==0 && target[i]<output_[i]?.8:slew[i];
-        output_[i]=std::clamp(target[i],output_[i]-rate*dt,output_[i]+rate*dt);
-      }
-    }
-    initialized_=true;
-    state_.policy_x=output_[0];state_.policy_yaw=output_[1];return state_;
+    // Forward starts use the finite S trajectory. Keep the original .8/s
+    // decrease response: slowing an already-issued approach/braking request
+    // changes its stopping distance and must not hide behind a startup fix.
+    // Keep the original yaw slew exactly: replacing that closed-loop steering
+    // response with a slower filter changes both pursuit and pivot pulse area.
+    // Explicit axis withdrawal keeps the original immediate-zero contract.
+    if(vx==0.){forward_.reset();state_.policy_x=0.;}
+    else if(vx<forward_.value()){
+      forward_.reset(std::max(vx,forward_.value()-.8*dt));
+      state_.policy_x=forward_.value();
+    }else state_.policy_x=forward_.step(vx,dt,.30,.40);
+    if(wz==0.)yaw_=0.;
+    else yaw_=std::clamp(wz,yaw_-.5*dt,yaw_+.5*dt);
+    state_.policy_yaw=yaw_;
+    return state_;
   }
 };
 } // namespace p2_nav

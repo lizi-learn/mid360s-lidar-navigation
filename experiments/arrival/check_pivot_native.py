@@ -1,4 +1,4 @@
-import os,json,itertools,subprocess,sys,argparse
+import os,json,itertools,subprocess,sys,argparse,csv
 from pathlib import Path
 import yaml
 ROOT=Path(__file__).resolve().parents[2];sys.path.insert(0,str(ROOT/'navigation'))
@@ -11,7 +11,7 @@ cohorts=[('original_large',list(itertools.product([.8,1.2],[.3,.8,1.1],[.28,.35]
  ('sweep_a',list(itertools.product([.55,1.25,1.9],[.55,1.45,1.95],[.32,.44],[-.4,.4,-2.8,2.8]))),
  ('sweep_b',list(itertools.product([.62,1.05,1.65],[.65,1.35,1.85],[.31,.425],[-.47,.47,-2.65,2.65])))]
 for candidate in [False,True]:
- params=config(gait_profile='p2-flat-model')['controller_server']['ros__parameters'];params['FollowPath']['settled_pivot_response']=candidate;params['goal_checker']['plugin']='p2_nav_controller::SettledHeadingGoalChecker'if candidate else'nav2_controller::SimpleGoalChecker'
+ params=config(gait_profile='p2-flat-model')['controller_server']['ros__parameters'];params['FollowPath']['settled_pivot_response']=candidate;params['progress_checker']['plugin']='p2_nav_controller::RotationProgressChecker'if candidate else'nav2_controller::SimpleProgressChecker';params['goal_checker']['plugin']='p2_nav_controller::SettledHeadingGoalChecker'if candidate else'nav2_controller::SimpleGoalChecker'
  pf=out/('candidate.yaml'if candidate else'baseline.yaml');pf.write_text(yaml.safe_dump({'preview_controller':{'ros__parameters':params}}))
  for cohort,cases in cohorts:
   # Paired comparisons retain every failure. These public fixed sweeps
@@ -29,12 +29,16 @@ for candidate in [False,True]:
    (out/'progress.json').write_text(json.dumps(rows,indent=2))
  # Obstacle response and explicit deactivation are both measured at the actual
  # plugin. The synthetic transport queue drains; it is never erased magically.
- for kind in ['blocked','cancel']:
-  prefix=out/f'{int(candidate)}-{kind}';cmd=[args.binary,str(prefix),'1.2','1.1','.35','.8',kind,'--ros-args','--params-file',str(pf),'--log-level','error']
+ for kind in ['blocked','cancel','endpoint']:
+  prefix=out/f'{int(candidate)}-{kind}';model=['.8','.1','0.','.25']if kind=='endpoint'else['1.2','1.1','.35','.8'];cmd=[args.binary,str(prefix),*model,kind,'--ros-args','--params-file',str(pf),'--log-level','error']
   r=subprocess.run(cmd,capture_output=True,text=True,timeout=12);prefix.with_suffix('.log').write_text(r.stdout+r.stderr)
   row={'cohort':kind,'candidate':candidate,'kind':kind,'returncode':r.returncode}
   if r.returncode==0:
-   row.update(json.loads(prefix.with_suffix('.json').read_text()));row['passed']=row['body_intrusions']==0 and ((kind=='blocked'and row['obstacle_verified']and row['collision_stops']>0)or(kind=='cancel'and row['cancelled']and not row['post_cancel_nonzero']and abs(row['final_measured_rate'])<.03))
+   row.update(json.loads(prefix.with_suffix('.json').read_text()))
+   if kind=='endpoint':
+    first=next(csv.DictReader(prefix.with_suffix('.csv').open()))
+    row['initial_requested_turn_allowed']=float(first['raw_z'])>0.0 and int(first['collision_exception'])==0
+   row['passed']=row['body_intrusions']==0 and ((kind=='blocked'and row['obstacle_verified']and row['collision_stops']>0)or(kind=='endpoint'and row['obstacle_verified']and row['goal_reached']and row['initial_requested_turn_allowed'])or(kind=='cancel'and row['cancelled']and not row['post_cancel_nonzero']and abs(row['final_measured_rate'])<.03))
   else:row['passed']=False
   rows.append(row)
 summary={}

@@ -19,7 +19,8 @@ from nav_msgs.msg import Odometry
 from sensor_msgs.msg import PointCloud2,LaserScan,JointState
 from biped_reference import BodyReference,rigid
 from odometry_velocity import PlanarVelocity
-from scan_ranges import encode_ranges
+from scan_ranges import polar_ranges
+from pose_history import PoseHistory
 from std_msgs.msg import Bool,String
 from tf2_ros import TransformBroadcaster,StaticTransformBroadcaster
 from terrain import local_floor,classify,observed_front_support,forward_lower_surface,ground_decision
@@ -47,6 +48,7 @@ class Adapter:
             profile=load(selected);check_machine(profile)
             if alignment.get('robot_identity')!=identity(profile):raise ValueError('Sensor alignment belongs to another robot/installation')
             if args.body_reference:check_calibration(profile,json.loads(Path(args.body_reference).read_text()))
+        self.pose_history=PoseHistory()
         self.rotation=np.asarray(alignment['rotation'])
         self.initial_height=float(alignment['initial_height_m'])
         if self.rotation.shape!=(3,3) or not np.allclose(self.rotation@self.rotation.T,np.eye(3),atol=1e-4):raise ValueError('Invalid gravity alignment')
@@ -81,11 +83,18 @@ class Adapter:
             self.body_reference.history.add(msg.header.stamp.sec+msg.header.stamp.nanosec*1e-9,dict(zip(msg.name,msg.position)))
         except (ValueError,KeyError) as e:self.reference_fault="Joint feedback invalid: "+str(e)
     def on_cloud(self,msg):
-        with self.lock:self.cloud=msg
+        received=time.monotonic()
+        source_age=self.source.get_clock().now().nanoseconds*1e-9-(msg.header.stamp.sec+msg.header.stamp.nanosec*1e-9)
+        with self.lock:self.cloud=msg;self.cloud_received=(received,source_age)
     def on_odom(self,msg):
-        with self.lock:self.odom=msg
+        source_ns=msg.header.stamp.sec*10**9+msg.header.stamp.nanosec
+        p=msg.pose.pose.position;q=msg.pose.pose.orientation
+        with self.lock:
+            if self.odom is None or source_ns>=self.odom.header.stamp.sec*10**9+self.odom.header.stamp.nanosec:self.odom=msg
+            try:self.pose_history.add(source_ns,(p.x,p.y,p.z),(q.x,q.y,q.z,q.w))
+            except ValueError:pass  # Existing tick validation handles an invalid latest pose.
     def tick(self):
-        with self.lock:cloud,odom=self.cloud,self.odom
+        with self.lock:cloud,odom,received=self.cloud,self.odom,getattr(self,'cloud_received',None)
         ground=Bool();ground.data=False
         if cloud is None or odom is None:self.ground_pub.publish(ground);return
         now=self.sink.get_clock().now().nanoseconds*1e-9
@@ -143,34 +152,59 @@ class Adapter:
             reference_source_age_s=now-stamp(odom),hardware_execution_enabled=False)
         message=String();message.data=json.dumps(reference);self.reference_pub.publish(message)
         if self.processed_stamp==stamp(cloud):return
-        self.processed_stamp=stamp(cloud)
+        cloud_ns=cloud.header.stamp.sec*10**9+cloud.header.stamp.nanosec
+        with self.lock:sample=self.pose_history.at(cloud_ns)
+        # Wait for the measured bracket instead of attaching a newer pose to an
+        # older cloud. The last source-stamped scan remains subject to its
+        # unchanged expiry; this wait never renews it or inserts a new health gate.
+        if sample is None:return
         try:
+            cloud_imu=Rotation.from_quat(sample.quaternion).as_matrix()
+            cloud_optical=self.rotation@(np.asarray(sample.position)+cloud_imu@np.array([-.011,-.02329,.04412]))
+            cloud_origin=cloud_optical.copy();cloud_orientation=self.rotation@cloud_imu@np.diag([1.,-1.,-1.])
+            if self.body_reference:
+                body=self.body_reference.transform(rigid(self.rotation@cloud_imu,cloud_optical+np.array([0.,0.,self.initial_height])),cloud_ns*1e-9)
+                cloud_origin=body[:3,3];cloud_orientation=body[:3,:3]
+            cloud_yaw=math.atan2(cloud_orientation[1,0],cloud_orientation[0,0])
+            # A source-stamped projection frame makes every consumer use exactly
+            # this cloud pose. It does not change the latest odometry output.
+            projection=TransformStamped();projection.header.stamp=cloud.header.stamp
+            projection.header.frame_id='odom';projection.child_frame_id='laser_projection'
+            projection.transform.translation.x=float(cloud_origin[0]);projection.transform.translation.y=float(cloud_origin[1])
+            projection.transform.rotation.z=math.sin(cloud_yaw/2);projection.transform.rotation.w=math.cos(cloud_yaw/2)
+            self.tf.sendTransform(projection)
+            self.processed_stamp=stamp(cloud)
+            processing_started=time.monotonic()
             points=xyz(cloud);points=points[np.isfinite(points).all(axis=1)]
             points=points@self.rotation.T;points[:,2]+=self.initial_height
-            plane,report=local_floor(points,origin[:2],expected_height=float(optical[2]))
-            _,obstacles=classify(points,origin[:2],plane)
-            delta=points[obstacles,:2]-origin[:2]
-            bearing=(np.arctan2(delta[:,1],delta[:,0])-yaw+math.pi)%(2*math.pi)-math.pi
-            ranges=np.linalg.norm(delta,axis=1);indices=np.clip(((bearing+math.pi)/(2*math.pi)*360).astype(int),0,359)
-            output=np.full(360,np.inf);np.minimum.at(output,indices,ranges)
-            output=encode_ranges(output,.12,14.)
-            scan=LaserScan();scan.header.stamp=cloud.header.stamp;scan.header.frame_id='laser'
-            scan.angle_min=-math.pi;scan.angle_increment=2*math.pi/360;scan.angle_max=-math.pi+359*scan.angle_increment
+            plane,report=local_floor(points,cloud_origin[:2],expected_height=float(cloud_optical[2]))
+            _,obstacles=classify(points,cloud_origin[:2],plane)
+            output=polar_ranges(points[obstacles,:2]-cloud_origin[:2],cloud_yaw)
+            scan=LaserScan();scan.header.stamp=cloud.header.stamp;scan.header.frame_id='laser_projection'
+            scan.angle_min=-math.pi;scan.angle_increment=2*math.pi/len(output);scan.angle_max=-math.pi+(len(output)-1)*scan.angle_increment
             scan.range_min=.12;scan.range_max=14.;scan.scan_time=.1;scan.ranges=output.tolist();self.scan_pub.publish(scan)
-            instant_observed=bool(observed_front_support(points,origin[:2],yaw,plane))
+            instant_observed=bool(observed_front_support(points,cloud_origin[:2],cloud_yaw,plane))
             observed=instant_observed;support_report={}
             if self.support_history:
-                observed,support_report=self.support_history.update(points,origin[:2],yaw,plane,stamp(cloud),now)
+                observed,support_report=self.support_history.update(points,cloud_origin[:2],cloud_yaw,plane,stamp(cloud),now)
             verified=bool(self.body_reference and self.body_reference.verified)
-            lower_surface=forward_lower_surface(points,origin[:2],yaw,plane)
+            lower_surface=forward_lower_surface(points,cloud_origin[:2],cloud_yaw,plane)
             ground.data=ground_decision(self.ground_policy,observed,lower_surface) and (verified if self.body_reference else True);self.ground_pub.publish(ground)
             report.update(ground_ok=ground.data,ground_policy=self.ground_policy,lower_surface_observed=lower_surface,
                 near_support_advisory=not observed,finite_scan_bins=int(np.isfinite(output).sum()),
-                source_age_s=now-stamp(cloud),base_reference='timestamped body kinematics' if self.body_reference else 'LiDAR center ground projection',
+                source_age_s=self.sink.get_clock().now().nanoseconds*1e-9-stamp(cloud),
+                input_source_age_s=now-stamp(cloud),processing_duration_ms=(time.monotonic()-processing_started)*1000,
+                base_reference='timestamped body kinematics' if self.body_reference else 'LiDAR center ground projection',
                 velocity_ready=True,velocity_window_s=self.velocity.window,observed_front_support=observed,instant_observed_front_support=instant_observed,
                 reference_source_stamp_s=stamp(odom),hardware_execution_enabled=False)
             report.update(reference_status(self.navigation_reference,body_verified=verified,body_feedback=bool(self.body_reference)))
+            report.update(projection_pose_stamp_ns=cloud_ns,projection_pose_bracket_ns=list(sample.bracket_ns),
+                latest_odom_minus_cloud_ns=odom.header.stamp.sec*10**9+odom.header.stamp.nanosec-cloud_ns,
+                projection_frame='laser_projection',scan_bins=len(output))
             report.update(support_report)
+            if received is not None:
+                report.update(cloud_age_at_receive_s=received[1],
+                              adapter_receive_to_report_ms=(time.monotonic()-received[0])*1000)
         except ValueError as e:
             if self.support_history:self.support_history.clear()
             self.ground_pub.publish(ground);report={'error':str(e),'ground_ok':False,'hardware_execution_enabled':False}
@@ -178,6 +212,7 @@ class Adapter:
     def run(self):
         sink_executor=SingleThreadedExecutor(context=self.sink_context);sink_executor.add_node(self.sink)
         try:sink_executor.spin()
+        except KeyboardInterrupt:pass
         finally:
             sink_executor.shutdown()
             self.executor.shutdown();self.source.destroy_node();self.sink.destroy_node()

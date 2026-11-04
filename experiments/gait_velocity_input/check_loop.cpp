@@ -29,6 +29,12 @@ struct Rig {
   auto f=frame(Operation::velocity);f.velocity.vx=.1f;box.post(f);tick();assert(reply.vx>.099f);}
 };
 int main(){
+ for(auto age:{160000000ULL,1999999999ULL,2000000000ULL}){
+  NativeOperatorGuard guard;NativeOperatorPacket p;p.instance=40;p.sequence=1;p.monotonic_ns=base;p.mode=1;p.flags=3;
+  assert(guard.accept(p,base+age));assert(!guard.accept(p,base+age));
+ }
+ {NativeOperatorGuard guard;NativeOperatorPacket p;p.instance=40;p.sequence=1;p.monotonic_ns=base;p.mode=1;p.flags=3;
+  assert(!guard.accept(p,base+native_operator_timeout_ns+1));}
  {Rig r;r.active();auto n=native();r.raw.mode=3;r.physical();r.tick(n);
   assert(!r.reply.navigation_owned&&!r.reply.force_zero&&r.reply.cancel_pending);
   r.raw.mode=1;r.physical();r.tick();assert(!r.reply.navigation_owned&&r.reply.force_zero);}
@@ -47,7 +53,7 @@ int main(){
   if(i==10){r.raw.flags|=4;r.raw.x=.5f;r.physical(base+1);}
   if(i==11)a.operator_instance++;
   if(i==12)a.health_stamp=base-100000001;
-  if(i==13)a.operator_stamp=base-100000001;
+  if(i==13)a.operator_stamp=base-native_operator_timeout_ns-1;
   if(i==14)a.flags&=~health_ground;
   if(i==15)a.flags&=~health_localized;
   r.box.post(a);r.tick(n);assert(!r.reply.navigation_owned&&r.reply.cancel_pending);if(i!=10)assert(r.reply.force_zero);else assert(r.reply.manual_owned&&r.reply.vx==.5f);
@@ -86,7 +92,18 @@ int main(){
  {Rig r;r.active();auto f=r.frame(Operation::authority);f.operator_mode=3;f.flags|=stick_active;
   r.box.post(f);r.tick();assert(r.reply.navigation_owned&&!r.reply.manual_owned);}
  // Raw input expiry revokes the lease even if RPC restamps every other field.
- {Rig r;r.active();auto t=base+100000001;auto f=r.frame(Operation::authority,t);
+ {Rig r;r.active();auto t=base+native_operator_timeout_ns+1;auto f=r.frame(Operation::authority,t);
   r.box.post(f);r.tick(native(t));assert(!r.reply.navigation_owned&&r.reply.cancel_pending);}
+ // Keep the original raw E-left stamp during a source gap. Fresh independent
+ // health/command traffic cannot renew it, and short gaps do not revoke it.
+ {Rig r;r.active();
+  for(std::uint64_t dt=20000000;dt<=native_operator_timeout_ns;dt+=20000000){
+   auto t=base+dt;auto a=r.frame(Operation::authority,t);a.operator_stamp=base;r.box.post(a);
+   auto v=r.frame(Operation::velocity,t);v.velocity.vx=.1f;r.box.post(v);r.tick(native(t));
+   assert(r.reply.navigation_owned&&!r.reply.cancel_pending);
+  }
+  auto t=base+native_operator_timeout_ns+1;auto a=r.frame(Operation::authority,t);a.operator_stamp=base;r.box.post(a);
+  r.tick(native(t));assert(!r.reply.navigation_owned&&r.reply.cancel_pending);
+ }
  std::cout<<"native manual priority,16 authority faults,expiry,no-auto-resume,zero handshake,connection replay passed\n";
 }

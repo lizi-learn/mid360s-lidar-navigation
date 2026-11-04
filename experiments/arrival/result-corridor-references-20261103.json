@@ -1,0 +1,72 @@
+{
+  "scope": "Corridor-reference software validation; not physical walking acceptance",
+  "base": "afeb2c114b3da09041d845517279bc338e916d35",
+  "native_corridor": {
+    "passed": true,
+    "cases": [
+      {
+        "case": "occupied_reference_area",
+        "points": 274,
+        "body_intrusions": 0
+      },
+      {
+        "case": "-area-initial",
+        "points": 275,
+        "body_intrusions": 0
+      },
+      {
+        "case": "-area-other",
+        "points": 170,
+        "body_intrusions": 0
+      },
+      {
+        "case": "-area-reused",
+        "points": 270,
+        "body_intrusions": 0
+      },
+      {
+        "case": "-area-new-obstacle",
+        "points": 172,
+        "body_intrusions": 0
+      },
+      {
+        "case": "exact_position_final",
+        "points": 416,
+        "body_intrusions": 0
+      },
+      {
+        "case": "exact_directed_final",
+        "points": 145,
+        "body_intrusions": 0
+      },
+      {
+        "case": "nearest_free_other_component_skipped",
+        "points": 156,
+        "body_intrusions": 0
+      }
+    ],
+    "blocked_area_rejected": true,
+    "unknown_area_rejected": true,
+    "occupied_final_rejected": true,
+    "exact_final_heading_preserved": true,
+    "original_exact_reference_failed": true,
+    "reference_radius": 0.6,
+    "footprint_total_side": 0.55,
+    "new_obstacle_reselected": true,
+    "alternating_leg_selection_stable": true,
+    "fixture_seed": 0,
+    "hardware_commands": 0,
+    "scope": "Actual Nav2 planner plugin on synthetic live costmaps; not physical tracking acceptance"
+  },
+  "native_previous_slow_planner_and_stale_action": "passed unchanged native BT and actual ROS action fixtures on new corridor tree",
+  "private_frozen_replay": {
+    "old_exact_reference_failures": 2,
+    "new_complete_routes": 2,
+    "complete_body_intrusions": 0,
+    "office_geometry_excluded": true,
+    "capture_is_not_atomic_planner_input": true
+  },
+  "initial_invalid_candidate": "Nearest-candidate approach failed one private return replay; retained locally. Current ranking includes approach room, spatial diversity and per-candidate time budget.",
+  "unit_tests": 397,
+  "production_changed": false
+}

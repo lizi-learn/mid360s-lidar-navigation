@@ -1,5 +1,11 @@
 cmake_minimum_required(VERSION 3.8)
 project(arrival_fixture)
+add_library(handoff_response SHARED handoff_response.cpp)
+target_compile_features(handoff_response PUBLIC cxx_std_17)
+target_include_directories(handoff_response PRIVATE ../../navigation ../../navigation/p2_nav_controller/include)
+add_executable(lateral_motion lateral_motion.cpp)
+target_compile_features(lateral_motion PUBLIC cxx_std_17)
+target_include_directories(lateral_motion PRIVATE ../../navigation/p2_nav_controller/include)
 find_package(ament_cmake REQUIRED)
 find_package(nav2_core REQUIRED)
 find_package(nav2_costmap_2d REQUIRED)
@@ -15,10 +21,43 @@ target_include_directories(pivot_model PRIVATE ../../navigation ../../navigation
 
 add_executable(tracking_replay tracking_replay.cpp)
 target_compile_features(tracking_replay PUBLIC cxx_std_17)
-target_include_directories(tracking_replay PRIVATE ../../navigation)
+target_include_directories(tracking_replay PRIVATE ../../navigation ../../navigation/p2_nav_controller/include)
 ament_target_dependencies(tracking_replay nav2_core nav2_costmap_2d pluginlib)
+target_link_libraries(tracking_replay ${CMAKE_DL_LIBS})
 
 add_executable(native_pivot native_pivot.cpp)
 target_compile_features(native_pivot PUBLIC cxx_std_17)
 target_include_directories(native_pivot PRIVATE ../../navigation)
 ament_target_dependencies(native_pivot nav2_core nav2_costmap_2d pluginlib)
+
+add_executable(settled_reset settled_reset.cpp)
+target_compile_features(settled_reset PUBLIC cxx_std_17)
+target_include_directories(settled_reset PRIVATE ../../navigation/p2_nav_controller/include)
+ament_target_dependencies(settled_reset nav2_core nav2_costmap_2d pluginlib)
+
+add_executable(rotation_progress rotation_progress.cpp)
+target_compile_features(rotation_progress PUBLIC cxx_std_17)
+ament_target_dependencies(rotation_progress nav2_core pluginlib)
+
+add_executable(filled_footprint filled_footprint.cpp)
+target_compile_features(filled_footprint PUBLIC cxx_std_17)
+target_include_directories(filled_footprint PRIVATE ../../navigation/p2_nav_controller/include)
+ament_target_dependencies(filled_footprint nav2_costmap_2d)
+
+add_executable(route_rejoin_replay route_rejoin_replay.cpp)
+target_compile_features(route_rejoin_replay PUBLIC cxx_std_17)
+target_include_directories(route_rejoin_replay PRIVATE ../../navigation/p2_nav_controller/include)
+ament_target_dependencies(route_rejoin_replay nav2_costmap_2d)
+
+add_executable(presentation_arrival presentation_arrival.cpp)
+target_compile_features(presentation_arrival PUBLIC cxx_std_17)
+ament_target_dependencies(presentation_arrival nav2_core nav2_costmap_2d pluginlib)
+
+add_executable(dynamic_map dynamic_map.cpp)
+target_compile_features(dynamic_map PUBLIC cxx_std_17)
+ament_target_dependencies(dynamic_map nav2_costmap_2d pluginlib)
+target_link_libraries(dynamic_map ${CMAKE_DL_LIBS})
+
+add_executable(pivot_observation pivot_observation.cpp)
+target_compile_features(pivot_observation PUBLIC cxx_std_17)
+target_include_directories(pivot_observation PRIVATE ../../navigation/p2_nav_controller/include)

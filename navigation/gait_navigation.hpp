@@ -125,10 +125,10 @@ class GaitNavigationInput {
     box.try_input(snapshot_);
     const auto& a=snapshot_.authority;const auto& native=snapshot_.native;
     const auto now=n.monotonic_ns;
-    const bool native_fresh=fresh(native.monotonic_ns,now,100000000ULL)&&native.instance&&
+    const bool native_fresh=fresh(native.monotonic_ns,now,native_operator_timeout_ns)&&native.instance&&
       native.sequence&&(native.flags&1U)&&(native.flags&2U)&&native.mode>=1&&native.mode<=3;
     const bool authority_fresh=a.operation==Operation::authority&&a.client&&
-      a.operator_instance==native.instance&&fresh(a.operator_stamp,now,100000000ULL)&&
+      a.operator_instance==native.instance&&fresh(a.operator_stamp,now,native_operator_timeout_ns)&&
       fresh(a.monotonic_ns,now,100000000ULL)&&a.receiver_instance==n.receiver_instance&&
       a.receiver_generation==n.receiver_generation;
     const bool source_changed=operator_instance_&&

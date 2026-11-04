@@ -2,6 +2,7 @@
 from pathlib import Path
 from types import SimpleNamespace as NS
 from concurrent.futures import Future
+from unittest.mock import Mock
 import unittest,tempfile,xml.etree.ElementTree as ET
 from test_console_cancellation import Console,fixture,Handle
 
@@ -33,6 +34,54 @@ class PositionGoalTests(unittest.TestCase):
         c=self.setup_console();generation=c.session.generation
         with self.assertRaisesRegex(ValueError,'未知目标'):c.set_goal(dict(x=1.,y=1.,yaw=0.,heading_mode='typo'))
         self.assertEqual(c.session.generation,generation);self.assertFalse(c.planner.sent);self.assertFalse(c.nav.sent)
+    def directed_route(self):
+        c=self.setup_console();c.planner_through=Client(True);c.nav_through=Client(False)
+        c.route_final_goal=Mock()
+        Console.set_goal.__globals__.update(ComputePathThroughPoses=NS(Goal=Goal),NavigateThroughPoses=NS(Goal=Goal))
+        data=dict(x=1.,y=0.,yaw=.6,heading_mode='pose',_route_goals=[dict(x=.5,y=0.,yaw=0.),dict(x=1.,y=0.,yaw=.6)])
+        return c,data
+    def test_directed_route_preview_and_replanning_share_final_request(self):
+        c,data=self.directed_route();receipt=c.set_goal(data)
+        self.assertEqual(c.planner_through.sent[0].planner_id,'GuideDirected')
+        c.route_final_goal.assert_called_once_with(data,c.goal_route[-1],'GuideDirected')
+        c.confirm_goal({'generation':receipt['generation']})
+        tree=ET.parse(c.nav_through.sent[0].behavior_tree)
+        self.assertEqual(tree.find('.//ComputeReferencePath').get('planner_id'),'GuideDirected')
+        self.assertEqual(tree.find('.//FollowPath').get('goal_checker_id'),'goal_checker')
+    def test_position_corridor_uses_same_guide_planner_for_preview_and_execution(self):
+        c,data=self.directed_route();data['heading_mode']='position'
+        receipt=c.set_goal(data)
+        self.assertEqual(c.planner_through.sent[0].planner_id,'GuidePosition')
+        c.route_final_goal.assert_called_once_with(data,c.goal_route[-1],'GuidePosition')
+        c.confirm_goal({'generation':receipt['generation']})
+        tree=ET.parse(c.nav_through.sent[0].behavior_tree)
+        self.assertEqual(tree.find('.//ComputeReferencePath').get('planner_id'),'GuidePosition')
+        self.assertEqual(tree.find('.//FollowPath').get('goal_checker_id'),'position_goal_checker')
+        self.assertEqual(tree.find('.//RemovePassedGoals').get('radius'),'0.75')
+
+    def test_explicit_exact_through_route_preserves_original_constraints(self):
+        for mode,planner,tree in [('pose','RouteDirected','forward_directed_route.xml'),('position','PositionOnly','forward_position_through_poses.xml')]:
+            c,data=self.directed_route();data.update(heading_mode=mode,_route_reference_mode='exact')
+            receipt=c.set_goal(data);self.assertEqual(c.planner_through.sent[0].planner_id,planner)
+            c.confirm_goal({'generation':receipt['generation']})
+            self.assertEqual(ET.parse(c.nav_through.sent[0].behavior_tree).find('.//ComputeReferencePath').get('planner_id'),planner)
+
+    def test_invalid_corridor_mode_does_not_prepare_any_request(self):
+        c,data=self.directed_route();data['_route_reference_mode']='typo'
+        generation=c.session.generation
+        with self.assertRaisesRegex(ValueError,'通道参考'):c.set_goal(data)
+        self.assertEqual(c.session.generation,generation)
+        self.assertFalse(c.planner_through.sent);self.assertFalse(c.nav_through.sent)
+
+    def test_manual_cancel_during_route_parameters_never_sends_plan_or_motion(self):
+        c,data=self.directed_route();c.route_final_goal.side_effect=lambda *_:c.session.cancel()
+        with self.assertRaisesRegex(ValueError,'取消'):c.set_goal(data)
+        self.assertFalse(c.planner_through.sent);self.assertFalse(c.nav_through.sent)
+    def test_route_parameter_failure_cleans_up_pending_preview(self):
+        c,data=self.directed_route();c.route_final_goal.side_effect=ValueError('synthetic parameter failure')
+        with self.assertRaisesRegex(ValueError,'parameter failure'):c.set_goal(data)
+        self.assertFalse(c.pending_plan_accept);self.assertFalse(c.planner_through.sent)
+
     def test_both_trees_have_unambiguous_checker_when_two_are_loaded(self):
         import xml.etree.ElementTree as ET
         root=Path(__file__).resolve().parents[1]/'navigation'

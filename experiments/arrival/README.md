@@ -46,3 +46,85 @@ binaries caused a reproducible double destruction during teardown, diagnosed
 with AddressSanitizer. Normal process teardown is exercised by the fixture.
 
 The optional closed-loop map replay uses the actual planner, controller and goal checker with a planar lag/gain response. Replanning pauses simulated time; it does not establish real-time or biped stability. A frozen reverse-start return still fails after replan and is retained as a failure. A trial preferring retained paths was rejected after a replay body intrusion; it is not part of this controller.
+
+
+The retained-route rejoin now searches and constructs the same 2 m connection
+(`route_rejoin_distance`), beyond the normal 1.2–1.6 m pursuit preview. The old
+65 cm rejoin generated a short inward leg and an immediate opposite bend after
+small tracking offsets. Each new connection and the complete remaining suffix
+still get the original filled/swept-body check. A blocked or unknown suffix is
+rejected; this changes connection geometry, not occupied cells or the footprint.
+`check_rejoin.py` verifies the generated offset/rejoin and blocked-tail cases.
+
+The controller additionally checks the continuing measured-yaw arc when its
+requested yaw has changed. Forward projection uses at least the already
+requested forward value, since the body can still be accelerating through an
+earlier queued command. If this arc intersects the current map, forward input
+becomes zero while the corrective yaw and current navigation action remain
+active. Clear-space forward corrections are unchanged. This uses the existing
+projection horizon and policy-input convention, not a newly calibrated P2
+physical-speed or stopping model.
+
+`check_turn_response.py` reproduces a wall intersection with the prior RPP in a
+generated delayed-response case, then requires actual goal completion and zero
+filled-body intersections with the new controller. The replay now lets queued
+plant responses drain after zero input instead of erasing them. Eight ordinary
+straight/curve/corner/observed-obstacle cases remain regression checks. Optional
+fixed-reference and measured/native initial-state inputs isolate failures in
+local private replay; they do not change production source timestamps.
+
+The response correction remains latched through low measured translation. It
+releases after both the continuing measured-yaw projection and the zero-yaw
+continuation used by the normal forward handoff are clear. This prevents a
+low-speed threshold from alternating forward/pivot and repeatedly resetting the
+turn ramp. The full Console reception obstacle scenario exercises that handoff;
+the initial unlatched candidate failed this scenario and was not deployed.
+
+Reference/final pure-turn projections end at their requested yaw instead of
+projecting the same command past that yaw. The ongoing measured yaw retains the
+original full projection horizon. A new occupied-cell endpoint case verifies
+that a clear short turn is allowed while a blocked requested turn remains
+rejected. The actual keepout-line tracking/SLAM-tools integration also covers
+the corner where the former overrun projection stalled.
+
+The pure-turn check uses the filled square against whole occupied/unknown cells
+at5mrad spacing. It checks the complete requested angle even for low pulse
+inputs; coarse outline sampling could miss a cell inside the rotated corner.
+The endpoint regression requires the first requested turn to be admitted and
+the goal to settle with zero body intrusion. Later braking for measured ongoing
+rotation is recorded rather than incorrectly requiring zero brake events.
+
+When a globally planned initial pivot disagrees with local obstacle cells, the
+controller evaluates its existing forward/velocity-window alternatives before
+failing the action. Every returned alternative and continuing response arc uses
+analytic filled-body sweep checks. This allows progression past a line corner
+before turning. The tools integration independently audits the synthetic truth
+body against the full authored line rectangle; it does not accept centre-only
+crossing as full-body clearance. Small new plans also clear obsolete reference
+pivot state instead of retaining an older target.
+
+`dynamic_map` also covers delayed buffered observations. A cloud processed400ms
+late can still be marked by the native ObstacleLayer, even though it is too old
+to authorize temporal expiry. Every such mark must retain its original producer
+time; skipping its bookkeeping can leave a permanent dynamic wall. The fixture
+checks delayed marking, offline retention, expiry after a fresh source returns,
+and a delayed refresh retaining its complete source-time lifetime. It reports
+the actual loaded costmap library. Static walls, exterior keepout and unobserved
+interior space remain separate checks; no sensor timestamp is rewritten.
+
+`check_handoff.py` combines the actual C++ pivot/input-ramp arithmetic with the
+production Python phase buffer, clear interval and final command gate. Named
+synthetic source ripple and planar delay/deadzone models distinguish phase
+starvation from actual sustained drift. `check_handoff_ros.py` then drives the
+actual buffer, native collision monitor and final ROS gate through the same
+small-turn case. Duplicate phase ownership can reject every pulse even though
+upstream measured-mean motion has already settled. The active buffered/native
+launch therefore delegates phase transitions to that upstream buffer once;
+unbuffered launches retain the final handoff. Final clearance waiting,
+collision stops, invalid-command rejection and original source expiry remain.
+
+The monitor emits a new zero receipt for each actual evaluated zero request,
+including after the stock zero-publication timeout. It emits no command in the
+absence of a request; idle source-health observations stay separate. The source
+component regression checks both behaviors. No laser/odometry stamp is renewed.
+These are isolated component and planar tests, not a physical biped pass.

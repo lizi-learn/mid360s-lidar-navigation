@@ -26,6 +26,10 @@ jobs:
       - run: python experiments/reception/check.py --output /tmp/reception-workflow.json
       - run: python experiments/reception/check_voice.py --output /tmp/reception-voice.json
       - run: python experiments/reception/check_ui.py
+      - name: Save point forms and empty route drafts through the rendered editor
+        run: |
+          npm install --prefix /tmp/p2-editor-dom --no-audit --no-fund --save-exact jsdom@26.1.0
+          NODE_PATH=/tmp/p2-editor-dom/node_modules python experiments/reception/check_editor.py --output /tmp/reception-editor.json
       - run: python -m compileall -q robot_profile.py nav_server.py nav_geometry.py survey.py localization_health.py demo_server.py sensor_watchdog.py scripts tests navigation
       - run: python -m compileall -q experiments
       - run: bash -n experiments/continuous_forward/build.sh experiments/continuous_forward/check_collision.sh experiments/gait_space/build.sh experiments/gait_space/check.sh
@@ -35,11 +39,25 @@ jobs:
   humble-controller:
     runs-on: ubuntu-22.04
     container: ros:humble-ros-base-jammy
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
-      - run: apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ros-humble-nav2-smac-planner ros-humble-nav2-regulated-pure-pursuit-controller ros-humble-nav2-collision-monitor ros-humble-nav2-controller python3-colcon-common-extensions patch ros-humble-nav2-lifecycle-manager ros-humble-nav2-amcl ros-humble-nav2-map-server ros-humble-nav2-planner ros-humble-nav2-behaviors ros-humble-nav2-bt-navigator ros-humble-nav2-velocity-smoother ros-humble-slam-toolbox ros-humble-rmw-cyclonedds-cpp
+      - run: apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ros-humble-nav2-smac-planner ros-humble-nav2-regulated-pure-pursuit-controller ros-humble-nav2-collision-monitor ros-humble-nav2-controller python3-numpy python3-scipy python3-colcon-common-extensions patch ros-humble-nav2-lifecycle-manager ros-humble-nav2-amcl ros-humble-nav2-map-server ros-humble-nav2-planner ros-humble-nav2-behaviors ros-humble-nav2-bt-navigator ros-humble-nav2-velocity-smoother ros-humble-slam-toolbox ros-humble-rmw-cyclonedds-cpp
       - run: bash scripts/build-nav-controller.sh
+      - name: Preserve mapped floor and real obstacles under partial local scans
+        shell: bash
+        run: |
+          source /opt/ros/humble/setup.bash
+          source "$GITHUB_WORKSPACE/nav_controller_ws/install/setup.bash"
+          ROS_DOMAIN_ID=217 ROS_LOCALHOST_ONLY=1 timeout 100s python3 experiments/reception/check_local_context.py --output /tmp/local-static-context/report.json
+      - name: Consume passed route references and retain the precise final goal
+        shell: bash
+        run: |
+          source /opt/ros/humble/setup.bash
+          cmake -S experiments/waypoint_progress -B /tmp/waypoint-progress-build
+          cmake --build /tmp/waypoint-progress-build -j2
+          ROS_DOMAIN_ID=223 ROS_LOCALHOST_ONLY=1 /tmp/waypoint-progress-build/waypoint_progress navigation/forward_position_through_poses.xml
+          ROS_DOMAIN_ID=223 ROS_LOCALHOST_ONLY=1 /tmp/waypoint-progress-build/reference_action "$GITHUB_WORKSPACE/nav_controller_ws/install/p2_nav_controller/lib/libp2_nav_reference_bt_node.so" navigation/forward_position_through_poses.xml
       - name: Reject swept-body collisions while allowing a clear forward left arc
         shell: bash
         env:
@@ -101,17 +119,73 @@ jobs:
           source nav_controller_ws/install/setup.bash
           cmake -S experiments/arrival -B /tmp/arrival-build
           cmake --build /tmp/arrival-build -j2
+          /tmp/arrival-build/settled_reset
+          /tmp/arrival-build/lateral_motion
+          python3 -c "import sys,yaml;sys.path.insert(0,'navigation');from configure import config;print(yaml.safe_dump({'preview_controller':{'ros__parameters':config(gait_profile='p2-flat-model')['controller_server']['ros__parameters']}}))" > /tmp/presentation-arrival.yaml
+          /tmp/arrival-build/presentation_arrival --ros-args --params-file /tmp/presentation-arrival.yaml --log-level error
+          mkdir -p /tmp/arrival
+          /tmp/arrival-build/dynamic_map > /tmp/arrival/dynamic-map.log
+          /tmp/arrival-build/pivot_observation > /tmp/arrival/pivot-observation.json
+          python3 experiments/arrival/check_route_reply.py --output /tmp/arrival/route-reply.json
+          /tmp/arrival-build/rotation_progress > /tmp/arrival/rotation-progress.json
+          /tmp/arrival-build/filled_footprint > /tmp/arrival/filled-footprint.json
+          python3 experiments/arrival/check_rejoin.py --binary /tmp/arrival-build/route_rejoin_replay --output /tmp/arrival/rejoin
+          python3 experiments/arrival/check_turn_response.py --binary /tmp/arrival-build/tracking_replay --output /tmp/arrival/turn-response
+          python3 experiments/arrival/check_lateral_tracking.py --binary /tmp/arrival-build/tracking_replay --output /tmp/arrival/lateral-tracking
+          python3 experiments/arrival/check_lateral_ripple.py --binary /tmp/arrival-build/tracking_replay --output /tmp/arrival/lateral-ripple
+          python3 experiments/arrival/check_tracking_breakaway.py --binary /tmp/arrival-build/tracking_replay --output /tmp/arrival/tracking-breakaway
+          python3 experiments/arrival/check_directed_route.py --binary /tmp/arrival-build/arrival_planner --output /tmp/arrival/directed-route
           python3 experiments/arrival/check.py --binary /tmp/arrival-build/arrival_planner --output /tmp/arrival/planner/comparison.json
+          python3 experiments/arrival/check_plan_time.py --source "$GITHUB_WORKSPACE" --binary /tmp/arrival-build/arrival_planner --output /tmp/arrival/heading-plan-time
           python3 experiments/arrival/check_replanning.py --binary /tmp/arrival-build/arrival_planner --output /tmp/arrival/replanning/comparison.json
+          python3 experiments/arrival/check_roomier_reuse.py --binary /tmp/arrival-build/arrival_planner --output /tmp/arrival/roomier-reuse
+          python3 experiments/arrival/check_roomier_reuse.py --binary /tmp/arrival-build/arrival_planner --planner ExactHeadingLattice --output /tmp/arrival/directed-roomier-reuse
+          python3 experiments/arrival/check_wall_clearance.py --binary /tmp/arrival-build/arrival_planner --output /tmp/arrival/wall-clearance
+          python3 experiments/arrival/check_corridor.py --binary /tmp/arrival-build/arrival_planner --output /tmp/arrival/corridor/comparison.json
           python3 experiments/arrival/check_pivot.py --binary /tmp/arrival-build/pivot_model --output /tmp/arrival/pivot/comparison.json
           python3 experiments/arrival/check_pivot_native.py --binary /tmp/arrival-build/native_pivot --output /tmp/arrival/native-pivot/report.json
           python3 experiments/arrival/check_tracking.py --binary /tmp/arrival-build/tracking_replay --output /tmp/arrival/tracking/comparison.json
+          python3 experiments/arrival/check_reference_handoff.py --binary /tmp/arrival-build/tracking_replay --output /tmp/arrival/reference-handoff
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: position-arrival-component-evidence
           path: /tmp/arrival/*
           if-no-files-found: ignore
+      - name: Preserve registered-cloud pose time under delayed sensor delivery
+        shell: bash
+        env:
+          ROS_LOCALHOST_ONLY: '1'
+          OPENBLAS_NUM_THREADS: '1'
+          OMP_NUM_THREADS: '1'
+          RMW_IMPLEMENTATION: rmw_cyclonedds_cpp
+        run: |
+          source /opt/ros/humble/setup.bash
+          export CYCLONEDDS_URI="file://$PWD/config/cyclonedds-local.xml"
+          python3 experiments/projection/check.py --output /tmp/projection-time/report.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: projection-time-evidence
+          path: /tmp/projection-time
+          if-no-files-found: ignore
+      - name: Forward original health while non-control Console callbacks are blocked
+        shell: bash
+        run: |
+          source /opt/ros/humble/setup.bash
+          export OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 ROS_DOMAIN_ID=225 ROS_LOCALHOST_ONLY=1
+          python3 experiments/console_health/check.py --legacy
+          python3 experiments/console_health/check.py
+          python3 experiments/console_health/check_operator.py
+      - name: Keep native velocity I/O outside UI GIL stalls and preserve source expiry
+        shell: bash
+        run: |
+          source /opt/ros/humble/setup.bash
+          export PYTHONPATH=/usr/lib/python3/dist-packages:$PYTHONPATH
+          export OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 ROS_DOMAIN_ID=224 ROS_LOCALHOST_ONLY=1
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror -pthread -Inavigation experiments/gait_velocity_input/contract_server.cpp -o /tmp/gait-contract-process
+          python3 experiments/gait_velocity_input/check_process.py /tmp/gait-contract-process --legacy
+          python3 experiments/gait_velocity_input/check_process.py /tmp/gait-contract-process
       - name: Reject missing, stale, unknown and untransformable obstacle observations
         shell: bash
         env:
@@ -121,11 +195,20 @@ jobs:
           source /opt/ros/humble/setup.bash
           source nav_controller_ws/install/setup.bash
           python3 experiments/collision_source_guard/check.py --binary "$GITHUB_WORKSPACE/nav_controller_ws/install/p2_nav_controller/lib/p2_nav_controller/observed_collision_monitor" --output /tmp/collision-source-guard.json
+          python3 experiments/arrival/check_handoff.py --library /tmp/arrival-build/libhandoff_response.so --output /tmp/turn-handoff-model
+          python3 experiments/collision_source_guard/check_handoff_ros.py --binary "$GITHUB_WORKSPACE/nav_controller_ws/install/p2_nav_controller/lib/p2_nav_controller/observed_collision_monitor" --library /tmp/arrival-build/libhandoff_response.so --duplicate-owner --output /tmp/turn-handoff-duplicate.json
+          python3 experiments/collision_source_guard/check_handoff_ros.py --binary "$GITHUB_WORKSPACE/nav_controller_ws/install/p2_nav_controller/lib/p2_nav_controller/observed_collision_monitor" --library /tmp/arrival-build/libhandoff_response.so --output /tmp/turn-handoff-single.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: collision-source-component-evidence
           path: /tmp/collision-source-guard*
+          if-no-files-found: ignore
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: turn-handoff-component-evidence
+          path: /tmp/turn-handoff*
           if-no-files-found: ignore
       - name: Preserve every long-path point and original source time across relay
         shell: bash
@@ -141,6 +224,40 @@ jobs:
         with:
           name: path-view-component-evidence
           path: /tmp/path-view-component*
+          if-no-files-found: ignore
+      - name: Collect map changes without publishing, merge when idle, and keep people dynamic
+        shell: bash
+        env:
+          ROS_LOCALHOST_ONLY: '1'
+          ROS_DOMAIN_ID: '225'
+          RMW_IMPLEMENTATION: rmw_cyclonedds_cpp
+        run: |
+          source /opt/ros/humble/setup.bash
+          source nav_controller_ws/install/setup.bash
+          export CYCLONEDDS_URI="file://$PWD/config/cyclonedds-local.xml"
+          timeout 130s python3 experiments/reception/check_native.py --setup "$GITHUB_WORKSPACE/nav_controller_ws/install/setup.bash" --output /tmp/observed-map-native/report.json --scenario map-observations --port 8954 --domain 225
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: observed-map-native-evidence
+          path: /tmp/observed-map-native
+          if-no-files-found: ignore
+      - name: Independent right90, observed rotation obstacle and manual takeover
+        shell: bash
+        env:
+          ROS_LOCALHOST_ONLY: '1'
+          ROS_DOMAIN_ID: '208'
+          RMW_IMPLEMENTATION: rmw_cyclonedds_cpp
+        run: |
+          source /opt/ros/humble/setup.bash
+          source nav_controller_ws/install/setup.bash
+          export CYCLONEDDS_URI="file://$PWD/config/cyclonedds-local.xml"
+          timeout 140s python3 experiments/reception/check_native.py --setup "$GITHUB_WORKSPACE/nav_controller_ws/install/setup.bash" --output /tmp/independent-rotation/report.json --scenario rotation
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: independent-rotation-evidence
+          path: /tmp/independent-rotation
           if-no-files-found: ignore
       - name: Continuous reception, observed door shortcut, obstacle, pause and takeover
         shell: bash
@@ -158,6 +275,40 @@ jobs:
         with:
           name: reception-native-evidence
           path: /tmp/reception-native
+          if-no-files-found: ignore
+      - name: Directed arrival, repeated product speech, guest continue, dwell and return
+        shell: bash
+        env:
+          ROS_LOCALHOST_ONLY: '1'
+          ROS_DOMAIN_ID: '208'
+          RMW_IMPLEMENTATION: rmw_cyclonedds_cpp
+        run: |
+          source /opt/ros/humble/setup.bash
+          source nav_controller_ws/install/setup.bash
+          export CYCLONEDDS_URI="file://$PWD/config/cyclonedds-local.xml"
+          timeout 180s python3 experiments/reception/check_native.py --setup "$GITHUB_WORKSPACE/nav_controller_ws/install/setup.bash" --output /tmp/reception-followthrough/report.json --scenario followthrough --source-gap-ms 650
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: reception-followthrough-evidence
+          path: /tmp/reception-followthrough
+          if-no-files-found: ignore
+      - name: Check production UDP transport with the reception workflow
+        shell: bash
+        env:
+          ROS_LOCALHOST_ONLY: '1'
+          ROS_DOMAIN_ID: '208'
+          RMW_IMPLEMENTATION: rmw_fastrtps_cpp
+        run: |
+          source /opt/ros/humble/setup.bash
+          source nav_controller_ws/install/setup.bash
+          export FASTRTPS_DEFAULT_PROFILES_FILE="$PWD/config/fastdds-udp.xml"
+          timeout 180s python3 experiments/reception/check_native.py --setup "$GITHUB_WORKSPACE/nav_controller_ws/install/setup.bash" --output /tmp/reception-udp/report.json --scenario followthrough
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: reception-udp-evidence
+          path: /tmp/reception-udp
           if-no-files-found: ignore
       - name: Stop for a fully blocked corridor, recover after opening, and honor manual takeover
         shell: bash
@@ -212,6 +363,10 @@ jobs:
       - run: g++ -std=c++17 -O2 -Wall -Wextra -Werror -pthread -Inavigation experiments/gait_velocity_input/check_loop.cpp -o /tmp/gait-loop && /tmp/gait-loop
       - run: g++ -std=c++17 -O2 -Wall -Wextra -Werror -pthread -Inavigation experiments/gait_velocity_input/contract_server.cpp -o /tmp/gait-contract
       - run: PYTHONPATH=navigation python3 experiments/gait_velocity_input/check_transport.py /tmp/gait-contract
+      - name: Refresh original authority after a delayed velocity or measurement reply
+        run: |
+          python3 experiments/gait_velocity_input/check_rpc_cadence.py /tmp/gait-contract
+          python3 experiments/gait_velocity_input/check_rpc_cadence.py /tmp/gait-contract --measured-delay-ms 65 --velocity-delay-ms 0
       - run: g++ -std=c++17 -O2 -Wall -Wextra -Werror -pthread -Inavigation experiments/gait_velocity_input/check_peer_acl.cpp -o /tmp/check_peer_acl
       - run: sudo env PYTHONPATH="$GITHUB_WORKSPACE/navigation" python3 experiments/gait_velocity_input/check_peer_acl.py /tmp/check_peer_acl
       - run: g++ -std=c++17 -O2 -Wall -Wextra -Werror -pthread experiments/runtime_readiness/test_runtime_readiness.cpp -o /tmp/runtime-readiness && /tmp/runtime-readiness

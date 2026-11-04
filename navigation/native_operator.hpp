@@ -5,6 +5,9 @@
 #include <cstring>
 namespace p2_nav {
 constexpr std::uint32_t native_magic=0x4e4f5031;
+// User-selected original receiver sample timeout. Transport/health/velocity
+// deadlines remain independent; no packet timestamp is renewed by this grace.
+constexpr std::uint64_t native_operator_timeout_ns=2000000000ULL;
 struct NativeOperatorPacket {
  std::uint32_t magic=native_magic,version=1;
  std::uint64_t instance=0,sequence=0,monotonic_ns=0,unix_us=0;
@@ -21,7 +24,7 @@ class NativeOperatorGuard {
   if(p.magic!=native_magic||p.version!=1||p.reserved||!p.instance||!p.sequence||!p.monotonic_ns||
      p.mode>3||(p.flags&~15U)||!std::isfinite(p.x)||!std::isfinite(p.y)||!std::isfinite(p.yaw)||
      std::abs(p.x)>1||std::abs(p.y)>1||std::abs(p.yaw)>1)return false;
-  if(p.monotonic_ns>now? p.monotonic_ns-now>5000000ULL:now-p.monotonic_ns>100000000ULL)return false;
+  if(p.monotonic_ns>now? p.monotonic_ns-now>5000000ULL:now-p.monotonic_ns>native_operator_timeout_ns)return false;
   if(p.instance==instance_&&(p.sequence<=sequence_||p.monotonic_ns<stamp_))return false;
   instance_=p.instance;sequence_=p.sequence;stamp_=p.monotonic_ns;return true;
  }

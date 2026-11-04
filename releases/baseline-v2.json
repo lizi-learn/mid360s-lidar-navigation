@@ -1,0 +1,98 @@
+{
+  "schema_version": 1,
+  "name": "Navigation V2 Release Baseline",
+  "tag": "baseline-v2",
+  "date": "2026-11-05",
+  "functional_source_commit": "5fc9ae3e709b5781fb54c744c1ab4f9839072f44",
+  "previous_baseline": {
+    "tag": "baseline-v1",
+    "commit": "6479e25f5825b5dbce9e6229a33ad5d564b0649a",
+    "tag_object": "53d455f1462471f734f676270beb8874e4a99125",
+    "immutable": true
+  },
+  "runtime_profile": "navigation/profiles/baseline-v2.json",
+  "platform": {
+    "os": "Ubuntu22.04",
+    "ros": "Humble",
+    "architecture_field": "aarch64",
+    "nav2_version": "1.1.20",
+    "sensor": "MID-360S",
+    "depth_camera": false,
+    "navigation_dimension": "2D with projected3D LiDAR observations"
+  },
+  "inputs": {
+    "semantics": "D_policy_manual_equivalent_input_not_measured_m_per_s",
+    "forward_cap": 0.75,
+    "yaw_cap": 1.0,
+    "turning_forward_target": 0.6,
+    "lateral": 0.0,
+    "selected_scale": 1.0,
+    "original_receiver_sample_timeout_s": 2.0,
+    "forward_rise_rate": 0.3,
+    "forward_rise_rate_change": 0.4,
+    "forward_decline_rate": 0.8,
+    "yaw_rate": 0.5,
+    "normal_arrival_full_zero_S_curve_integrated": false
+  },
+  "arrival": {
+    "presentation_xy_m": 0.4,
+    "presentation_yaw_degrees": 20,
+    "extra_final_confirmation": false
+  },
+  "native_controller_package": {
+    "path": "navigation/p2_nav_controller",
+    "git_tree": "efb49423ecc06602b1a645cec2f32f3cdc71d8e7",
+    "field_overlay_source_base": "1dd17a4732032243be7c36dfd32f8c645f5a2056",
+    "package_source_unchanged_since_field_base": true,
+    "simulation_input_model_not_used_as_physical_D": true
+  },
+  "external_D_build_public_headers_sha256": {
+    "navigation/native_operator.hpp": "1019d42c730ea942ca5cb3d1c936ff33d1550cd04070e4b155a2eb66c3b91d0f",
+    "navigation/gait_navigation.hpp": "bca58539353759b5302fe1f9f5ec7dd466cb41c2b662caf0a9e9c6ff968e5774",
+    "navigation/speed_response.hpp": "40d1cdcd2d63e3e64bdc0a9631b6ee9fc2f5f88baf891b0613b14a8e8ed21da8",
+    "navigation/input_s_curve.hpp": "8b934ac352371ffa386ff1ca514d2a11d65ccd85760b2a49ca39d58526903c4e"
+  },
+  "validation": {
+    "python_tests": 478,
+    "exact_functional_commit_push_CI": {
+      "run": 41926395445,
+      "jobs_passed": 4,
+      "jobs_total": 4
+    },
+    "exact_functional_commit_PR_CI": {
+      "run": 41926406675,
+      "jobs_passed": 4,
+      "jobs_total": 4
+    },
+    "field_points_reached": 20,
+    "field_auto_after_resuming_point4_through": 20,
+    "field_uninterrupted_all20_without_repairs": false,
+    "observed_replanning_intervals_after_resume": 6,
+    "replanning_interval_seconds": [
+      2.71,
+      1.44,
+      2.01,
+      4.58,
+      4.29,
+      4.47
+    ],
+    "original_sample_max_observed_age_ms": 338.104608,
+    "source_timeout_observed_after_resume": false,
+    "physical_2s_radio_outage_tested": false
+  },
+  "external_not_distributed": [
+    "vendor_full_body_driver",
+    "vendor_D_policy_and_model",
+    "robot_installation_identity",
+    "private_maps_recordings_and_audio",
+    "credentials"
+  ],
+  "known_remaining": [
+    "moving_leg_replanning_pauses",
+    "start_turn_stop_go",
+    "normal_full_zero_braking_intent_not_connected",
+    "MID360S_time_type0_ROS_header_is_host_receive_time",
+    "actual_office3D_PCD_transform_not_bound_to_a3D_navigation_workflow"
+  ],
+  "baseline_scope": "Frozen user-selected field-working navigation version; field repair/continuation and prior failed experiments remain recorded."
+}

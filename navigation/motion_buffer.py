@@ -8,13 +8,14 @@ import math
 from gate import Limits
 
 class MotionBuffer:
-    def __init__(self,accel=.10,decel=.15,angular_accel=.30,settle_time=.15,feedback_timeout=None):
+    def __init__(self,accel=.10,decel=.15,angular_accel=.30,settle_time=.15,feedback_timeout=None,ramp_enabled=True):
         if not all(math.isfinite(v) and v>0 for v in (accel,decel,angular_accel,settle_time)):
             raise ValueError('positive_finite_motion_parameters_required')
         self.feedback_timeout=Limits().sensor_timeout if feedback_timeout is None else feedback_timeout
         if not math.isfinite(self.feedback_timeout) or not 0<self.feedback_timeout<=Limits().sensor_timeout:
             raise ValueError('feedback timeout must not exceed the command gate sensor expiry')
         self.accel=accel;self.decel=decel;self.angular_accel=angular_accel;self.settle_time=settle_time
+        self.ramp_enabled=ramp_enabled
         self.reset()
     def reset(self):
         self.v=self.w=0.;self.last=None;self.phase='stopped';self.stable_since=None
@@ -62,8 +63,37 @@ class MotionBuffer:
             w=0.;self.phase='settling_yaw';self.stable_since=None
         def slew(current,target,rate):
             delta=target-current;return current+math.copysign(min(abs(delta),rate*dt),delta)
-        self.v=slew(self.v,v,self.accel if v>self.v else self.decel)
-        self.w=slew(self.w,w,self.angular_accel)
+        if self.ramp_enabled:
+            self.v=slew(self.v,v,self.accel if v>self.v else self.decel)
+            self.w=slew(self.w,w,self.angular_accel)
+        else:
+            # The physical gait handoff owns the sole input ramp. Keep only
+            # the measured phase transitions and immediate-stop behavior here.
+            self.v,self.w=v,w
         if self.phase=='normal_braking' and self.v==self.w==0 and self._settled(now,linear<=.06 and angular<=.06):
             self.phase='stopped'
         return (self.v,0.,self.w)
+
+
+class MeasuredMotionMean:
+    """Mean body velocity for phase transitions; retains the original source time.
+
+    Step-frequency ripple must not look like sustained opposite yaw. Collision,
+    operator and stale-source stops do not pass through this estimator.
+    """
+    def __init__(self, time_constant=.15):
+        if not math.isfinite(time_constant) or time_constant<=0:
+            raise ValueError('positive_finite_mean_time_required')
+        self.time_constant=time_constant;self.source=None;self.value=None
+    def step(self, measured, source):
+        measured=tuple(measured)
+        if len(measured)!=3 or not all(math.isfinite(v) for v in (*measured,source)):
+            self.source=None;self.value=None;return measured
+        if self.source is not None and source<=self.source:
+            return self.value
+        if self.source is None or source-self.source>.5:
+            self.value=measured
+        else:
+            dt=source-self.source;alpha=dt/(self.time_constant+dt)
+            self.value=tuple(a+alpha*(b-a) for a,b in zip(self.value,measured))
+        self.source=source;return self.value

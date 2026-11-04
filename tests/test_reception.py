@@ -41,6 +41,42 @@ class CatalogTest(unittest.TestCase):
             two=store.save(one,1);os.utime(path,ns=(original.st_atime_ns,original.st_mtime_ns))
             self.assertEqual(store.read(one['map_id'])['revision'],2)
             with self.assertRaises(ValueError):store.save(one,1)
+    def test_empty_route_draft_saves_without_blocking_point_updates(self):
+        with tempfile.TemporaryDirectory() as root:
+            store=Catalog(root);d=fixture();d['routes'][0]['steps']=[]
+            d['points'][0]['name']='接待起点';saved=store.save(d,0)
+            self.assertEqual(store.read(saved['map_id'])['points'][0]['name'],'接待起点')
+            self.assertEqual(saved['routes'][0]['steps'],[])
+    def test_invalid_name_reports_which_point_and_keeps_route_limit(self):
+        d=fixture();d['points'][1]['name']=' '
+        with self.assertRaisesRegex(ValueError,'第2个点位名称不能为空'):validate(d)
+        d=fixture();d['routes'][0]['steps']*=51
+        with self.assertRaisesRegex(ValueError,'最多包含100'):validate(d)
+    def test_distinct_ids_cannot_save_equivalent_point_names(self):
+        for first,second in [('真人测试点位1','真人测试点位1'),('接待起点','  接待起点  '),('Test 1','ＴＥＳＴ １')]:
+            with self.subTest(first=first,second=second):
+                d=fixture();d['points'][0]['name']=first;d['points'][1]['name']=second
+                with self.assertRaisesRegex(ValueError,'第2个点位名称.*第1个点位重复'):validate(d)
+    def test_duplicate_save_does_not_change_revision_or_content(self):
+        with tempfile.TemporaryDirectory()as root:
+            store=Catalog(root);saved=store.save(fixture(),0);bad=copy.deepcopy(saved)
+            bad['points'][1]['name']=bad['points'][0]['name']
+            with self.assertRaisesRegex(ValueError,'重复'):store.save(bad,1)
+            self.assertEqual(store.read(saved['map_id']),saved)
+            bad['points'][1]['name']='接待起点';self.assertEqual(store.save(bad,1)['revision'],2)
+    def test_legacy_duplicates_can_be_read_and_renamed_but_not_restored(self):
+        with tempfile.TemporaryDirectory()as root:
+            store=Catalog(root);d=fixture();d['revision']=1;d['points'][1]['name']=d['points'][0]['name']
+            store.path(d['map_id']).write_text(json.dumps(d))
+            old=store.read(d['map_id']);fixed=copy.deepcopy(old);fixed['points'][1]['name']='修正点'
+            store.save(fixed,1);self.assertEqual(len(store.versions(d['map_id'])['versions']),1)
+            self.assertEqual(store.read_revision(d['map_id'],1)['points'][0]['name'],store.read_revision(d['map_id'],1)['points'][1]['name'])
+            with self.assertRaisesRegex(ValueError,'重复'):store.restore(d['map_id'],1,2)
+            self.assertEqual(store.read(d['map_id'])['revision'],2)
+    def test_point_names_are_scoped_to_map_and_same_point_can_keep_name(self):
+        with tempfile.TemporaryDirectory()as root:
+            store=Catalog(root);one=store.save(fixture(),0);self.assertEqual(store.save(one,1)['revision'],2)
+            other=fixture();other['map_id']='another_floor';self.assertEqual(store.save(other,0)['revision'],1)
     def test_path_traversal(self):
         with tempfile.TemporaryDirectory() as root:
             for s in ['../other','/tmp/a','x/abc','']:
@@ -76,6 +112,10 @@ class CatalogTest(unittest.TestCase):
 class MissionTest(unittest.TestCase):
     def start(self,d=None):
         m=Mission();d=d or fixture();epoch=m.start(d,'tour',0);return m,d,epoch
+    def test_empty_saved_draft_does_not_create_a_task(self):
+        m=Mission();d=fixture();d['routes'][0]['steps']=[];epoch=m.epoch
+        with self.assertRaisesRegex(ValueError,'还没有点位'):m.start(d,'tour',0)
+        self.assertEqual(m.phase,'idle');self.assertEqual(m.epoch,epoch);self.assertEqual(m.run_id,'')
     def test_plain_transit_batch_has_one_native_action_and_no_fake_arrivals(self):
         d=fixture();d['points'][1]['kind']='transit';d['points'][1]['dwell']=0
         m,d,e=self.start(d);cmd=m.tick(permitted(),0)
@@ -96,8 +136,8 @@ class MissionTest(unittest.TestCase):
         m,d,e=self.start();cmd=m.tick(permitted(),0);self.assertEqual(cmd['point']['id'],'b')
         m.dispatched(e,1);m.tick(permitted('arrived'),1);self.assertEqual(m.phase,'dispatching')
         m.dispatched(e,2);m.tick(permitted('arrived',2),2);self.assertEqual(m.phase,'presenting')
-        key=m.speech_key;m.tick(permitted('arrived',2),3,{'key':'wrong','result':'completed'});self.assertEqual(m.phase,'presenting')
-        m.tick(permitted('arrived',2),4,{'key':key,'result':'completed'});self.assertEqual(m.phase,'completed')
+        key=m.speech_key;m.tick(permitted('arrived',2),3,{'epoch':m.epoch,'key':'wrong','result':'completed'});self.assertEqual(m.phase,'presenting')
+        m.tick(permitted('arrived',2),4,{'epoch':m.epoch,'key':key,'result':'completed'});self.assertEqual(m.phase,'completed')
         self.assertEqual([x['kind']for x in m.events].count('arrived'),2)
     def test_snapshot_not_changed_by_admin_edit(self):
         m,d,e=self.start();d['points'][1]['x']=100.;self.assertEqual(m.tick(permitted(),0)['point']['x'],3.)
@@ -112,7 +152,7 @@ class MissionTest(unittest.TestCase):
         m,d,e=self.start();m.dispatched(e,1);m.tick(permitted('executing',2),1);self.assertEqual(m.phase,'failed');self.assertEqual(m.index,0)
     def test_speech_failure_becomes_visible_wait_not_success(self):
         m,d,e=self.start();m.index=1;m.dispatched(e,2);m.tick(permitted('arrived',2),1)
-        m.tick(permitted('arrived',2),2,{'key':m.speech_key,'result':'missing'})
+        m.tick(permitted('arrived',2),2,{'epoch':m.epoch,'key':m.speech_key,'result':'missing'})
         self.assertEqual(m.phase,'guest_wait');self.assertNotIn('speech_completed',[x['kind']for x in m.events])
         m.continue_visit(3);self.assertEqual(m.phase,'completed')
     def test_guest_continue_and_dwell(self):

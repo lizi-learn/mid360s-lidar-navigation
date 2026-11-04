@@ -20,10 +20,16 @@ class GateNode(Node):
         self.gate = ForwardGate()
         self.handoff=None;self.intent=(0.,0.,0.);self.intent_time=0.;self.measured=None
         self.recovery=None;self.recovery_wait=False;self.collision_stop=False
+        self.upstream_handoff=self.declare_parameter('upstream_motion_handoff',False).value
         if self.declare_parameter('gait_handoff',False).value:
             self.gate=ForwardGate(Limits(max_v=.8,max_w=1.,accel=.4,decel=.8))
-            from gait_handoff import GaitHandoff
-            self.handoff=GaitHandoff()
+            # The upstream MotionBuffer already performs the measured
+            # translation/pivot handoff. Repeating it here with unfiltered
+            # standing sway can suppress every otherwise valid turn pulse.
+            # Keep the final source/collision/clearance gate in either layout.
+            if not self.upstream_handoff:
+                from gait_handoff import GaitHandoff
+                self.handoff=GaitHandoff()
             from clearance_recovery import ClearanceRecovery
             self.recovery=ClearanceRecovery()
             self.create_subscription(CollisionMonitorState,'/p2_nav/collision_state',self.on_collision_state,10)
@@ -139,6 +145,10 @@ class GateNode(Node):
                 and -.05<=scan_age<=self.gate.limits.sensor_timeout and -.05<=odom_age<=self.gate.limits.sensor_timeout
                 and 0<=now-self.command_time<=self.gate.limits.command_timeout and not self.gate.command_fault(command))
             self.recovery_wait=not self.recovery.step(now,clear)
+        if self.recovery_wait and not self.gate.command_fault(command):
+            # Clearance waiting is independent of which node owns phase
+            # transitions. Preserve invalid commands for the final rejection.
+            command=(0.,0.,0.)
         if self.handoff:
             if self.gate.command_fault(command):self.handoff.reset();self.handoff.phase='command_rejected'
             elif self.recovery_wait:self.handoff.reset();command=(0.,0.,0.)
@@ -150,12 +160,15 @@ class GateNode(Node):
         self.counter += 1
         if True: #50Hz actual evaluations; original sensor/source stamps are unchanged
             status = String();status.data = json.dumps({**getattr(self,'terrain_details',{}),'armed':self.gate.armed,'simulation':self.simulation,
+                'arm_generation':self.arm_generation,'collision_fault_generation':self.collision_fault_generation,
                 'evaluated_monotonic_ns':time.monotonic_ns(),'data_fresh':collision_source_ok and -.05<=min(scan_age,odom_age) and max(scan_age,odom_age)<=self.gate.limits.sensor_timeout,'collision_source_valid':collision_source_ok,'calibration_ready':self.calibration_ready and now-self.calibration_time<.2,
                 'navigation_reference':getattr(self,'reference_mode','unknown'),'navigation_reference_ready':self.calibration_ready and now-self.calibration_time<.2,
                 'hardware_execution_enabled':False,'speed_cap':self.gate.speed,
                 'velocity_scale':self.gate.velocity_scale,'effective_speed_cap':self.gate.speed*self.gate.velocity_scale,'reason':self.gate.reason,
-                'motion_phase':'waiting_clearance' if self.recovery_wait else self.handoff.phase if self.handoff else 'direct','body_velocity_feedback':self.measured,'velocity_source_monotonic_ns':self.velocity_source_ns,'velocity_stages':self.velocity_stages,'command':result,'scan_age':scan_age,'odom_age':odom_age,'localized':localized,
+                'motion_phase':'waiting_clearance' if self.recovery_wait else self.handoff.phase if self.handoff else 'upstream_handoff' if self.upstream_handoff else 'direct','body_velocity_feedback':self.measured,'velocity_source_monotonic_ns':self.velocity_source_ns,'velocity_stages':self.velocity_stages,'command':result,'scan_age':scan_age,'odom_age':odom_age,'localized':localized,
                 'ground_ok':self.ground and now - self.ground_time < .5,
+                'ground_evidence':self.ground,'ground_observation_fresh':0<=now-self.ground_time<.5,
+                'localization_evidence_ok':not self.require_localization or self.covariance_ok,
                 'localization_covariance':self.covariance,'map_transform_age':age})
             self.status.publish(status)
 

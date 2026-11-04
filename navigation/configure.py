@@ -90,7 +90,24 @@ def config(controller='rpp', tree=None, minimum_speed=.03, footprint_vertices=No
                     expected_update_rate=.3)),
             inflation_layer=dict(plugin='nav2_costmap_2d::InflationLayer',inflation_radius=.75,cost_scaling_factor=3.),
             always_send_full_costmap=True)
-        if rolling:common.update(rolling_window=True,width=5,height=5)
+        if rolling:
+            common.update(rolling_window=True,width=5,height=5)
+            if gait_profile=='p2-flat-model':
+                # A height-slice scan has genuinely unknown angular bins. They
+                # must not erase or replace the existing mapped floor context.
+                # Reproject the same map into the rolling odom costmap, then
+                # overlay actual dynamic observations. Static unknown/walls and
+                # authored keepouts remain; no empty scan is declared free.
+                common['plugins'].insert(0,'static_layer')
+                common['static_layer']['map_topic']='/p2_nav/reception_map'
+                # A finite current ray must clear the same old static mark in
+                # the controller as it does in the planning map. Unknown scan
+                # bins retain the static value; current hit endpoints remain
+                # lethal. Authored keepouts/boundaries are separate filters.
+                common['obstacle_layer']['combination_method']=0
+        elif gait_profile=='p2-flat-model':
+            common['obstacle_layer'].update(plugin='p2_nav_controller::TemporalObstacleLayer',
+                observation_keep_time=3.,expiration_source_max_age=.3)
         result[name]={name:{'ros__parameters':common}}
     add('planner_server',dict(use_sim_time=False,expected_planner_frequency=1.,planner_plugins=['GridBased'],
         GridBased=dict(plugin='nav2_smac_planner/SmacPlannerLattice',tolerance=.05,allow_unknown=False,
@@ -109,12 +126,28 @@ def config(controller='rpp', tree=None, minimum_speed=.03, footprint_vertices=No
         planner['PositionOnly']['plugin']='p2_nav_controller::PositionOnlyLattice'
         planner['PositionOnly']['smooth_path']=False
         planner['PositionOnly']['cache_obstacle_heuristic']=True
+        planner['planner_plugins'].append('RouteDirected')
+        planner['RouteDirected']=copy.deepcopy(planner['PositionOnly'])
+        planner['RouteDirected']['plugin']='p2_nav_controller::RouteDirectedLattice'
+        for name,directed in [('GuidePosition',False),('GuideDirected',True)]:
+            planner['planner_plugins'].append(name)
+            planner[name]=copy.deepcopy(planner['PositionOnly'])
+            planner[name].update(plugin='p2_nav_controller::CorridorRouteLattice',reference_radius=.6,final_heading_required=directed)
         control=result['controller_server']['ros__parameters']
         control['goal_checker_plugins'].append('position_goal_checker')
         control['position_goal_checker']=dict(plugin='p2_nav_controller::PositionGoalChecker',xy_goal_tolerance=.15)
+        # Authored presentation stops use approximate positioning and direction.
+        # Keep ordinary route tracking/position-only navigation unchanged.
+        control['goal_checker_plugins']+=['presentation_goal_checker','presentation_position_goal_checker']
+        control['presentation_goal_checker']=dict(plugin='nav2_controller::SimpleGoalChecker',xy_goal_tolerance=.30,yaw_goal_tolerance=math.radians(20),stateful=True)
+        control['presentation_position_goal_checker']=dict(plugin='nav2_controller::SimpleGoalChecker',xy_goal_tolerance=.30,yaw_goal_tolerance=math.pi,stateful=True)
     add('behavior_server',dict(use_sim_time=False,costmap_topic='local_costmap/costmap_raw',
-        footprint_topic='local_costmap/published_footprint',cycle_frequency=10.,behavior_plugins=['wait'],
-        wait=dict(plugin='nav2_behaviors/Wait'),global_frame='odom',robot_base_frame='base_link',transform_tolerance=.2))
+        footprint_topic='local_costmap/published_footprint',cycle_frequency=10.,behavior_plugins=['wait','spin'],
+        wait=dict(plugin='nav2_behaviors/Wait'),spin=dict(plugin='nav2_behaviors/Spin'),
+        max_rotational_vel=1.0 if gait_profile=='p2-flat-model' else .35,
+        min_rotational_vel=.5 if gait_profile=='p2-flat-model' else .1,
+        rotational_acc_lim=.5,simulate_ahead_time=2.,
+        global_frame='odom',robot_base_frame='base_link',transform_tolerance=.2))
     add('bt_navigator',dict(use_sim_time=False,global_frame='map',robot_base_frame='base_link',odom_topic='/odom',
         bt_loop_duration=10,default_server_timeout=20,wait_for_service_timeout=1000,
         default_nav_to_pose_bt_xml=str(tree or Path(__file__).with_name('forward_navigation.xml')),
@@ -126,6 +159,7 @@ def config(controller='rpp', tree=None, minimum_speed=.03, footprint_vertices=No
             'nav2_goal_updated_condition_bt_node','nav2_globally_updated_goal_condition_bt_node',
             'nav2_is_path_valid_condition_bt_node','nav2_round_robin_node_bt_node',
             'nav2_spin_action_bt_node','nav2_back_up_action_bt_node']))
+    if gait_profile=='p2-flat-model':result['bt_navigator']['ros__parameters']['plugin_lib_names'].append('p2_nav_reference_bt_node')
     add('velocity_smoother',dict(use_sim_time=False,smoothing_frequency=20.,scale_velocities=False,
         feedback='OPEN_LOOP',max_velocity=[.30,0.,.35],min_velocity=[0.,0.,-.35],
         max_accel=[.15,0.,.5],max_decel=[-.30,0.,-.5],odom_topic='odom',odom_duration=.1,
@@ -151,8 +185,9 @@ def config(controller='rpp', tree=None, minimum_speed=.03, footprint_vertices=No
         # SlowZone compounded into sub-actuation inputs (0.39*0.4*0.5).
         result['collision_monitor']['ros__parameters']['polygons']=['StopZone']
         result['planner_server']['ros__parameters']['GridBased']['plugin']='p2_nav_controller::ExactHeadingLattice'
+        result['planner_server']['ros__parameters']['GridBased']['smooth_path']=False
         for costmap in ('local_costmap','global_costmap'):result[costmap][costmap]['ros__parameters']['inflation_layer']['inflation_radius']=1.2
-        result['controller_server']['ros__parameters']['progress_checker']['movement_time_allowance']=40.
+        result['controller_server']['ros__parameters']['progress_checker'].update(plugin='p2_nav_controller::RotationProgressChecker',movement_time_allowance=40.,required_movement_angle=.1)
         result['controller_server']['ros__parameters']['goal_checker']['plugin']='p2_nav_controller::SettledHeadingGoalChecker'
         result['velocity_smoother']['ros__parameters']['max_velocity'][0]=.8
         result['velocity_smoother']['ros__parameters']['max_accel'][0]=.4
@@ -207,10 +242,18 @@ def apply_runtime_geometry(params_file):
     for name in ('local_costmap','global_costmap'):
         grid=params[name][name]['ros__parameters']
         grid['footprint']=json.dumps(vertices);grid['footprint_padding']=float(padding)
-    if 'global_obstacle_combination' in value:
-        method=value['global_obstacle_combination']
+    for kind in ('global','local'):
+        key=kind+'_obstacle_combination'
+        if key not in value:continue
+        method=value[key]
         if type(method) is not int or method not in (0,1):raise ValueError('Invalid obstacle layer combination')
-        params['global_costmap']['global_costmap']['ros__parameters']['obstacle_layer']['combination_method']=method
+        params[kind+'_costmap'][kind+'_costmap']['ros__parameters']['obstacle_layer']['combination_method']=method
+    if 'presentation_xy_tolerance' in value:
+        tolerance=value['presentation_xy_tolerance']
+        if type(tolerance)not in(int,float)or not math.isfinite(tolerance)or tolerance<=0.:
+            raise ValueError('Invalid presentation position tolerance')
+        for name in ('presentation_goal_checker','presentation_position_goal_checker'):
+            params['controller_server']['ros__parameters'][name]['xy_goal_tolerance']=float(tolerance)
     path.write_text(yaml.safe_dump(params,sort_keys=False))
     return True
 
@@ -245,3 +288,11 @@ def main():
     if not .03<=args.minimum_speed<=.25:raise ValueError('Minimum speed outside profile range')
     path.write_text(yaml.safe_dump(config(args.controller,minimum_speed=args.minimum_speed,footprint_vertices=load_footprint(args.footprint_profile) if args.footprint_profile else None,odometry_model=args.odometry_model,gait_profile=args.gait_profile),sort_keys=False))
 if __name__=='__main__':main()
+
+
+def apply_input_ramp_routing(path,native_ramp,buffered):
+    """Native hardware or its synthetic input model owns the sole input ramp."""
+    path=Path(path);data=yaml.safe_load(path.read_text())
+    topic='/p2_nav/cmd_buffered'if buffered else'/p2_nav/cmd_raw'
+    data['collision_monitor']['ros__parameters']['cmd_vel_in_topic']=topic if native_ramp else'/p2_nav/cmd_smooth'
+    path.write_text(yaml.safe_dump(data,sort_keys=False))

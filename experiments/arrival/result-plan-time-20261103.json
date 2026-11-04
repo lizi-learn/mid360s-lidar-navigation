@@ -1,0 +1,258 @@
+{
+  "scope": "Actual isolated ROS2/Nav2 on synthetic maps; no robot commands or biped acceptance",
+  "seed": 0,
+  "source_goal_age_s": 5,
+  "footprint_total_side_m": 0.55,
+  "before": {
+    "time_regression_passed": true,
+    "all_geometry_checks_passed": false,
+    "passed": false,
+    "expected_old_header_bug": true,
+    "hardware_commands": 0,
+    "seed": 0,
+    "footprint_total_side_m": 0.55,
+    "source_goal_age_s": 5,
+    "cases": [
+      {
+        "planned": true,
+        "points": 53,
+        "input_goal_stamp_s": 1793648240.5362506,
+        "path_stamp_s": 1793648240.5362506,
+        "path_age_at_result_s": 5.000109332,
+        "seconds": 0.00010667,
+        "filled_body_intrusions": 0,
+        "new_result_time_valid": false,
+        "case": "straight"
+      },
+      {
+        "planned": true,
+        "points": 51,
+        "input_goal_stamp_s": 1793648240.9521008,
+        "path_stamp_s": 1793648240.9521008,
+        "path_age_at_result_s": 5.000101483,
+        "seconds": 9.8388e-05,
+        "filled_body_intrusions": 0,
+        "new_result_time_valid": false,
+        "case": "pivot"
+      },
+      {
+        "planned": true,
+        "points": 75,
+        "input_goal_stamp_s": 1793648241.3694308,
+        "path_stamp_s": 1793648246.3714006,
+        "path_age_at_result_s": 0.003588914,
+        "seconds": 0.00555637,
+        "filled_body_intrusions": 16,
+        "new_result_time_valid": true,
+        "case": "detour"
+      },
+      {
+        "planned": false,
+        "points": 0,
+        "input_goal_stamp_s": 1793648241.798961,
+        "path_stamp_s": 1793648246.8009577,
+        "path_age_at_result_s": 0.40269683,
+        "seconds": 0.404691349,
+        "case": "closed"
+      }
+    ]
+  },
+  "candidate": {
+    "time_regression_passed": true,
+    "all_geometry_checks_passed": true,
+    "passed": true,
+    "expected_old_header_bug": false,
+    "hardware_commands": 0,
+    "seed": 0,
+    "footprint_total_side_m": 0.55,
+    "source_goal_age_s": 5,
+    "cases": [
+      {
+        "planned": true,
+        "points": 53,
+        "input_goal_stamp_s": 1793648281.2634437,
+        "path_stamp_s": 1793648286.2634857,
+        "path_age_at_result_s": 5.5727e-05,
+        "seconds": 9.4739e-05,
+        "filled_body_intrusions": 0,
+        "new_result_time_valid": true,
+        "case": "straight"
+      },
+      {
+        "planned": true,
+        "points": 51,
+        "input_goal_stamp_s": 1793648281.680283,
+        "path_stamp_s": 1793648286.6803303,
+        "path_age_at_result_s": 5.8152e-05,
+        "seconds": 0.000101667,
+        "filled_body_intrusions": 0,
+        "new_result_time_valid": true,
+        "case": "pivot"
+      },
+      {
+        "planned": true,
+        "points": 75,
+        "input_goal_stamp_s": 1793648282.1413734,
+        "path_stamp_s": 1793648287.1464136,
+        "path_age_at_result_s": 0.000103085,
+        "seconds": 0.005140477,
+        "filled_body_intrusions": 0,
+        "new_result_time_valid": true,
+        "case": "detour"
+      },
+      {
+        "planned": false,
+        "points": 0,
+        "input_goal_stamp_s": 1793648282.5821733,
+        "path_stamp_s": 1793648287.5840945,
+        "path_age_at_result_s": 0.386176596,
+        "seconds": 0.388095658,
+        "case": "closed"
+      }
+    ]
+  },
+  "physical_rollback_installed": false,
+  "initial_native_joint": {
+    "passed": true,
+    "cases": [
+      {
+        "case": "continuous_native_transit",
+        "passed": true
+      },
+      {
+        "case": "observed_closed_door_reopens_and_live_shortcut",
+        "passed": true
+      },
+      {
+        "case": "actual_dynamic_obstacle_and_complete",
+        "passed": true
+      },
+      {
+        "case": "actual_directed_goal_settled_action_completion",
+        "passed": true
+      },
+      {
+        "case": "middle_pause_then_explicit_resume_native",
+        "passed": true
+      },
+      {
+        "case": "manual_cancel_no_auto_resume_and_durable_receipts",
+        "passed": true
+      }
+    ],
+    "collision_attempts": 0,
+    "hardware_commands": 0
+  },
+  "rejected_broad_rollback_tracking": {
+    "passed": false,
+    "cases": 8,
+    "failed_case": "nominal corner",
+    "body_intrusions": 1,
+    "deployed": false
+  },
+  "recovery_tracking": {
+    "passed": true,
+    "cases": 8,
+    "body_intrusions": 0,
+    "actual_parameters": "corner_preview=true, settled_pivot_response=false, original long preview/limits"
+  },
+  "unit_tests": 361,
+  "final_native_joint": {
+    "passed": true,
+    "cases": [
+      {
+        "case": "continuous_native_transit",
+        "passed": true
+      },
+      {
+        "case": "observed_closed_door_reopens_and_live_shortcut",
+        "passed": true
+      },
+      {
+        "case": "actual_dynamic_obstacle_and_complete",
+        "passed": true
+      },
+      {
+        "case": "actual_directed_goal_settled_action_completion",
+        "passed": true
+      },
+      {
+        "case": "middle_pause_then_explicit_resume_native",
+        "passed": true
+      },
+      {
+        "case": "manual_cancel_no_auto_resume_and_durable_receipts",
+        "passed": true
+      }
+    ],
+    "collision_attempts": 0,
+    "elapsed_s": 96.15681069507264,
+    "hardware_commands": 0
+  },
+  "final_profile_tracking": {
+    "passed": true,
+    "cases": 8,
+    "body_intrusions": 0,
+    "motion_parameters_unchanged": true
+  },
+  "rejected_turn_rollback": {
+    "passed": false,
+    "reason": "directed arrival timeout",
+    "deployed": false
+  },
+  "same_goal_reset_component": {
+    "old_never_finishes_under_1Hz_replans": true,
+    "new_accepted_at_s": 2,
+    "changed_goal_motion_and_gap_reset": true,
+    "original_hold_seconds": 2
+  },
+  "subsequent_full_CI": {
+    "run": 41517455554,
+    "commit": "0ad2b0e",
+    "conclusion": "failure",
+    "stage": "adaptive door route second leg paused",
+    "deployed": false,
+    "historical_source_cause_proven": false
+  },
+  "simulation_authority_source": {
+    "actual_Console_old_lost_samples": 47,
+    "corrected_lost_samples": 0,
+    "UI_lock_stalls": 3,
+    "UI_lock_stall_seconds": 0.25,
+    "stopped_source_expiry_preserved": true,
+    "manual_pause_disconnect_negatives_pass": true,
+    "hardware_commands": 0
+  },
+  "authority_joint": {
+    "passed": true,
+    "cases": [
+      {
+        "case": "continuous_native_transit",
+        "passed": true
+      },
+      {
+        "case": "observed_closed_door_reopens_and_live_shortcut",
+        "passed": true
+      },
+      {
+        "case": "actual_dynamic_obstacle_and_complete",
+        "passed": true
+      },
+      {
+        "case": "actual_directed_goal_settled_action_completion",
+        "passed": true
+      },
+      {
+        "case": "middle_pause_then_explicit_resume_native",
+        "passed": true
+      },
+      {
+        "case": "manual_cancel_no_auto_resume_and_durable_receipts",
+        "passed": true
+      }
+    ],
+    "elapsed_s": 96.23734751087613,
+    "collision_attempts": 0,
+    "hardware_commands": 0
+  }
+}

@@ -5,6 +5,7 @@ import json
 import math
 import re
 import threading
+import unicodedata
 from pathlib import Path
 from audio_feedback import atomic_json
 
@@ -32,7 +33,10 @@ def blank(map_id):
             'policy': {'brief_wait': 4., 'max_wait': 25., 'clear_hold': 1.5,
                        'replan_interval': 3., 'shortcut_gain': .2}}
 
-def validate(raw):
+def point_name_key(name):
+    return unicodedata.normalize('NFKC', name).strip().lower()
+
+def validate(raw, *, unique_point_names=True):
     if not isinstance(raw, dict) or set(raw) - set(blank('map')):
         raise ValueError('内容类型或字段无效')
     d = copy.deepcopy(raw)
@@ -61,10 +65,15 @@ def validate(raw):
         p['name'] = text(p.get('name', ''), 80)
         p['script'] = text(p.get('script', ''), 3000)
         p['tags'] = text(p.get('tags', ''), 200)
-    for p in d['points']:
+    names = {}
+    for point_index,p in enumerate(d['points']):
         fields(p, 'id name x y yaw product_id script dwell guest_wait kind')
         p['name'] = text(p.get('name', ''), 80)
-        if not p['name']: raise ValueError('点位名称不能为空')
+        if not p['name']: raise ValueError(f'第{point_index+1}个点位名称不能为空')
+        key = point_name_key(p['name'])
+        if unique_point_names and key in names:
+            raise ValueError(f'第{point_index+1}个点位名称“{p["name"]}”与第{names[key]+1}个点位重复，请使用不同名称')
+        names[key] = point_index
         for k in ('x', 'y'): p[k] = number(p.get(k), -100000., 100000.)
         yaw = p.get('yaw')
         p['yaw'] = None if yaw is None else number(yaw, -math.pi, math.pi)
@@ -84,7 +93,7 @@ def validate(raw):
         if r['mode'] not in ('showcase', 'adaptive'): raise ValueError('路线模式无效')
         if type(r.get('loops', 1)) is not int or not 1 <= r.get('loops', 1) <= 10: raise ValueError('循环次数应为1到10')
         r['loops'] = r.get('loops', 1)
-        if not isinstance(r.get('steps'), list) or not 1 <= len(r['steps']) <= 100: raise ValueError('路线需包含1到100个点位')
+        if not isinstance(r.get('steps'), list) or not 0 <= len(r['steps']) <= 100: raise ValueError('路线最多包含100个点位')
         for s in r['steps']:
             fields(s, 'point_id speak')
             if s.get('point_id') not in ids['points']: raise ValueError('路线引用的点位不存在')
@@ -125,7 +134,8 @@ class Catalog:
         if stat.st_size>MAX_BYTES:raise ValueError('内容包过大')
         cached=self.cache.get(map_id)
         if cached and cached[0]==identity:return cached[1]
-        document=validate(json.loads(path.read_text()))
+        # Legacy content remains readable for renaming; every write is strict.
+        document=validate(json.loads(path.read_text()), unique_point_names=False)
         if document['map_id']!=map_id:raise ValueError('内容包地图标识与所在文件不一致')
         self.cache[map_id]=(identity,document)
         return document
@@ -151,7 +161,7 @@ class Catalog:
             if revision==current['revision']:return current
             path=self.root/'history'/ident(map_id)/(str(revision)+'.json')
             if not path.is_file()or path.stat().st_size>MAX_BYTES:raise ValueError('该内容版本不存在或已超过保留范围')
-            d=validate(json.loads(path.read_text()))
+            d=validate(json.loads(path.read_text()), unique_point_names=False)
             if d['map_id']!=map_id or d['revision']!=revision:raise ValueError('历史内容标识不一致')
             return d
     def restore(self,map_id,revision,expected_revision):

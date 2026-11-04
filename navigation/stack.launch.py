@@ -15,19 +15,24 @@ def setup(context):
     mode=get('mode');simulation=get('simulation')=='true';params=get('params');map_file=get('map')
     from process_scheduling import background_prefix
     background=background_prefix(get('physical_gait')=='true')
-    from configure import apply_runtime_geometry,apply_directional_stop
+    from configure import apply_runtime_geometry,apply_directional_stop,apply_input_ramp_routing
     apply_runtime_geometry(params)
     if os.getenv('P2_NAV_DIRECTIONAL_STOP')=='true':apply_directional_stop(params)
     assert mode in ('mapping','navigation')
     common={'use_sim_time':False}
     nodes=[]
-    buffered=os.getenv('P2_NAV_MOTION_BUFFER')=='true'
+    emulated_ramp=simulation and get('gait_handoff')=='true' and get('simulation_sensor_fixture')!='true'
+    buffered=os.getenv('P2_NAV_MOTION_BUFFER')=='true' or emulated_ramp
+    native_ramp=get('physical_gait')=='true' or emulated_ramp
+    apply_input_ramp_routing(params,native_ramp,buffered)
     if get('physical_gait')=='true':nodes.append(ExecuteProcess(cmd=['/usr/bin/python3','-S',str(root/'path_view_node.py')],output='screen'))
-    if buffered:nodes.append(ExecuteProcess(cmd=['/usr/bin/python3','-S',str(root/'motion_buffer_node.py')],output='screen'))
+    if buffered:nodes.append(ExecuteProcess(cmd=['/usr/bin/python3','-S',str(root/'motion_buffer_node.py'),
+        '--ros-args','-p','native_input_ramp:='+str(native_ramp).lower()],output='screen'))
     if get('simulation_sensor_fixture')=='true' and not simulation:raise ValueError('External simulation sensors require simulation mode')
     if simulation and get('simulation_sensor_fixture')!='true':
         shape=yaml.safe_load(Path(params).read_text())['local_costmap']['local_costmap']['ros__parameters']['footprint']
         sim_env={'P2_NAV_FOOTPRINT':shape}
+        if native_ramp:sim_env['P2_NAV_NATIVE_INPUT_RAMP']='true'
         if get('gait_handoff')=='true':sim_env['P2_NAV_VELOCITY_WINDOW']=os.getenv('P2_NAV_VELOCITY_WINDOW','.4')
         nodes.append(ExecuteProcess(cmd=['/usr/bin/python3','-S',str(root/'sim_world.py')],additional_env=sim_env,output='screen'))
     elif not simulation:
@@ -38,7 +43,9 @@ def setup(context):
             '--navigation-reference',get('navigation_reference'),'--ground-policy',get('ground_policy'),'--source-domain',get('source_domain'),'--target-domain',os.getenv('ROS_DOMAIN_ID','194')]+
             (['--support-history'] if get('support_history')=='true' else []),output='screen'))
     nodes.append(ExecuteProcess(cmd=['/usr/bin/python3','-S',str(root/'gate_node.py'),'--ros-args',
-        '-p','simulation:='+str(simulation).lower(),'-p','gait_handoff:='+get('gait_handoff'),'-p','require_localization:='+str(mode=='navigation').lower()],output='screen'))
+        '-p','simulation:='+str(simulation).lower(),'-p','gait_handoff:='+get('gait_handoff'),
+        '-p','upstream_motion_handoff:='+str(buffered and native_ramp).lower(),
+        '-p','require_localization:='+str(mode=='navigation').lower()],output='screen'))
     if mode=='mapping':
         slam={'use_sim_time':False,'solver_plugin':'solver_plugins::CeresSolver','ceres_linear_solver':'SPARSE_NORMAL_CHOLESKY',
             'ceres_preconditioner':'SCHUR_JACOBI','ceres_trust_strategy':'LEVENBERG_MARQUARDT','ceres_dogleg_type':'TRADITIONAL_DOGLEG',
@@ -80,9 +87,12 @@ def setup(context):
             nodes.append(Node(package=package,executable=executable,name=executable,parameters=[params],prefix=background if executable=='planner_server' else [],
                 remappings=[('cmd_vel','/p2_nav/cmd_raw')],output='screen'))
         navigation=['planner_server','controller_server','behavior_server','bt_navigator','velocity_smoother','collision_monitor']
-    nodes += [Node(package='nav2_velocity_smoother',executable='velocity_smoother',name='velocity_smoother',parameters=[params],
-                   remappings=[('cmd_vel','/p2_nav/cmd_buffered' if buffered else '/p2_nav/cmd_raw'),('cmd_vel_smoothed','/p2_nav/cmd_smooth')],output='screen'),
-              Node(package='p2_nav_controller',executable='observed_collision_monitor',name='collision_monitor',parameters=[params],output='screen'),
+    if native_ramp:
+        navigation.remove('velocity_smoother')
+    else:
+        nodes.append(Node(package='nav2_velocity_smoother',executable='velocity_smoother',name='velocity_smoother',parameters=[params],
+            remappings=[('cmd_vel','/p2_nav/cmd_buffered' if buffered else '/p2_nav/cmd_raw'),('cmd_vel_smoothed','/p2_nav/cmd_smooth')],output='screen'))
+    nodes += [Node(package='p2_nav_controller',executable='observed_collision_monitor',name='collision_monitor',parameters=[params],output='screen'),
               TimerAction(period=6.,actions=[Node(package='nav2_lifecycle_manager',executable='lifecycle_manager',name='lifecycle_manager_navigation',
                    parameters=[{'use_sim_time':False,'autostart':True,'node_names':navigation,'bond_timeout':4.}],output='screen')])]
     return nodes

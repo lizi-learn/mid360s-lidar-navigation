@@ -41,7 +41,7 @@ int main(int argc,char **argv){
   if(cm->on_configure(rclcpp_lifecycle::State())!=nav2_util::CallbackReturn::SUCCESS)throw std::runtime_error("Costmap configure failed");
   auto map=cm->getCostmap();map->resizeMap(100,100,.05,-2.5,-2.5);std::fill(map->getCharMap(),map->getCharMap()+10000,0);
   bool verified=false;double ox=0,oy=0;
-  if(kind=="blocked") {unsigned ix,iy;map->worldToMap(.39,.02,ix,iy);map->setCost(ix,iy,254);map->mapToWorld(ix,iy,ox,oy);verified=map->getCost(ix,iy)==254;}
+  if(kind=="blocked"||kind=="endpoint") {unsigned ix,iy;map->worldToMap(.39,.02,ix,iy);map->setCost(ix,iy,254);map->mapToWorld(ix,iy,ox,oy);verified=map->getCost(ix,iy)==254;}
   auto tf=std::make_shared<tf2_ros::Buffer>(node->get_clock());
   pluginlib::ClassLoader<nav2_core::Controller> loader("nav2_core","nav2_core::Controller");
   auto control=loader.createSharedInstance("p2_nav_controller::SettledGoalRPP");control->configure(node,"FollowPath",tf,cm);control->activate();
@@ -49,7 +49,8 @@ int main(int argc,char **argv){
   if(!node->has_parameter("goal_checker.plugin"))node->declare_parameter("goal_checker.plugin",std::string("nav2_controller::SimpleGoalChecker"));
   auto checker=goals.createSharedInstance(node->get_parameter("goal_checker.plugin").as_string());checker->initialize(node,"goal_checker",cm);
   pluginlib::ClassLoader<nav2_core::ProgressChecker> progress_loader("nav2_core","nav2_core::ProgressChecker");
-  auto progress=progress_loader.createSharedInstance("nav2_controller::SimpleProgressChecker");progress->initialize(node,"progress_checker");
+  if(!node->has_parameter("progress_checker.plugin"))node->declare_parameter("progress_checker.plugin",std::string("nav2_controller::SimpleProgressChecker"));
+  auto progress=progress_loader.createSharedInstance(node->get_parameter("progress_checker.plugin").as_string());progress->initialize(node,"progress_checker");
   geometry_msgs::msg::PoseStamped target;target.header.frame_id="fixture_world";target.header.stamp=node->now();target.pose.orientation=nav2_util::geometry_utils::orientationAroundZAxis(goal);
   nav_msgs::msg::Path path;path.header=target.header;path.poses.push_back(target);control->setPlan(path);
   p2_nav::SpeedResponse native;std::deque<double> latency(static_cast<int>(std::round(delay/dt))+1,0.);

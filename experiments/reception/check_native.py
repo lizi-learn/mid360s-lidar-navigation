@@ -8,7 +8,8 @@ from pathlib import Path
 ROOT=Path(__file__).resolve().parents[2];NAV=ROOT/'navigation';sys.path.insert(0,str(NAV))
 
 def main():
-    ap=argparse.ArgumentParser();ap.add_argument('--output',required=True);ap.add_argument('--setup',required=True);ap.add_argument('--port',type=int,default=8947);ap.add_argument('--domain',type=int,default=208);ap.add_argument('--stop-profile',choices=['baseline-directional','legacy-rectangle'],default='baseline-directional');ap.add_argument('--scenario',choices=['transit','all','obstacle','tools','maps','blockage'],default='all');ap.add_argument('--block-case',choices=['persistent','transient','takeover'],default='persistent');ap.add_argument('--obstacle-offset',type=float,default=0.);args=ap.parse_args()
+    ap=argparse.ArgumentParser();ap.add_argument('--output',required=True);ap.add_argument('--setup',required=True);ap.add_argument('--port',type=int,default=8947);ap.add_argument('--domain',type=int,default=208);ap.add_argument('--stop-profile',choices=['baseline-directional','legacy-rectangle'],default='baseline-directional');ap.add_argument('--scenario',choices=['transit','all','obstacle','tools','maps','blockage','followthrough','rotation','map-observations'],default='all');ap.add_argument('--block-case',choices=['persistent','transient','takeover'],default='persistent');ap.add_argument('--obstacle-offset',type=float,default=0.);ap.add_argument('--source-gap-ms',type=float,default=0.);args=ap.parse_args()
+    if not 0<=args.source_gap_ms<=1500:raise ValueError('Invalid bounded source gap')
     if not math.isfinite(args.obstacle_offset):raise ValueError('Invalid synthetic obstacle offset')
     out=Path(args.output).resolve().parent
     if out.exists()and any(out.iterdir()):raise ValueError('Use a new output directory; old failures are retained')
@@ -26,13 +27,22 @@ def main():
     door={'id':'front_door','x':5.9,'y':2.5,'yaw':math.pi/2,'width':2.4,'thickness':.15,'closed':True}
     doors=[door]if args.scenario=='all'else []
     mapdir=runtime/'maps/native_showroom';save_truth(mapdir,doors);(mapdir/'mapped.yaml').write_text((mapdir/'truth.yaml').read_text())
+    if args.scenario=='map-observations':
+        import numpy as np
+        from reception_maps import read_pgm
+        pixels=read_pgm(mapdir/'truth.pgm')[::-1].copy()
+        pixels[47:54,67:74]=0  # Historical obstacle, independent of synthetic world geometry.
+        pixels[62,70]=205  # An interior unknown cell must remain unknown in the map.
+        (mapdir/'mapped.pgm').write_bytes(b'P5\n240 200\n255\n'+pixels[::-1].tobytes())
+        (mapdir/'mapped.yaml').write_text((mapdir/'truth.yaml').read_text().replace('truth.pgm','mapped.pgm'))
+        env['P2_NAV_SIM_INITIAL_OBSTACLE']=json.dumps([3.525,2.525,.28])
     shape=[[.275,.275],[.275,-.275],[-.275,-.275],[-.275,.275]]
     foot=out/'footprint.json';foot.write_text(json.dumps({'schema_version':1,'vertices':shape}))
     (runtime/'planning_geometry.json').write_text(json.dumps({'footprint':shape,'footprint_padding':0,'global_obstacle_combination':0}))
     if doors:env['P2_NAV_SIM_DOORS']=json.dumps(doors)
     shell='source /opt/ros/humble/setup.bash\nsource '+shlex.quote(str(setup))+'\nexport PYTHONPATH=/usr/lib/python3/dist-packages:'+shlex.quote(str(NAV))+':${PYTHONPATH:-}\nexec /usr/bin/python3 -S '+shlex.quote(str(NAV/'console.py'))+' --simulation --gait-profile p2-flat-model --footprint-profile '+shlex.quote(str(foot))+' --runtime '+shlex.quote(str(runtime))+' --port '+str(args.port)
     log=(out/'console.log').open('w');process=subprocess.Popen(['bash','-c',shell],env=env,stdout=log,stderr=subprocess.STDOUT,start_new_session=True)
-    url=f'http://127.0.0.1:{args.port}';token='';latest={};trace=[];events=[];report={};started=time.monotonic();ros=None
+    url=f'http://127.0.0.1:{args.port}';token='';latest={};trace=[];events=[];report={};started=time.monotonic();ros=None;presentation=None;presentation_trace=None
     def call(path,data=None):
         raw=None if data is None else json.dumps(data).encode();request=urllib.request.Request(url+path,data=raw,headers={'Content-Type':'application/json','X-Nav-Token':token})
         try:
@@ -41,6 +51,10 @@ def main():
     def status():
         nonlocal latest
         latest=call('/api/status?summary=1')
+        if presentation:
+            from audio_feedback import atomic_json
+            atomic_json(runtime/'audio-feedback-state.json',dict(updated_at=time.time()))
+            presentation.observe(latest['reception']['mission'],enabled=True,volume=55,now=time.monotonic())
         if ros:ros.spin();ros.snapshot(latest)
         if latest.get('truth'):trace.append({'truth':latest['truth'],'feedback':latest['feedback'],'session':latest['session'],'path_source':latest.get('path_source',{}),'mission':{k:latest['reception']['mission'][k]for k in ['phase','index','epoch']}})
         return latest
@@ -127,10 +141,97 @@ def main():
         token=wait(lambda d:'request_token'in d,15)['request_token']
         call('/api/start',{'mode':'navigation','name':'native_showroom','controller':'rpp'})
         wait(lambda d:d.get('gate',{}).get('localized')and d['gate'].get('collision_source_valid')is True and d['gate'].get('data_fresh')is True and d.get('pose'),50)
+        assert status().get('truth',{}).get('input_ramp')=='production_cpp','Owned P2 fixture must use the production C++ input ramp'
         call('/api/sim_operator',{'mode':'navigation_allowed'});wait(lambda d:d['session']['navigation_permitted'],5)
         call('/api/speed',{'speed':.75,'velocity_scale':.5})
         d=status();doc=blank('native_showroom')
-        if args.scenario not in ('obstacle','tools','maps','blockage'):
+        if args.scenario=='rotation':
+            ros=ScenarioROS();origin=d['truth']['pose'][:];requested=-math.pi/2
+            prepared=call('/api/rotate',dict(radians=requested))
+            assert prepared['global_path_planned']is False and prepared['hardware_execution_enabled']is False
+            before=status();assert before['session']['path_points']==0 and before['session']['task_kind']=='rotation'
+            call('/api/confirm',dict(generation=prepared['generation']))
+            d=wait(lambda d:d['session']['phase']=='arrived',45)
+            turn=math.remainder(d['truth']['pose'][2]-origin[2],2*math.pi)
+            assert abs(turn-requested)<.15,(turn,requested)
+            assert math.dist(d['truth']['pose'][:2],origin[:2])<.01
+            assert all(abs(t['truth']['command'][0])<1e-9 for t in trace)
+            events.append(dict(case='independent_right90_actual_spin_no_translation_no_global_path',passed=True,actual_turn_rad=turn,global_path_points=0))
+            circle=[origin[0]+.35,origin[1]+.05,.03]
+            until=time.monotonic()+2.
+            while time.monotonic()<until:ros.control(dict(obstacle=circle,control_id='rotation-edge-obstacle'));status();time.sleep(.05)
+            seen=status();rays=ros.obstacle_rays(seen,circle);assert rays>=2,('rotation obstacle not observed',rays)
+            prepared=call('/api/rotate',dict(radians=-math.pi/2));call('/api/confirm',dict(generation=prepared['generation']))
+            d=wait(lambda d:d['session']['phase']in ('blocked','cancelled')and max(map(abs,d['truth']['command']))<1e-6,15)
+            assert d['truth']['collision_attempts']==0
+            assert math.dist(d['truth']['pose'][:2],origin[:2])<.01
+            events.append(dict(case='independent_spin_observed_edge_obstacle_stop',passed=True,ray_returns=rays,collision_attempts=0,terminal_phase=d['session']['phase']))
+            for _ in range(10):ros.control(dict(obstacle=None,control_id='rotation-cleared'));status();time.sleep(.1)
+            prepared=call('/api/rotate',dict(radians=math.pi/2));call('/api/confirm',dict(generation=prepared['generation']))
+            wait(lambda d:abs(d['truth']['command'][1])>.05,10)
+            call('/api/sim_operator',dict(mode='manual'));d=wait(lambda d:d['session']['phase']=='manual'and max(map(abs,d['truth']['command']))<1e-6,5)
+            call('/api/sim_operator',dict(mode='navigation_allowed'));time.sleep(.5);d=status()
+            assert d['session']['force_navigation_zero']and max(map(abs,d['truth']['command']))<1e-6
+            events.append(dict(case='independent_spin_manual_takeover_no_auto_resume',passed=True))
+        if args.scenario=='map-observations':
+            ros=ScenarioROS();ghost=(3.525,2.525);base_sha=hashlib.sha256((mapdir/'mapped.pgm').read_bytes()).hexdigest()
+            from nav_msgs.msg import OccupancyGrid
+            from rclpy.qos import QoSProfile,DurabilityPolicy,ReliabilityPolicy
+            static_input=[None]
+            static_sub=ros.node.create_subscription(OccupancyGrid,'/p2_nav/reception_map',lambda m:static_input.__setitem__(0,m),
+                QoSProfile(depth=1,durability=DurabilityPolicy.TRANSIENT_LOCAL,reliability=ReliabilityPolicy.RELIABLE))
+            def static_cell():
+                g=static_input[0]
+                if g is None:return None
+                return g.data[math.floor((ghost[1]-g.info.origin.position.y)/g.info.resolution)*g.info.width+
+                              math.floor((ghost[0]-g.info.origin.position.x)/g.info.resolution)]
+            def cell(grid,x,y):
+                if grid is None:return None
+                m=grid.metadata;ix=math.floor((x-m.origin.position.x)/m.resolution);iy=math.floor((y-m.origin.position.y)/m.resolution)
+                return grid.data[iy*m.size_x+ix]if 0<=ix<m.size_x and 0<=iy<m.size_y else None
+            def displayed(x,y):
+                g=call('/api/map')['map'];return g['cells'][math.floor((y-g['origin'][1])/g['resolution'])*g['width']+math.floor((x-g['origin'][0])/g['resolution'])]
+            wait(lambda d:cell(ros.global_map,*ghost)==254,15)
+            until=time.monotonic()+3.
+            while time.monotonic()<until:status();time.sleep(.1)
+            assert displayed(*ghost)==100,'A person occupying the old cell must veto clearing'
+            rays=ros.obstacle_rays(status(),[3.525,2.525,.28]);assert rays>=2,rays
+            for _ in range(8):ros.control(dict(obstacle=None,control_id='person-left'));status();time.sleep(.1)
+            fixed_revision=status()['map_revision']
+            d=wait(lambda d:d['reception']['map_observations']['pending_cells']>0 and cell(ros.global_map,*ghost)==0,25)
+            assert displayed(*ghost)==100 and static_cell()==100 and d['map_revision']==fixed_revision,'Collecting must not rewrite or publish the fixed map'
+            call('/api/save',{'reception':dict(operation='map_observations_merge',map_id='native_showroom')})
+            d=wait(lambda d:d['reception']['map_observations']['cleared_cells']>0 and displayed(*ghost)==0 and static_cell()==0,10)
+            assert displayed(*ghost)==0 and displayed(3.525,3.125)==-1
+            assert cell(ros.global_map,.075,2.525)==254
+            assert hashlib.sha256((mapdir/'mapped.pgm').read_bytes()).hexdigest()==base_sha
+            raster=call('/api/save',{'reception':dict(operation='map_raster',map_id='native_showroom')})
+            index=math.floor(ghost[1]/.05)*240+math.floor(ghost[0]/.05)
+            assert raster['cells'][index]==0 and raster['map_observations']['cleared_cells']>0
+            original=d['reception']['map_observations']['cleared_cells'];surface=(3.375,2.375)
+            assert displayed(*surface)==0
+            for _ in range(15):ros.control(dict(obstacle=[3.525,2.525,.28],control_id='person-returned'));status();time.sleep(.1)
+            # The entire old patch is inside the solid circle. Its actual
+            # surface is outside that patch; test the CURRENT measured returns,
+            # rather than assuming the scan can observe the occluded interior.
+            def marked_returns(d):
+                return sum(abs(math.hypot(p[0]-3.525,p[1]-2.525)-.28)<.12 and cell(ros.global_map,*p)==254
+                           for p in (d.get('scan_overlay')or{}).get('points',[]))
+            d=wait(lambda d:marked_returns(d)>=2,10)
+            assert displayed(*surface)==0 and d['reception']['map_observations']['cleared_cells']==original
+            restored_marks=marked_returns(d)
+            for _ in range(8):ros.control(dict(obstacle=None,control_id='person-left-again'));status();time.sleep(.1)
+            wait(lambda d:cell(ros.global_map,*ghost)==0 and displayed(*ghost)==0,20)
+            events.append(dict(case='collect_without_map_publish_idle_merge_person_remains_dynamic',passed=True,
+                source_obstacle_rays=rays,unknown_source_preserved=True,wall_retained=True,
+                actual_global_costmap_updated=True,returning_obstacle_marked_returns=restored_marks,
+                immutable_base_sha256=base_sha))
+            doc=blank('native_showroom');doc['points']=[point('a',4.8,2.5,'visit')]
+            doc['routes']=[dict(id='tour',name='updated map navigation',mode='showcase',loops=1,description='',steps=[dict(point_id='a',speak=False)])]
+            doc=save(doc);start(doc);d=complete()
+            assert d['truth']['collision_attempts']==0
+            events.append(dict(case='navigate_through_updated_map_goal_complete_no_body_intrusion',passed=True))
+        if args.scenario not in ('obstacle','tools','maps','blockage','followthrough','rotation','map-observations'):
             doc=blank('native_showroom');doc['points']=[point('a',2.8,2.5),point('b',3.6,2.5),point('c',4.4,2.5,'visit')]
             doc['routes']=[{'id':'tour','name':'continuous transit','mode':'showcase','loops':1,'description':'synthetic','steps':[{'point_id':i,'speak':False}for i in ['a','b','c']]}]
             doc=save(doc);start(doc);d=complete();mission=d['reception']['mission']
@@ -143,6 +244,66 @@ def main():
                 assert samples and min(t['command'][0]for t in samples)>.05,('transit stopped or unobserved',x)
                 windows[str(x)]={'samples':len(samples),'minimum_forward':min(t['command'][0]for t in samples)}
             events.append({'case':'continuous_native_transit','passed':True,'windows':windows})
+        if args.scenario=='followthrough':
+            # Real native navigation results, real playback subprocess lifecycle;
+            # only sound output is a short synthetic WAV and fake paplay.
+            import wave
+            from reception_voice import PresentationPlayer
+            from reception_catalog import content_key
+            voice=runtime/'reception-voice-cache';voice.mkdir(exist_ok=True)
+            text='Synthetic repeated product introduction.';key=content_key(text)
+            with wave.open(str(voice/(key+'.wav')),'wb')as wav:
+                wav.setparams((1,2,24000,0,'NONE','none'));wav.writeframes(b'\0\0'*12000)
+            fake=out/'fake-audio';fake.mkdir();presentation_trace=out/'presentation-processes.txt'
+            player=fake/'paplay'
+            player.write_text('\n'.join(['#!/usr/bin/python3', 'import sys,time',
+                'with open('+repr(str(presentation_trace))+',"a")as f:',
+                '    f.write(" ".join(sys.argv[1:])+"\\n")', 'time.sleep(.25)', '']))
+            player.chmod(0o755);os.environ['PATH']=str(fake)+os.pathsep+os.environ['PATH']
+            presentation=PresentationPlayer(voice,runtime/'reception-speech-result.json')
+            a=point('product_a',2.8,2.5,'visit');a.update(yaw=.6,script=text,guest_wait=True)
+            b=point('product_b',3.8,2.5,'visit');b.update(yaw=0.,script=text,dwell=1.)
+            home=point('home',2.,2.5,'home')
+            doc['points']=[point('via',2.4,2.5),a,b,home];doc['routes']=[dict(id='tour',name='Heading, product, guest wait, dwell, return',mode='showcase',loops=1,description='',steps=[dict(point_id=p['id'],speak=True)for p in doc['points']])]
+            doc=save(doc);start(doc)
+            if args.source_gap_ms:
+                ros=ScenarioROS()
+                moving=wait(lambda d:d['truth']['travelled_m']>.2 and d['session']['phase']=='executing',20)
+                original_generation=moving['session']['generation'];witness=[]
+                until=time.monotonic()+args.source_gap_ms/1000.
+                while time.monotonic()<until:
+                    ros.control(dict(drop_scan=True,control_id='reception-source-gap'))
+                    observed=status();witness.append(dict(controls=observed['truth']['controls'],gate=observed['gate'],session=observed['session'],command=observed['truth']['command']))
+                    if observed['reception']['mission']['phase']=='failed':raise RuntimeError(observed['reception']['mission']['error'])
+                    time.sleep(.04)
+                assert any(s['controls']['drop_scan']for s in witness)
+                assert any(s['gate'].get('collision_source_valid')is False for s in witness),'No actual source fault observed'
+                assert any(max(map(abs,s['command']))<1e-6 for s in witness),'No stopped output observed'
+                for _ in range(5):ros.control(dict(drop_scan=False,control_id='reception-source-restored'));time.sleep(.04)
+                resumed=wait(lambda d:d['session']['generation']>original_generation and d['session']['phase']=='executing'and d['gate'].get('armed')is True,25)
+                assert resumed['gate']['arm_generation']>max(s['gate'].get('collision_fault_generation',-1)for s in witness)
+                events.append(dict(case='actual_scan_gap_cancel_receipt_replan_reauthorize_same_task',passed=True,original_generation=original_generation,new_generation=resumed['session']['generation'],gap_ms=args.source_gap_ms,
+                    observed_fault_samples=sum(s['gate'].get('collision_source_valid')is False for s in witness),stopped_samples=sum(max(map(abs,s['command']))<1e-6 for s in witness),user_start_requests=1))
+            parked=wait(lambda d:d['reception']['mission']['phase']=='guest_wait',45)
+            assert parked['reception']['mission']['index']==1
+            error=abs(math.remainder(parked['pose'][2]-a['yaw'],2*math.pi));assert error<=math.radians(20),error
+            epoch=parked['reception']['mission']['epoch'];pose=parked['truth']['pose']
+            time.sleep(.6);parked=status()
+            assert parked['reception']['mission']['phase']=='guest_wait'
+            assert max(map(abs,parked['truth']['command']))<1e-6
+            assert math.dist(parked['truth']['pose'][:2],pose[:2])<.01
+            call('/api/confirm',{'reception_command':dict(command='continue',epoch=epoch)})
+            dwelling=wait(lambda d:d['reception']['mission']['phase']=='dwell',45)
+            assert dwelling['reception']['mission']['index']==2
+            assert abs(math.remainder(dwelling['pose'][2]-b['yaw'],2*math.pi))<=math.radians(20)
+            assert dwelling['reception']['mission']['epoch']!=epoch
+            assert max(map(abs,dwelling['truth']['command']))<1e-6
+            d=complete()
+            assert len(presentation_trace.read_text().splitlines())==2
+            assert d['truth']['collision_attempts']==0
+            events.append(dict(case='native_heading_then_same_product_twice_guest_continue_dwell_return',passed=True,
+                first_yaw_error=error,actual_playback_processes=2,guest_wait_held=True,dwell_observed=True,
+                audio_scope='Synthetic silent WAV and fake paplay; not a physical speaker test'))
         if args.scenario=='blockage':
             ros=ScenarioROS()
             doc=blank('native_showroom');doc['points']=[point('finish',5.0,2.5,'visit')]
@@ -259,7 +420,7 @@ def main():
             orient=point('oriented',before[0],before[1],'visit');orient['yaw']=math.remainder(pose+1.,2*math.pi)
             doc['points']=[orient];doc['routes']=[dict(id='tour',name='directed arrival',mode='showcase',loops=1,description='',steps=[dict(point_id='oriented',speak=False)])];doc=save(doc);start(doc);d=complete()
             actual_yaw=d['pose'][2];yaw_error=abs(math.remainder(actual_yaw-orient['yaw'],2*math.pi))
-            assert yaw_error<.15,(actual_yaw,orient['yaw'])
+            assert yaw_error<=math.radians(20),(actual_yaw,orient['yaw'])
             events.append({'case':'actual_directed_goal_settled_action_completion','passed':True,'requested_yaw':orient['yaw'],'actual_yaw':actual_yaw,'error_rad':yaw_error})
             doc['points']=[point('finish',10.5,4.25,'visit')];doc['routes'][0]['steps']=[dict(point_id='finish',speak=False)];doc=save(doc)
             start(doc);wait(lambda d:d['reception']['mission']['phase']=='navigating',10)
@@ -295,6 +456,20 @@ def main():
             start(doc);d=complete()
             cross=[t['truth']['pose']for t in trace if abs(t['truth']['pose'][0]-3.5)<.08]
             assert cross and all(p[1]<1.7 or p[1]>3.3 for p in cross),cross
+            # Independent synthetic truth audit of the complete55cm square
+            # against the authored10cm line, rather than robot-centre crossing.
+            intrusion_samples=0;body_samples=0;previous=None
+            for entry in trace:
+                if entry['mission']['phase']not in ('navigating','dispatching'):continue
+                current=entry['truth']['pose']
+                for k in range(1,11):
+                    q=current if previous is None else [previous[0]+(current[0]-previous[0])*k/10.,previous[1]+(current[1]-previous[1])*k/10.,previous[2]+math.remainder(current[2]-previous[2],2*math.pi)*k/10.]
+                    x,y,yaw=q;dx=3.5-x;dy=2.5-y;c=math.cos(yaw);sn=math.sin(yaw);half=.275;hx=.05;hy=.55
+                    overlaps=(abs(dx)<=half*(abs(c)+abs(sn))+hx and abs(dy)<=half*(abs(c)+abs(sn))+hy and abs(c*dx+sn*dy)<=half+hx*abs(c)+hy*abs(sn) and abs(-sn*dx+c*dy)<=half+hx*abs(sn)+hy*abs(c))
+                    body_samples+=1;intrusion_samples+=int(overlaps)
+                previous=current
+            witness.update(body_intrusion_samples=intrusion_samples,body_check_samples=body_samples,body_scope='synthetic truth square vs authored line;10 interpolated samples per trace interval')
+            assert body_samples>0 and intrusion_samples==0,witness
             wait(lambda d:d['speed_zones']['factor']==1.,5)
             run=d['reception']['mission']['run_id'];history=call('/api/save',{'reception':dict(operation='trace_read',map_id=doc['map_id'],run_id=run,limit=200)})
             assert len(history['samples'])>5 and all(s.get('pose_source_ros_ns')and s['gate'].get('evaluated_monotonic_ns')for s in history['samples'])
@@ -328,6 +503,7 @@ def main():
             try:process.wait(timeout=25)
             except subprocess.TimeoutExpired:os.killpg(process.pid,signal.SIGKILL);process.wait()
         if ros:ros.close()
+        if presentation:presentation.stop()
         log.close();report['curved_forward_receipts']=sum('Curved forward input blended'in line for line in(runtime/'workflow.log').read_text(errors='replace').splitlines())if(runtime/'workflow.log').is_file()else None;Path(args.output).write_text(json.dumps(report,ensure_ascii=False,indent=2))
     print(json.dumps({k:v for k,v in report.items()if k not in ('latest','source_sha','truth')},ensure_ascii=False))
     return 0 if report.get('passed')else 1

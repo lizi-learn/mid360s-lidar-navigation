@@ -4,10 +4,12 @@
 #include <chrono>
 #include <iomanip>
 #include <memory>
+#include <sstream>
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp_lifecycle/lifecycle_node.hpp"
 #include "pluginlib/class_loader.hpp"
 #include "nav2_core/global_planner.hpp"
+#include "nav2_core/exceptions.hpp"
 #include "nav2_costmap_2d/costmap_2d_ros.hpp"
 #include "tf2_ros/buffer.h"
 #include "nav2_util/geometry_utils.hpp"
@@ -31,12 +33,64 @@ int main(int argc,char **argv){
   geometry_msgs::msg::PoseStamped start,goal;start.header.frame_id=goal.header.frame_id="fixture_world";start.header.stamp=parent->now();goal.header.stamp=parent->now()-rclcpp::Duration::from_seconds(5.);
   start.pose.position.x=std::stod(argv[4]);start.pose.position.y=std::stod(argv[5]);start.pose.orientation=nav2_util::geometry_utils::orientationAroundZAxis(std::stod(argv[6]));
   goal.pose.position.x=std::stod(argv[7]);goal.pose.position.y=std::stod(argv[8]);goal.pose.orientation=nav2_util::geometry_utils::orientationAroundZAxis(std::stod(argv[9]));
+  if(std::getenv("P2_ARRIVAL_FINAL_REQUEST")) {
+    const double fx=parent->get_parameter("GridBased.final_x").as_double(),fy=parent->get_parameter("GridBased.final_y").as_double();
+    // A real request header is used, rather than synthesizing a pose timestamp.
+    if(std::hypot(goal.pose.position.x-fx,goal.pose.position.y-fy)<1e-6)
+      parent->set_parameter(rclcpp::Parameter("GridBased.final_request_ns",rclcpp::Time(goal.header.stamp).nanoseconds()));
+  }
   const auto began=std::chrono::steady_clock::now();
   try{
    auto path=planner->createPlan(start,goal);std::ofstream out(std::string(argv[2])+".csv");out<<"x,y,yaw\n";
    for(const auto &p:path.poses)out<<std::setprecision(12)<<p.pose.position.x<<','<<p.pose.position.y<<','<<tf2::getYaw(p.pose.orientation)<<'\n';
    std::ofstream(std::string(argv[2])+".json")<<std::setprecision(17)<<"{\"planned\":"<<(!path.poses.empty()?"true":"false")<<",\"points\":"<<path.poses.size()<<",\"input_goal_stamp_s\":"<<rclcpp::Time(goal.header.stamp).seconds()<<",\"path_stamp_s\":"<<rclcpp::Time(path.header.stamp).seconds()<<",\"path_age_at_result_s\":"<<(parent->now()-rclcpp::Time(path.header.stamp)).seconds()<<",\"seconds\":"<<std::chrono::duration<double>(std::chrono::steady_clock::now()-began).count()<<"}";
   }catch(const std::exception &e){std::string err=e.what();for(auto &c:err)if(c=='\"'||c=='\\'||c=='\n')c=' ';std::ofstream(std::string(argv[2])+".json")<<std::setprecision(17)<<"{\"planned\":false,\"error\":\""<<err<<"\",\"seconds\":"<<std::chrono::duration<double>(std::chrono::steady_clock::now()-began).count()<<"}";}
+  if(std::getenv("P2_ARRIVAL_REUSE_NARROW")) {
+    auto from=start;from.pose.position.x+=.2;from.pose.position.y+=.005;
+    auto reused=planner->createPlan(from,goal);
+    if(reused.poses.empty())throw std::runtime_error("Original footprint route was not reused");
+    std::ofstream narrow(std::string(argv[2])+"-reused.csv");narrow<<"x,y,yaw\n";
+    for(const auto &p:reused.poses)narrow<<std::setprecision(12)<<p.pose.position.x<<','<<p.pose.position.y<<','<<tf2::getYaw(p.pose.orientation)<<'\n';
+    narrow.close();unsigned marked=0;
+    for(unsigned y=0;y<height;++y)for(unsigned x=0;x<width;++x){double wx,wy;map->mapToWorld(x,y,wx,wy);if(std::abs(wx-4.)<.08&&wy>1.2&&wy<1.8){map->setCost(x,y,254);++marked;}}
+    bool rejected=false;
+    try{auto blocked=planner->createPlan(from,goal);rejected=blocked.poses.empty();}catch(const nav2_core::PlannerException &){rejected=true;}
+    if(!marked||!rejected)throw std::runtime_error("New corridor obstacle was not rejected");
+    std::ofstream(std::string(argv[2])+"-blocked.json")<<"{\"rejected\":"<<(rejected?"true":"false")<<",\"marked_cells\":"<<marked<<"}";
+  }
+  if(std::getenv("P2_ARRIVAL_ROOMIER_SEQUENCE")) {
+    const std::vector<unsigned char> original(map->getCharMap(),map->getCharMap()+width*height);
+    auto save=[&](const std::string &label) {
+      const auto began=std::chrono::steady_clock::now();auto path=planner->createPlan(start,goal);
+      if(path.poses.empty())throw std::runtime_error("Empty roomier-reuse plan: "+label);
+      std::ofstream out(std::string(argv[2])+"-"+label+".csv");out<<"x,y,yaw\n";
+      for(const auto &p:path.poses)out<<std::setprecision(12)<<p.pose.position.x<<','<<p.pose.position.y<<','<<tf2::getYaw(p.pose.orientation)<<'\n';
+      std::ofstream(std::string(argv[2])+"-"+label+".json")<<"{\"seconds\":"<<std::chrono::duration<double>(std::chrono::steady_clock::now()-began).count()<<"}";
+    };
+    auto block=[&](bool ceiling) {
+      for(unsigned y=0;y<height;++y)for(unsigned x=0;x<width;++x){double wx,wy;map->mapToWorld(x,y,wx,wy);
+        if(wx>=2.5&&wx<=4.&&(wy<=2.15||(ceiling&&wy>=2.85)))map->setCost(x,y,254);}
+    };
+    start.pose.position.x+=.2;save("open");block(false);save("roomier");
+    std::copy(original.begin(),original.end(),map->getCharMap());save("reset");block(true);save("narrow");
+    for(unsigned y=0;y<height;++y)for(unsigned x=0;x<width;++x){double wx,wy;map->mapToWorld(x,y,wx,wy);if(wx>=2.5&&wx<=4.)map->setCost(x,y,254);}
+    bool rejected=false;try{rejected=planner->createPlan(start,goal).poses.empty();}catch(const nav2_core::PlannerException &){rejected=true;}
+    if(!rejected)throw std::runtime_error("Completely closed passage accepted");
+    std::ofstream(std::string(argv[2])+"-closed.json")<<"{\"rejected\":true,\"actual_obstacle_marked\":true}";
+  }
+  if(const char *update=std::getenv("P2_ARRIVAL_FIELD_REPLAN")) {
+    // Read a second real frozen snapshot. This is an offline replay only;
+    // original cells and source metadata stay in its private evidence bundle.
+    std::ifstream changed(update);unsigned uw,uh;double ur,uox,uoy;changed>>uw>>uh>>ur>>uox>>uoy;
+    if(uw!=width||uh!=height||std::abs(ur-r)>1e-9||std::abs(uox-ox)>1e-9||std::abs(uoy-oy)>1e-9)throw std::runtime_error("Replay map geometry changed");
+    for(unsigned i=0;i<width*height;++i){int cost;if(!(changed>>cost))throw std::runtime_error("Incomplete changed map");map->getCharMap()[i]=cost;}
+    const char *input=std::getenv("P2_ARRIVAL_UPDATED_START");if(!input)throw std::runtime_error("Missing observed updated pose");
+    std::istringstream pose(input);double x,y,yaw;if(!(pose>>x>>y>>yaw))throw std::runtime_error("Invalid observed updated pose");
+    start.pose.position.x=x;start.pose.position.y=y;start.pose.orientation=nav2_util::geometry_utils::orientationAroundZAxis(yaw);
+    auto path=planner->createPlan(start,goal);if(path.poses.empty())throw std::runtime_error("Changed-map path empty");
+    std::ofstream out(std::string(argv[2])+"-updated.csv");out<<"x,y,yaw\n";
+    for(const auto &p:path.poses)out<<std::setprecision(12)<<p.pose.position.x<<','<<p.pose.position.y<<','<<tf2::getYaw(p.pose.orientation)<<'\n';
+  }
   if(std::getenv("P2_ARRIVAL_REPLAN_SEQUENCE")) {
     auto save_path=[&](const std::string &label,const geometry_msgs::msg::PoseStamped &from,const geometry_msgs::msg::PoseStamped &to){
       auto path=planner->createPlan(from,to);if(path.poses.empty())throw std::runtime_error("Replan empty: "+label);
@@ -53,6 +107,52 @@ int main(int argc,char **argv){
     save_path("opened",start,goal);
     goal.pose.position.x=2.2;goal.pose.position.y=5.5;
     save_path("newgoal",start,goal);
+  }
+  if(std::getenv("P2_ARRIVAL_ALTERNATING_SEQUENCE")) {
+    const std::vector<unsigned char> original(map->getCharMap(),map->getCharMap()+width*height);
+    auto save=[&](const std::string &name,const geometry_msgs::msg::PoseStamped &from,const geometry_msgs::msg::PoseStamped &to){
+      auto path=planner->createPlan(from,to);if(path.poses.empty())throw std::runtime_error("Alternating replan empty");
+      std::ofstream out(std::string(argv[2])+"-"+name+".csv");out<<"x,y,yaw\n";
+      for(const auto &p:path.poses)out<<std::setprecision(12)<<p.pose.position.x<<','<<p.pose.position.y<<','<<tf2::getYaw(p.pose.orientation)<<'\n';};
+    // First observe one side closed, then reopen it while the existing upper
+    // detour remains valid. Another route leg must not evict that detour.
+    for(unsigned y=0;y<height;++y)for(unsigned x=0;x<width;++x){double wx,wy;map->mapToWorld(x,y,wx,wy);if(wx>=3.1&&wx<=4.3&&wy<2.)map->setCost(x,y,254);}
+    save("alternating-initial",start,goal);
+    std::copy(original.begin(),original.end(),map->getCharMap());
+    auto other=goal;other.pose.position.x=2.2;other.pose.position.y=5.5;save("alternating-other",start,other);
+    auto from=start;from.pose.position.x=2.2;from.pose.position.y=2.48;save("alternating-reused",from,goal);
+    for(unsigned y=0;y<height;++y)for(unsigned x=0;x<width;++x){double wx,wy;map->mapToWorld(x,y,wx,wy);if(wx>=3.1&&wx<=4.3&&wy>3.)map->setCost(x,y,254);}
+    save("alternating-blocked",from,goal);
+  }
+  if(std::getenv("P2_ARRIVAL_CORRIDOR_SEQUENCE")) {
+    const std::vector<unsigned char> original(map->getCharMap(),map->getCharMap()+width*height);
+    auto save=[&](const std::string &label,const geometry_msgs::msg::PoseStamped &from,const geometry_msgs::msg::PoseStamped &to) {
+      auto path=planner->createPlan(from,to);if(path.poses.empty())throw std::runtime_error("Empty reference area plan");
+      std::ofstream out(std::string(argv[2])+"-"+label+".csv");out<<"x,y,yaw\n";
+      for(const auto &p:path.poses)out<<std::setprecision(12)<<p.pose.position.x<<','<<p.pose.position.y<<','<<tf2::getYaw(p.pose.orientation)<<'\n';
+      return path;
+    };
+    auto chosen=save("area-initial",start,goal);
+    auto other=goal;other.pose.position.x=1.;other.pose.position.y=3.;save("area-other",start,other);
+    auto from=start;from.pose.position.x+=.1;from.pose.position.y+=.01;
+    auto reused=save("area-reused",from,goal);
+    if(std::hypot(chosen.poses.back().pose.position.x-reused.poses.back().pose.position.x,
+                  chosen.poses.back().pose.position.y-reused.poses.back().pose.position.y)>1e-6)
+      throw std::runtime_error("Selected reference area flapped between route legs");
+    const auto centre=reused.poses.back().pose.position;unsigned ix,iy;
+    if(!map->worldToMap(centre.x,centre.y,ix,iy))throw std::runtime_error("Selected area outside map");
+    map->setCost(ix,iy,254);save("area-new-obstacle",from,goal);
+    for(unsigned y=0;y<height;++y)for(unsigned x=0;x<width;++x){double wx,wy;map->mapToWorld(x,y,wx,wy);if(std::hypot(wx-goal.pose.position.x,wy-goal.pose.position.y)<1.)map->setCost(x,y,254);}
+    bool rejected=false;try{auto path=planner->createPlan(from,goal);rejected=path.poses.empty();}catch(const nav2_core::PlannerException &){rejected=true;}
+    if(!rejected)throw std::runtime_error("Completely occupied reference area accepted");
+    std::copy(original.begin(),original.end(),map->getCharMap());
+    // Same coordinates, a genuine new final request: now they must remain exact.
+    auto final=goal;final.header.stamp=parent->now();
+    parent->set_parameters({rclcpp::Parameter("GridBased.final_x",goal.pose.position.x),rclcpp::Parameter("GridBased.final_y",goal.pose.position.y),
+      rclcpp::Parameter("GridBased.final_request_ns",rclcpp::Time(final.header.stamp).nanoseconds())});
+    bool final_rejected=false;try{auto path=planner->createPlan(from,final);final_rejected=path.poses.empty();}catch(const nav2_core::PlannerException &){final_rejected=true;}
+    if(!final_rejected)throw std::runtime_error("Occupied final visit was moved into a reference area");
+    std::ofstream(std::string(argv[2])+"-area-receipts.json")<<"{\"blocked_area_rejected\":true,\"occupied_final_rejected\":true,\"actual_new_obstacle\":["<<centre.x<<","<<centre.y<<"]}";
   }
   planner->deactivate();planner->cleanup();planner.reset();cm->on_cleanup(rclcpp_lifecycle::State());cm.reset();parent.reset();
  }catch(const std::exception &e){std::cerr<<e.what();rc=1;}
