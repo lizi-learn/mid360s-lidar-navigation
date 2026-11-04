@@ -248,6 +248,12 @@ def apply_runtime_geometry(params_file):
         method=value[key]
         if type(method) is not int or method not in (0,1):raise ValueError('Invalid obstacle layer combination')
         params[kind+'_costmap'][kind+'_costmap']['ros__parameters']['obstacle_layer']['combination_method']=method
+    if 'presentation_xy_tolerance' in value:
+        tolerance=value['presentation_xy_tolerance']
+        if type(tolerance)not in(int,float)or not math.isfinite(tolerance)or tolerance<=0.:
+            raise ValueError('Invalid presentation position tolerance')
+        for name in ('presentation_goal_checker','presentation_position_goal_checker'):
+            params['controller_server']['ros__parameters'][name]['xy_goal_tolerance']=float(tolerance)
     path.write_text(yaml.safe_dump(params,sort_keys=False))
     return True
 
