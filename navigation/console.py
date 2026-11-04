@@ -240,13 +240,22 @@ class Console(Node):
             msg=copy.deepcopy(base);msg.data=cells
             self.navigation_grid=msg;self.overlay_revision+=1;self.overlay_report=report;self._overlay_key=key
             self.reception_map.publish(msg)
-            # Preserve the saved map's unknown boundary after live obstacle
+            # Preserve the saved map's EXTERIOR unknown boundary after live obstacle
             # clearing. A long laser ray is not evidence of navigable floor
             # outside this map (for example a stairwell beside a corridor).
             # The same standard filter also applies authored virtual walls in
             # BOTH costmaps. No source map or measured timestamp is rewritten.
-            mask=copy.deepcopy(base);mask.data=[100 if value<0 else 0 for value in base.data]
-            report['map_boundary_cells']=sum(value<0 for value in base.data)
+            # Isolated unknown holes inside the mapped floor are not virtual
+            # walls. They remain unknown in the source map until real laser
+            # clearing; masking them lethal would override that live evidence.
+            from map_boundary import exterior_unknown_mask
+            boundary_key=(self.map_revision,id(base))
+            cache=getattr(self,'_boundary_cache',None)
+            if cache is None or cache[0]!=boundary_key:
+                boundary,counts=exterior_unknown_mask(base.data,base.info.width,base.info.height)
+                self._boundary_cache=(boundary_key,boundary,counts)
+            _,boundary,counts=self._boundary_cache
+            mask=copy.deepcopy(base);mask.data=list(boundary);report.update(counts)
             if abs(q.z)<=1e-8 and abs(q.x)<=1e-8 and abs(q.y)<=1e-8:
                 mask.data=self.annotation_layer.apply(dict(grid,cells=mask.data),annotations)[0]
             self.keepout_mask.publish(mask)

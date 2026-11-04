@@ -54,7 +54,7 @@ int main(int argc,char **argv){
   auto info_pub=pubnode->create_publisher<nav2_msgs::msg::CostmapFilterInfo>("/fixture/boundary_info",qos);
   auto mask_pub=pubnode->create_publisher<nav_msgs::msg::OccupancyGrid>("/fixture/boundary_mask",qos);
   nav2_msgs::msg::CostmapFilterInfo info;info.type=0;info.base=0.;info.multiplier=1.;info.filter_mask_topic="/fixture/boundary_mask";
-  nav_msgs::msg::OccupancyGrid mask;mask.header.frame_id="fixture_world";mask.info.width=80;mask.info.height=80;mask.info.resolution=.1;mask.info.origin.position.x=-4.;mask.info.origin.position.y=-4.;mask.info.origin.orientation.w=1.;mask.data.assign(6400,0);
+  nav_msgs::msg::OccupancyGrid mask;mask.header.frame_id="fixture_world";mask.info.width=80;mask.info.height=80;mask.info.resolution=.1;mask.info.origin.position.x=-4.;mask.info.origin.position.y=-4.;mask.info.origin.orientation.w=1.;mask.data.assign(6400,-1);
   for(unsigned y=0;y<80;++y)for(unsigned x=0;x<20;++x)mask.data[y*80+x]=100;
   info_pub->publish(info);mask_pub->publish(mask);rclcpp::executors::SingleThreadedExecutor executor;executor.add_node(node->get_node_base_interface());executor.add_node(pubnode);
   const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(3);
@@ -63,7 +63,19 @@ int main(int argc,char **argv){
   std::fill(master.getCharMap(),master.getCharMap()+6400,0);
   filter->process(master,0,0,80,80,geometry_msgs::msg::Pose2D());
   require(master.getCost(10,40)==254&&master.getCost(40,40)==0,"outside remains forbidden after dynamic clearing");
-  std::cout<<"{\"passed\":true,\"cases\":10,\"synthetic_source_time\":true,\"actual_plugins\":true,\"physical_commands\":0}"<<std::endl;
+  // An interior unknown hole is not made free by removing the extra keepout.
+  master.setCost(mx,my,255);filter->process(master,0,0,80,80,geometry_msgs::msg::Pose2D());
+  require(master.getCost(mx,my)==255,"unobserved interior hole remains unknown");
+  // Only an actual ObstacleLayer clearing observation can reveal free floor.
+  layer->clearStaticObservations(true,true);nav2_costmap_2d::Observation ray;
+  ray.cloud_->header.frame_id="fixture_world";ray.cloud_->header.stamp=rclcpp::Time(110000000000LL);
+  sensor_msgs::PointCloud2Modifier modifier(*ray.cloud_);modifier.setPointCloud2FieldsByString(1,"xyz");modifier.resize(1);
+  sensor_msgs::PointCloud2Iterator<float> rx(*ray.cloud_,"x"),ry(*ray.cloud_,"y"),rz(*ray.cloud_,"z");*rx=3.f;*ry=0.f;*rz=.4f;
+  ray.origin_.x=0.;ray.origin_.y=0.;ray.origin_.z=.4;ray.raytrace_min_range_=.1;ray.raytrace_max_range_=12.;
+  layer->addStaticObservation(ray,false,true);update();plugin->updateCosts(master,0,0,80,80);
+  filter->process(master,0,0,80,80,geometry_msgs::msg::Pose2D());
+  require(master.getCost(mx,my)==0&&master.getCost(10,40)==254,"observed interior floor clears while exterior stays protected");
+  std::cout<<"{\"passed\":true,\"cases\":12,\"synthetic_source_time\":true,\"actual_plugins\":true,\"physical_commands\":0}"<<std::endl;
   executor.remove_node(node->get_node_base_interface());executor.remove_node(pubnode);filter_plugin->deactivate();filter_plugin.reset();filter.reset();layer.reset();plugin.reset();node->on_cleanup(rclcpp_lifecycle::State());
  }catch(const std::exception &error){std::cerr<<error.what()<<std::endl;result=1;}
  rclcpp::shutdown();return result;
