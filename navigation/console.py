@@ -235,7 +235,7 @@ class Console(Node):
         self.reception.decisions.bind(document)
         from reception_door_worker import accept_rows
         accept_rows(self.reception.decisions,document,rows,time.monotonic())
-    def publish_reception_map(self,document):
+    def publish_reception_map(self,document,force=False):
         import copy
         base=self.grid
         if base is None or not hasattr(self,'door_overlay') or document['map_id']!=self.reception.map_id():return
@@ -244,6 +244,12 @@ class Console(Node):
         key=(self.map_revision,self.map_observations.revision,tuple(sorted(states.items())),tuple((d['id'],d['x'],d['y'],d['width'],d['yaw'])for d in document['doors']),json.dumps(annotations,sort_keys=True))
         with self._overlay_lock:
             if key==self._overlay_key:return
+            # Coalesce background learning into at most one full map/s update.
+            # Real scan marking/clearing remains independent and immediate;
+            # authored lines, door changes and a new base bypass this throttle.
+            structural=(key[0],*key[2:]);now=time.monotonic()
+            if (not force and getattr(self,'_observed_structural',None)==structural and
+                    now-getattr(self,'_observed_publish_at',-float('inf'))<1.):return
             q=base.info.origin.orientation
             grid={'revision':self.map_revision,'width':base.info.width,'height':base.info.height,'resolution':base.info.resolution,
                   'origin':[base.info.origin.position.x,base.info.origin.position.y],'cells':base.data}
@@ -255,6 +261,7 @@ class Console(Node):
                 cells,authored=self.annotation_layer.apply(dict(grid,cells=cells),annotations);report.update(authored)
             msg=copy.deepcopy(base);msg.data=cells
             self.navigation_grid=msg;self.overlay_revision+=1;self.overlay_report=report;self._overlay_key=key
+            self._observed_structural=structural;self._observed_publish_at=now
             self.reception_map.publish(msg)
             # Preserve the saved map's EXTERIOR unknown boundary after live obstacle
             # clearing. A long laser ray is not evidence of navigable floor
@@ -882,7 +889,7 @@ class Console(Node):
                 self.map_library.snapshot(self.map_name,'before_observed_map_reset')
                 self.map_observations.set_enabled(False)
                 self.map_observations.reset()
-                self.publish_reception_map(self.reception.observation_document())
+                self.publish_reception_map(self.reception.observation_document(),force=True)
             return self.map_observations.status()
         if operation.startswith('bundle_') or operation in ('map_raster','map_snapshot'):
             self.map_observations.flush(force=True)
