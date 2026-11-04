@@ -354,8 +354,11 @@ class Console(Node):
         gait=getattr(self,'gait',None)
         if gait is None:return
         for attempt in range(2):
-            d=gait.operator_authority()
             with self.session.lock:
+                # Wait for the session before reading the original packet.
+                # An intervening callback must not age an already-read packet
+                # while a newer receiver observation is available.
+                d=gait.operator_authority()
                 now=max(now,time.monotonic())
                 source_fresh=bool(d and -.005<=now-d['stamp']<=.1)
                 reply_fresh=bool(d and(d.get('source_transport')=='native_packet_snapshot' or -.005<=now-d['reply_stamp']<=.1))

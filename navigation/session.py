@@ -3,6 +3,7 @@ A left switch permits a NEW explicit start, never starts/resumes a goal itself.
 """
 import math
 import threading
+import time
 
 MODES={'unknown','navigation_allowed','paused','manual'}
 ACTIVE={'starting','executing','replanning'}
@@ -19,6 +20,7 @@ class NavigationSession:
         self.cancel_pending=False;self.message='等待保护开关状态';self.notice_sequence=0
         self.blocked_since=None;self.replans=0;self.clear_since=None;self.last_now=None;self.prepared_with_authority=False
         self.obstruction_policy=None;self.obstruction_decision='continue';self.obstruction_plan_seen=False
+        self.last_stop=None
     def configure_obstruction(self,policy):
         from reception_routes import ObstructionPolicy
         with self.lock:
@@ -27,6 +29,9 @@ class NavigationSession:
     def _notice(self,message):
         if message!=self.message:self.notice_sequence+=1;self.message=message
     def _cancel(self,message,phase='cancelled'):
+        if self.phase in ACTIVE or self.phase in PENDING:
+            self.last_stop={'reason':message,'phase':phase,'source':self.source,
+                'sequence':self.sequence,'source_time':self.source_time,'observed_at':time.monotonic()}
         if self.phase in ACTIVE or self.phase in PENDING:
             self.cancel_pending=True;self.cancel_generation=self.generation
         self.phase=phase;self._notice(message);self.path_points=0;self.blocked_since=None;self.clear_since=None
@@ -52,7 +57,7 @@ class NavigationSession:
             elif mode!='navigation_allowed':self._cancel('保护开关档位未知，已停止','stopped')
             elif self.manual_activity:self._cancel('摇杆介入：已退出导航，请重新确认开始','manual')
             elif self.phase in {'idle','manual','paused','stopped','cancelled'}:
-                self._notice('E 左档：可以选择目标，确认开始后才会行走')
+                if self.last_stop is None:self._notice('E 左档：可以选择目标，确认开始后才会行走')
             return self._fresh(now)
     def poll(self,now):
         with self.lock:
@@ -69,6 +74,7 @@ class NavigationSession:
             if self.phase in ACTIVE:raise ValueError('请先取消当前导航再选择新目标')
             if not all(math.isfinite(float(goal[k])) for k in ('x','y','yaw')):raise ValueError('目标坐标无效')
             self.generation+=1;self.goal={k:float(goal[k]) for k in ('x','y','yaw')};self.task_kind='navigation'
+            self.last_stop=None
             self.prepared_with_authority=self._fresh(now);self.phase='planning';self.path_points=0;self._notice('正在预览路径，尚未开始行走');return self.generation
     def planned(self,generation,path_points,now):
         with self.lock:
@@ -138,7 +144,7 @@ class NavigationSession:
     def status(self,now):
         with self.lock:
             fresh=self._fresh(now)
-            return {'phase':self.phase,'generation':self.generation,'goal':self.goal,'path_points':self.path_points,'task_kind':self.task_kind,
+            return {'phase':self.phase,'generation':self.generation,'goal':self.goal,'path_points':self.path_points,'task_kind':self.task_kind,'last_stop':self.last_stop,
                 'operator_mode':self.mode if fresh else 'unknown','operator_verified':fresh,
                 'manual_activity':self.manual_activity,'navigation_permitted':fresh and self.mode=='navigation_allowed' and not self.manual_activity,
                 'force_navigation_zero':self.phase!='executing' or not fresh or self.mode!='navigation_allowed' or self.manual_activity,

@@ -5,6 +5,20 @@ from native_operator_source import NATIVE
 from native_operator_snapshot import NativeSnapshotWriter,NativeSnapshotReader
 
 class NativeSnapshotTests(unittest.TestCase):
+    def test_receiver_packet_published_during_slow_read_is_not_future(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory()as d:
+            path=d+'/source';w=NativeSnapshotWriter(path);r=NativeSnapshotReader(path)
+            w.publish(NATIVE.pack(0x4e4f5031,1,40,7,time.monotonic_ns(),123456,1,3,0.,0.,0.,0))
+            actual_pread=os.pread;stamps=[]
+            def delayed_read(fd,size,offset):
+                time.sleep(.02);stamp=time.monotonic_ns();stamps.append(stamp)
+                w.publish(NATIVE.pack(0x4e4f5031,1,40,8,stamp,123457,1,3,0.,0.,0.,0))
+                return actual_pread(fd,size,offset)
+            try:
+                with patch('native_operator_snapshot.os.pread',side_effect=delayed_read):sample=r.sample(40)
+                self.assertIsNotNone(sample);self.assertEqual(sample['stamp_ns'],stamps[0]);self.assertEqual(sample['sequence'],8)
+            finally:r.close();w.close()
     def test_original_packet_time_and_identity_are_never_renewed(self):
         with tempfile.TemporaryDirectory()as d:
             path=d+'/source';w=NativeSnapshotWriter(path);r=NativeSnapshotReader(path)

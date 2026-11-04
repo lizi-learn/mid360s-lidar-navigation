@@ -20,6 +20,25 @@ class Server:
     def wait_for_server(self,timeout_sec):self.calls+=1;return False
 
 class ConsoleGaitTests(unittest.TestCase):
+    def test_original_packet_is_read_after_waiting_for_session_lock(self):
+        c,g=self.setup_console();old_lock=c.session.lock;entered=[]
+        class Lock:
+            def __enter__(self):old_lock.acquire();entered.append(True)
+            def __exit__(self,*args):entered.pop();old_lock.release()
+        c.session.lock=Lock()
+        def sample():
+            self.assertTrue(entered,'Packet was read before acquiring session lock')
+            now=time.monotonic();return dict(mode='navigation_allowed',verified=True,connected=True,activity=False,
+                source=c.session.source,sequence=c.session.sequence+1,stamp=now,reply_stamp=now)
+        c.gait.operator_authority=sample;c.poll_gait_authority(time.monotonic())
+        self.assertEqual(c.session.phase,'ready');self.assertTrue(c.session.verified)
+    def test_fresh_left_packet_preserves_original_stop_cause(self):
+        c,g=self.setup_console();now=time.monotonic();c.session.start(g,now,True,True);c.session.started(g,now)
+        c.session.poll(now+.101);reason=c.session.message
+        self.assertEqual(c.session.phase,'stopped');self.assertIn('过期',reason)
+        fresh=time.monotonic();c.session.operator('navigation_allowed',True,True,False,c.session.source,c.session.sequence+1,fresh,fresh)
+        self.assertEqual(c.session.message,reason);self.assertEqual(c.session.last_stop['reason'],reason)
+        self.assertEqual(c.session.phase,'stopped');self.assertTrue(c.session.status(fresh)['force_navigation_zero'])
     def setup_console(self):
         c,g=fixture();c.simulation=False;c.gait=Gait();c.health_ready=lambda:True
         c.checked_pose=lambda goal:object();c.nav=Server();c.session.planned(g,10,time.monotonic());return c,g
