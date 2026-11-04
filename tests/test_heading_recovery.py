@@ -71,6 +71,26 @@ class HeadingRecoveryTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'真实动作取消'):self.run_recovery(n,e,epoch)
         n.set_goal.assert_not_called()
 
+    def test_observed_right_then_left_stays_cancelled_without_polling_the_right_edge(self):
+        e,epoch,n,state,_=self.fixture()
+        n.confirm_goal.side_effect=lambda _:state.update(navigation_permitted=False,operator_mode='manual')
+        self.assertIsNone(self.run_recovery(n,e,epoch))
+        state.update(navigation_permitted=True,operator_mode='navigation_allowed')
+        self.assertEqual(e.phase,'manual');self.assertIsNone(e.tick(state,1.));n.set_goal.assert_not_called()
+
+    def test_observed_middle_then_left_requires_explicit_resume(self):
+        e,epoch,n,state,_=self.fixture()
+        n.confirm_goal.side_effect=lambda _:state.update(navigation_permitted=False,operator_mode='pause')
+        self.assertIsNone(self.run_recovery(n,e,epoch))
+        state.update(navigation_permitted=True,operator_mode='navigation_allowed')
+        self.assertEqual(e.phase,'paused');self.assertIsNone(e.tick(state,1.));n.set_goal.assert_not_called()
+
+    def test_session_retains_intervention_even_when_left_is_already_fresh(self):
+        for phase in ['manual','paused']:
+            e,epoch,n,state,_=self.fixture();state.update(phase=phase,navigation_permitted=True,operator_mode='navigation_allowed')
+            self.assertIsNone(self.run_recovery(n,e,epoch));self.assertEqual(e.phase,phase)
+            n.prepare_rotation.assert_not_called();n.set_goal.assert_not_called()
+
     def test_action_wait_is_bounded_and_cancels_before_error(self):
         e,epoch,n,state,_=self.fixture();n.confirm_goal.side_effect=lambda _:state.update(phase='executing')
         t=[0.]

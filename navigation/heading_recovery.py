@@ -39,7 +39,17 @@ def plan_after_turn(node, engine, epoch, data, original_error, *, now=time.monot
     """Return a new plan, or None after takeover; never replace the target."""
     def permitted():
         s = node.session_state()
-        return engine.valid(epoch) and s['navigation_permitted'] and not s.get('manual_activity', False)
+        with engine.lock:
+            if not engine.valid(epoch):
+                return False
+            if (not s['navigation_permitted'] or s.get('manual_activity', False) or
+                    s['phase'] in ('manual', 'paused')):
+                # Latch the observed intervention before the dispatch worker
+                # returns. A quick right->left or middle->left transition must
+                # not make the polling thread redispatch this old mission.
+                engine.cancel('manual' if s.get('operator_mode') == 'manual' or s.get('manual_activity') or s['phase'] == 'manual' else 'paused')
+                return False
+            return True
 
     def available():
         if not node.health_ready():
@@ -77,7 +87,7 @@ def plan_after_turn(node, engine, epoch, data, original_error, *, now=time.monot
                 return None
             if s['generation'] != generation:
                 raise ValueError('原地转向恢复已被其他目标替换')
-            if s['phase'] in ('arrived', 'blocked', 'failed', 'cancelled', 'paused'):
+            if s['phase'] in ('arrived', 'blocked', 'failed', 'cancelled', 'paused', 'stopped'):
                 break
             if now() >= deadline:
                 if not node.cancel_reception_leg(epoch):
@@ -87,7 +97,7 @@ def plan_after_turn(node, engine, epoch, data, original_error, *, now=time.monot
         after = node.reception_pose()
         moved = None if before is None or after is None else math.remainder(after[2]-before[2], math.tau)
         engine.event('heading_recovery_finished', generation=generation, phase=s['phase'], measured_radians=moved)
-        if s['phase'] in ('cancelled', 'paused'):
+        if s['phase'] in ('cancelled', 'paused', 'stopped'):
             raise ValueError(s.get('notice') or '原地转向恢复已取消')
         if not node.cancel_reception_leg(epoch):
             return None
