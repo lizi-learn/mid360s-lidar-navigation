@@ -27,4 +27,22 @@ class TerrainTests(unittest.TestCase):
         rng=np.random.default_rng(5);xy=rng.uniform(-2,2,(5000,2));points=np.column_stack((xy,.5*xy[:,0]))
         with self.assertRaises(ValueError):local_floor(points,[0,0])
 
+    def test_dense_cell_selection_preserves_floor_fit_and_obstacle_masks(self):
+        # Independent legacy oracle: lowest measured return per XY cell, with
+        # its original height order. Extra returns must not change which cells
+        # vote, the seeded fit, or which physical returns are obstacles.
+        for seed in [23,81,219]:
+            rng=np.random.default_rng(seed);center=np.array([100.123,-200.435])
+            xy=rng.uniform(-3,3,(24000,2));z=.025*xy[:,0]-.015*xy[:,1]+rng.normal(0,.006,len(xy))
+            z[rng.random(len(z))<.3]+=.7
+            points=np.column_stack((xy+center,z));distance=np.linalg.norm(xy,axis=1)
+            near=points[(distance>.45)&(distance<4.)];cells=np.floor((near[:,:2]-center)/.35).astype(int)
+            first={}
+            for i in np.argsort(near[:,2]):first.setdefault(tuple(cells[i]),near[i])
+            expected=np.array(list(first.values()))
+            plane,report=local_floor(points,center);reference,reference_report=local_floor(expected,center)
+            np.testing.assert_array_equal(plane,reference);self.assertEqual(report,reference_report)
+            for actual,wanted in zip(classify(points,center,plane),classify(points,center,reference)):
+                np.testing.assert_array_equal(actual,wanted)
+
 if __name__=='__main__':unittest.main()

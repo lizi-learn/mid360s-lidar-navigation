@@ -83,7 +83,9 @@ class Adapter:
             self.body_reference.history.add(msg.header.stamp.sec+msg.header.stamp.nanosec*1e-9,dict(zip(msg.name,msg.position)))
         except (ValueError,KeyError) as e:self.reference_fault="Joint feedback invalid: "+str(e)
     def on_cloud(self,msg):
-        with self.lock:self.cloud=msg
+        received=time.monotonic()
+        source_age=self.source.get_clock().now().nanoseconds*1e-9-(msg.header.stamp.sec+msg.header.stamp.nanosec*1e-9)
+        with self.lock:self.cloud=msg;self.cloud_received=(received,source_age)
     def on_odom(self,msg):
         source_ns=msg.header.stamp.sec*10**9+msg.header.stamp.nanosec
         p=msg.pose.pose.position;q=msg.pose.pose.orientation
@@ -92,7 +94,7 @@ class Adapter:
             try:self.pose_history.add(source_ns,(p.x,p.y,p.z),(q.x,q.y,q.z,q.w))
             except ValueError:pass  # Existing tick validation handles an invalid latest pose.
     def tick(self):
-        with self.lock:cloud,odom=self.cloud,self.odom
+        with self.lock:cloud,odom,received=self.cloud,self.odom,getattr(self,'cloud_received',None)
         ground=Bool();ground.data=False
         if cloud is None or odom is None:self.ground_pub.publish(ground);return
         now=self.sink.get_clock().now().nanoseconds*1e-9
@@ -172,6 +174,7 @@ class Adapter:
             projection.transform.rotation.z=math.sin(cloud_yaw/2);projection.transform.rotation.w=math.cos(cloud_yaw/2)
             self.tf.sendTransform(projection)
             self.processed_stamp=stamp(cloud)
+            processing_started=time.monotonic()
             points=xyz(cloud);points=points[np.isfinite(points).all(axis=1)]
             points=points@self.rotation.T;points[:,2]+=self.initial_height
             plane,report=local_floor(points,cloud_origin[:2],expected_height=float(cloud_optical[2]))
@@ -189,7 +192,9 @@ class Adapter:
             ground.data=ground_decision(self.ground_policy,observed,lower_surface) and (verified if self.body_reference else True);self.ground_pub.publish(ground)
             report.update(ground_ok=ground.data,ground_policy=self.ground_policy,lower_surface_observed=lower_surface,
                 near_support_advisory=not observed,finite_scan_bins=int(np.isfinite(output).sum()),
-                source_age_s=now-stamp(cloud),base_reference='timestamped body kinematics' if self.body_reference else 'LiDAR center ground projection',
+                source_age_s=self.sink.get_clock().now().nanoseconds*1e-9-stamp(cloud),
+                input_source_age_s=now-stamp(cloud),processing_duration_ms=(time.monotonic()-processing_started)*1000,
+                base_reference='timestamped body kinematics' if self.body_reference else 'LiDAR center ground projection',
                 velocity_ready=True,velocity_window_s=self.velocity.window,observed_front_support=observed,instant_observed_front_support=instant_observed,
                 reference_source_stamp_s=stamp(odom),hardware_execution_enabled=False)
             report.update(reference_status(self.navigation_reference,body_verified=verified,body_feedback=bool(self.body_reference)))
@@ -197,6 +202,9 @@ class Adapter:
                 latest_odom_minus_cloud_ns=odom.header.stamp.sec*10**9+odom.header.stamp.nanosec-cloud_ns,
                 projection_frame='laser_projection',scan_bins=len(output))
             report.update(support_report)
+            if received is not None:
+                report.update(cloud_age_at_receive_s=received[1],
+                              adapter_receive_to_report_ms=(time.monotonic()-received[0])*1000)
         except ValueError as e:
             if self.support_history:self.support_history.clear()
             self.ground_pub.publish(ground);report={'error':str(e),'ground_ok':False,'hardware_execution_enabled':False}

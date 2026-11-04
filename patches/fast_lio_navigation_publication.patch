@@ -1,0 +1,22 @@
+--- a/src/laserMapping.cpp
++++ b/src/laserMapping.cpp
+@@ -1062,6 +1062,11 @@
+ 
+             /******* Publish odometry *******/
+             publish_odometry(pubOdomAftMapped_, tf_broadcaster_);
++            // Registered points use this scan's already estimated state and
++            // undistorted cloud. Publish them before incremental-map work so
++            // navigation does not wait for insertion/deletion of map points.
++            // Keep the original lidar_end_time and the full cloud unchanged.
++            if (scan_pub_en)      publish_frame_world(pubLaserCloudFull_);
+ 
+             /*** add the feature points to map kdtree ***/
+             t3 = omp_get_wtime();
+@@ -1070,7 +1075,6 @@
+             
+             /******* Publish points *******/
+             if (path_en)                         publish_path(pubPath_);
+-            if (scan_pub_en)      publish_frame_world(pubLaserCloudFull_);
+             if (scan_pub_en && scan_body_pub_en) publish_frame_body(pubLaserCloudFull_body_);
+             if (effect_pub_en) publish_effect_world(pubLaserCloudEffect_);
+             // if (map_pub_en) publish_map(pubLaserCloudMap_);

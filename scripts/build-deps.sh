@@ -20,10 +20,12 @@ checkout_pinned https://github.com/Livox-SDK/Livox-SDK2.git c0796f04c143143899c8
 checkout_pinned https://github.com/Livox-SDK/livox_ros_driver2.git 21445540f0d100dc86a7e6df312dd70bbdb4afdf "$nav_root/.deps/livox_ros_driver2"
 checkout_pinned https://github.com/hku-mars/FAST_LIO.git cc3c9e8b1469b33b8072764d6db2348ed6dc597f "$nav_root/.deps/FAST_LIO"
 git -C .deps/FAST_LIO submodule update --init --recursive
-if ! git -C .deps/FAST_LIO apply --reverse --check "$nav_root/patches/fast_lio_imu_queue.patch" 2>/dev/null; then
- git -C .deps/FAST_LIO apply --check "$nav_root/patches/fast_lio_imu_queue.patch"
- git -C .deps/FAST_LIO apply "$nav_root/patches/fast_lio_imu_queue.patch"
-fi
+for lio_patch in fast_lio_imu_queue.patch fast_lio_navigation_publication.patch; do
+ if ! git -C .deps/FAST_LIO apply --reverse --check "$nav_root/patches/$lio_patch" 2>/dev/null; then
+  git -C .deps/FAST_LIO apply --check "$nav_root/patches/$lio_patch"
+  git -C .deps/FAST_LIO apply "$nav_root/patches/$lio_patch"
+ fi
+done
 export CMAKE_BUILD_PARALLEL_LEVEL="${BUILD_JOBS:-2}"
 cmake -S .deps/Livox-SDK2 -B .deps/sdk-build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$nav_root/sdk"
 cmake --build .deps/sdk-build --parallel "$CMAKE_BUILD_PARALLEL_LEVEL"

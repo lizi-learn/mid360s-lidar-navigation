@@ -16,7 +16,8 @@ included.
 | SLAM Toolbox | https://github.com/SteveMacenski/slam_toolbox | Separately installed; LGPL-2.1-only and upstream component notices apply. |
 | ROS 2 / PCL / Eigen | Their upstream distributions | Installed separately; their licenses remain applicable. |
 
-`patches/fast_lio_imu_queue.patch` is a small modification of GPL-2.0 FAST-LIO
+`patches/fast_lio_imu_queue.patch` and
+`patches/fast_lio_navigation_publication.patch` are modifications of GPL-2.0 FAST-LIO
 code, distributed under that license rather than the application's MIT license.
 The GPL v2 text is provided in `LICENSES/GPL-2.0.txt`. Apply the patch to the exact
 FAST-LIO revision in `dependencies.lock.json`. If distributing the patched

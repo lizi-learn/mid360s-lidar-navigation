@@ -67,6 +67,12 @@ def main():
         errors=[x['error_m']for x in observed];passed=(max(errors)<.04 if args.expect=='correct'else np.median(errors)>.20)
         if not all(x['source_was_published']for x in observed):passed=False
         if args.expect=='correct'and not all(x['frame']=='laser_projection'and x['bins']==720 for x in observed):passed=False
+        timings=[d for d in reports if 'projection_pose_stamp_ns'in d]
+        if args.expect=='correct'and (not timings or not all(
+            math.isfinite(d.get('processing_duration_ms',float('nan')))and d['processing_duration_ms']>=0 and
+            d.get('source_age_s',-1)>=d.get('input_source_age_s',float('inf')) and
+            d.get('adapter_receive_to_report_ms',-1)>=d['processing_duration_ms']
+            for d in timings)):passed=False
         report={'passed':bool(passed),'expect':args.expect,'scans':len(observed),'mean_error_m':float(np.mean(errors)),'median_error_m':float(np.median(errors)),'max_error_m':max(errors),'all_original_cloud_stamps':all(x['source_was_published']for x in observed),'input_cloud_delay_s':.1,'input_translation_m_s':.4,'input_yaw_rad_s':.8,'observed_projection_reports':[{k:v for k,v in d.items()if k in ['projection_pose_stamp_ns','projection_pose_bracket_ns','latest_odom_minus_cloud_ns','projection_frame','scan_bins']}for d in reports if 'projection_pose_stamp_ns'in d], 'hardware_commands':0,'scope':'Actual ROS2 Adapter subprocess and independent TF witness; synthetic stationary reflector/ground and delayed messages. No robot/gait or physical acceptance.'}
     except Exception as e:report={'passed':False,'error':str(e),'hardware_commands':0,'scans':len(observed),'scope':'Isolated synthetic ROS source/adapter witness; failure retained.'}
     finally:
