@@ -17,6 +17,9 @@ namespace p2_nav_controller {
 class PositionOnlyLattice : public nav2_smac_planner::SmacPlannerLattice {
   std::vector<unsigned> occupied_;
   double route_rejoin_distance_=2.;
+  // A route preference, never an enlarged accepted footprint. Keep full-body
+  // narrow fallbacks below when no roomier complete route can be found.
+  static constexpr double tracking_room_preference_=.30;
   std::mutex stable_mutex_;
   nav_msgs::msg::Path stable_path_;
   geometry_msgs::msg::PoseStamped stable_goal_;
@@ -319,7 +322,7 @@ class PositionOnlyLattice : public nav2_smac_planner::SmacPlannerLattice {
     {
       std::unique_lock<nav2_costmap_2d::Costmap2D::mutex_t> lock(*_costmap->getMutex());
       prepare_map();
-      if(clear(direct,.08))return remember(message(direct,goal.header),goal);
+      if(clear(direct,tracking_room_preference_))return remember(message(direct,goal.header),goal);
       // Keep a valid detour on the same side of an obstacle. Re-solving a
       // symmetric corridor every second can flip left/right under small AMCL
       // updates. Recheck the complete remaining body path on this LIVE map;
@@ -330,12 +333,14 @@ class PositionOnlyLattice : public nav2_smac_planner::SmacPlannerLattice {
         for(const auto &p:stable_path_.poses)stored.push_back({p.pose.position.x,p.pose.position.y,tf2::getYaw(p.pose.orientation)});
         const auto rejoin_deadline=std::min(deadline,std::chrono::steady_clock::now()+std::chrono::milliseconds(100));
         auto joined=route_rejoin({x,y,yaw},stored,route_rejoin_distance_,[&](const auto &samples){
-          // Match the direct-route tracking preference. A merely collision-free
+          // Match the direct-route tracking preference. The former 8 cm
+          // shortcut could beat the roomier point guide, leaving little room
+          // for measured lateral drift. A merely collision-free
           // remembered path must not beat a roomier newly observed detour before
           // we have even searched for it (for example room on the left of a
           // close obstacle on the right). Keep a fully checked fallback so a
           // genuinely narrow passage still works with the original body.
-          if(swept_clear(samples,.08))return true;
+          if(swept_clear(samples,tracking_room_preference_))return true;
           if(!swept_clear(samples,0.))return false;
           if(narrow_reuse.empty())narrow_reuse=samples;
           return false;
@@ -361,8 +366,8 @@ class PositionOnlyLattice : public nav2_smac_planner::SmacPlannerLattice {
         if(std::chrono::steady_clock::now()>visibility_deadline)break;
         auto candidate=position_guide(_costmap->getCharMap(),_costmap->getSizeInCellsX(),_costmap->getSizeInCellsY(),_costmap->getResolution(),_costmap->getOriginX(),_costmap->getOriginY(),{x,y},{gx,gy},centre_clearance);
         if(centre_clearance==0.)guide=candidate;
-        for(double margin:{.16,.08,.04,0.}) {
-          if(!narrow_reuse.empty()&&margin<.08)continue;
+        for(double margin:{tracking_room_preference_,.16,.08,.04,0.}) {
+          if(!narrow_reuse.empty()&&margin<tracking_room_preference_)continue;
           auto connected=visibility(candidate,yaw,margin,visibility_deadline);
           if(!connected.empty())return remember(message(connected,goal.header),goal);
         }
