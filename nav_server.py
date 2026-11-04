@@ -3,6 +3,7 @@
 import os, json, math, threading, time, pathlib, argparse, gzip, signal
 from collections import deque
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
+from urllib.parse import urlsplit,parse_qs
 import numpy as np
 from scipy.spatial.transform import Rotation
 from scipy.ndimage import label
@@ -142,6 +143,7 @@ class NavigationView(Node):
 
     def publish_map(self):
         with self.lock:
+            if not self.map_pub.get_subscription_count():return
             if self.height is None or self.localization_error or self.message_age("cloud") is None or self.message_age("cloud")>1:return
             _,occupancy=self.floor_map.layers()
             msg=OccupancyGrid();msg.header.stamp=self.get_clock().now().to_msg();msg.header.frame_id='map'
@@ -186,26 +188,29 @@ class NavigationView(Node):
         try:self.plan(msg.pose.position.x,msg.pose.position.y)
         except ValueError as e:self.get_logger().warn(str(e))
 
-    def status(self):
+    def status(self,include_cells=True):
         with self.lock:
-            now=time.monotonic();free,_=self.floor_map.layers()
+            now=time.monotonic()
             points=self.points
             gravity=np.mean(self.recent_acc,axis=0) if self.recent_acc else None
-            return {'robot':'MID-360S platform','sensor':'MID-360S','mount':'倒装','raw_age':round(self.message_age('cloud'),3) if self.message_age('cloud') is not None else None,
+            result={'robot':'MID-360S platform','sensor':'MID-360S','mount':'倒装','raw_age':round(self.message_age('cloud'),3) if self.message_age('cloud') is not None else None,
                 'imu_age':round(self.message_age('imu'),3) if self.message_age('imu') is not None else None,'map_age':round(self.message_age('cloud'),3) if self.message_age('cloud') is not None else None,
                 'odom_age':round(self.message_age('odom'),3) if self.message_age('odom') is not None else None,'odom_receive_age':round(now-self.odom_time,3) if self.odom_time else None,'counts':{'imu':self.imu_count,'map_frames':self.cloud_count},
                 'map_kind':'随雷达移动的近期局部图；推架记录另存累计图',
                 'initial_tilt_deg':self.initial_tilt,'sensor_height_m':self.height+self.sensor_z if self.height is not None and self.sensor_z is not None else None,'alignment_origin_height_m':self.height,'error':self.localization_error or self.floor_error,'localization_fault':self.localization_error,
-                'sensor_xy':self.sensor_xy,'sensor_yaw':self.sensor_yaw,'points':np.round(points,3).tolist(),
+                'sensor_xy':self.sensor_xy,'sensor_yaw':self.sensor_yaw,
                 'gravity_raw':gravity.tolist() if gravity is not None else None,
                 'gravity_pitch_deg':math.degrees(math.atan2(-gravity[0],-gravity[2])) if gravity is not None else None,
                 'lio_pitch_deg':math.degrees(self.sensor_pitch),
-                'free_cells':np.argwhere(free)[::1].tolist(),'obstacle_cells':np.argwhere(self.floor_map.obstacles).tolist(),
                 'grid':{'resolution':self.floor_map.resolution,'origin':self.floor_map.origin,'origin_xy':self.floor_map.origin_xy.tolist(),'size':self.floor_map.size},
                 'path':self.path,'goal':self.goal,'path_state':self.path_state,'execution_enabled':False,'robot_name':ROBOT_IDENTITY['name'] if ROBOT_IDENTITY else None,
                 'localization_reference':'雷达地面投影；机身与颈部运动外参待核验',
-                'survey':self.survey.status(),
                 'neck':json.loads((RUNTIME/'neck_status.json').read_text()) if (RUNTIME/'neck_status.json').is_file() else {'state':'固定安装姿态 · 此程序不控制电机'}}
+            if include_cells:
+                free,_=self.floor_map.layers()
+                result.update(survey=self.survey.status(),points=np.round(points,3).tolist(),free_cells=np.argwhere(free).tolist(),
+                              obstacle_cells=np.argwhere(self.floor_map.obstacles).tolist())
+            return result
 
 def main():
     global RUNTIME,ROBOT_IDENTITY
@@ -236,7 +241,8 @@ def main():
             if compressed:self.send_header('Content-Encoding','gzip')
             self.send_header('Content-Length',str(len(raw)));self.end_headers();self.wfile.write(raw)
         def do_GET(self):
-            if self.path=='/api/status':self.send_json(node.status());return
+            request=urlsplit(self.path)
+            if request.path=='/api/status':self.send_json(node.status(include_cells=parse_qs(request.query).get('summary')!=['1']));return
             if self.path not in ['/','/index.html']:self.send_json({'error':'Not found'},404);return
             raw=(ROOT/'web/index.html').read_bytes();self.send_response(200);self.send_header('Content-Type','text/html; charset=utf-8');self.send_header('Content-Length',str(len(raw)));self.end_headers();self.wfile.write(raw)
         def do_POST(self):
