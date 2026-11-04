@@ -619,6 +619,7 @@ class Console(Node):
                     self.op(armed=False,paused=True);self.last_action=self.session.message
             self.acknowledge_if_quiet(generation)
     def route_final_goal(self,data,final_pose,prefix="RouteDirected"):
+        from planning_requests import wait_route_reply
         # Publish the actual final request coordinates atomically before either
         # preview or navigation replans; never encode task flags in pose stamps.
         if not self.route_parameters.wait_for_service(timeout_sec=2.):raise ValueError('路线规划参数服务尚未响应')
@@ -626,7 +627,13 @@ class Console(Node):
         request.parameters=[Parameter(name=prefix+'.final_'+k,value=ParameterValue(type=ParameterType.PARAMETER_DOUBLE,double_value=float(data[k])))for k in ('x','y')]
         stamp=final_pose.header.stamp
         request.parameters.append(Parameter(name=prefix+'.final_request_ns',value=ParameterValue(type=ParameterType.PARAMETER_INTEGER,integer_value=stamp.sec*10**9+stamp.nanosec)))
-        response=self.wait_future(self.route_parameters.call_async(request),2.)
+        generation=self.session.generation
+        def current():
+            with self.lock:return self.session.generation==generation and self.session.phase=='planning'
+        # A just-cancelled through-poses plan can still occupy the planner's
+        # parameter callback. Wait for its real response without dropping the
+        # mission after two seconds, and stop waiting immediately on takeover.
+        response=wait_route_reply(self.route_parameters.call_async(request),self.route_parameters,current)
         if not response.result.successful:raise ValueError('路线终点参数未应用：'+response.result.reason)
     def set_goal(self,data):
         reception=getattr(self,'reception',None)

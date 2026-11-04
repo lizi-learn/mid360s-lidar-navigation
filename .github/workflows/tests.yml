@@ -118,6 +118,8 @@ jobs:
           /tmp/arrival-build/presentation_arrival --ros-args --params-file /tmp/presentation-arrival.yaml --log-level error
           mkdir -p /tmp/arrival
           /tmp/arrival-build/dynamic_map > /tmp/arrival/dynamic-map.log
+          /tmp/arrival-build/pivot_observation > /tmp/arrival/pivot-observation.json
+          python3 experiments/arrival/check_route_reply.py --output /tmp/arrival/route-reply.json
           /tmp/arrival-build/rotation_progress > /tmp/arrival/rotation-progress.json
           /tmp/arrival-build/filled_footprint > /tmp/arrival/filled-footprint.json
           python3 experiments/arrival/check_rejoin.py --binary /tmp/arrival-build/route_rejoin_replay --output /tmp/arrival/rejoin

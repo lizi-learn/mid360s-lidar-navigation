@@ -10,6 +10,7 @@ import secrets
 import time
 from concurrent.futures import ThreadPoolExecutor
 from reception_catalog import introduction, content_key
+from planning_requests import RouteReplyTimeout
 
 def route_poses(points, start=None):
     """Seed unspecified orientations with the incoming route direction.
@@ -384,7 +385,7 @@ class MissionService:
             if not self.engine.valid(epoch):return
             if (command.get('source_recovery') and self.engine.valid(epoch) and
                     time.monotonic()<command['source_deadline'] and
-                    (not self.node.health_ready() or starting_generation is not None and self.node.session.generation>starting_generation and getattr(self.node,'source_revoked_generation',None)==self.node.session.generation)):
+                    (isinstance(error,RouteReplyTimeout) or not self.node.health_ready() or starting_generation is not None and self.node.session.generation>starting_generation and getattr(self.node,'source_revoked_generation',None)==self.node.session.generation)):
                 self.pending_source_command=command
                 self.engine.event('source_recovery_retry',reason=str(error))
             else:

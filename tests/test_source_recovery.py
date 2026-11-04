@@ -4,6 +4,7 @@ from types import SimpleNamespace as NS
 from unittest.mock import Mock,patch
 from test_reception import fixture,permitted
 from reception_mission import Mission,MissionService
+from planning_requests import RouteReplyTimeout
 from test_console_cancellation import fixture as console_fixture
 import test_collision_source_gate as source_gate_tests
 
@@ -46,6 +47,20 @@ class SourceRecoveryTests(unittest.TestCase):
     def test_geometry_failure_is_not_silently_retried(self):
         s=self.service();s.source_fault('source gap');s.node.set_goal.side_effect=ValueError('actual no path')
         s.dispatch(s.pending_source_command);self.assertEqual(s.engine.phase,'failed');self.assertIn('actual no path',s.engine.error)
+    def test_parameter_reply_timeout_retries_with_original_recovery_deadline(self):
+        s=self.service();s.source_fault('source gap');command=s.pending_source_command;deadline=command['source_deadline']
+        s.node.set_goal.side_effect=RouteReplyTimeout('queued parameter reply')
+        s.dispatch(command)
+        self.assertEqual(s.engine.phase,'rerouting');self.assertEqual(s.pending_source_command['source_deadline'],deadline)
+        s.node.confirm_goal.assert_not_called()
+        s.node.set_goal.side_effect=None;s.dispatch(s.pending_source_command)
+        self.assertEqual(s.engine.phase,'navigating');s.node.confirm_goal.assert_called_once()
+    def test_parameter_reply_timeout_after_takeover_does_not_retry(self):
+        s=self.service();s.source_fault('source gap');command=s.pending_source_command;s.pending_source_command=None
+        def cancelled(_):
+            s.engine.cancel('manual');raise RouteReplyTimeout('late reply')
+        s.node.set_goal.side_effect=cancelled;s.dispatch(command)
+        self.assertEqual(s.engine.phase,'manual');self.assertIsNone(s.pending_source_command);s.node.confirm_goal.assert_not_called()
     def test_plain_existing_goal_adoption_does_not_modify_catalog(self):
         s=self.service();s.engine=Mission();s.active_command=None;s.node.session.goal=dict(x=2.,y=3.,yaw=.6);s.node.goal_heading_mode='position'
         doc=s.catalog.read('x');original=copy.deepcopy(doc)
