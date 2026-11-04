@@ -18,12 +18,12 @@ class NativeInputModelTests(unittest.TestCase):
         for i in range(25):
             stamp=now+i*20_000_000;a=full.step((.75,.8),(0.,0.),.02,stamp,stamp);b=half.step((.375,.4),(0.,0.),.02,stamp,stamp)
         self.assertAlmostEqual(a[0],.05);self.assertAlmostEqual(b[0],.05)
-        self.assertAlmostEqual(a[1],.075);self.assertAlmostEqual(b[1],.075)
+        self.assertAlmostEqual(a[1],.25-1./48.);self.assertAlmostEqual(b[1],.25-1./48.)
     def test_unclassified_zero_immediately_resets_like_production(self):
         m=self.model()
         for i in range(60):m.step((.75,.8),(0.,0.),.02,10**9,10**9)
         self.assertEqual(m.step((0.,0.),(.4,.3),.02,10**9,10**9),(0.,0.))
-        self.assertEqual(m.step((.75,.8),(0.,0.),.02,10**9,10**9),(.00008,.00012))
+        self.assertEqual(m.step((.75,.8),(0.,0.),.02,10**9,10**9),(.00008,.0012))
     def test_original_feedback_expiry_and_takeover_are_not_refreshed(self):
         m=self.model();self.assertEqual(m.step((.75,.8),(0.,0.),.02,10**9,1_600_000_000),(0.,0.));self.assertEqual(m.reason,2)
         self.assertEqual(m.step((.75,.8),(0.,0.),.02,10**9,10**9,owned=False),(0.,0.))

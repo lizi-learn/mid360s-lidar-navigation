@@ -29,6 +29,18 @@ int main(){
   if(i==3)s=c.step(.075,.1,std::numeric_limits<double>::quiet_NaN(),0.,.01,now,now,true);
   assert(s.policy_x==0.&&s.policy_yaw==0.&&!s.valid);
  }
+ // A zero on one axis is a controller withdrawal, not a normal-brake tag.
+ // The other axis may stay active; translation must not trail into a pivot.
+ for(int k=0;k<400;++k){now+=10000000;c.step(.75,.6,0.,0.,.01,now,now,true);}
+ s=c.step(0.,.6,0.,0.,.01,now,now,true);assert(s.policy_x==0.&&s.policy_yaw>.59);
+ s=c.step(.75,0.,0.,0.,.01,now,now,true);assert(s.policy_yaw==0.&&s.policy_x<=.000021);
+ // Yaw retains the old .5 input/s slope; finite slope transitions add <.1s,
+ // rather than the multi-second correction lag of the rejected candidate.
+ c.reset();double old_yaw=0.;
+ for(int k=0;k<220;++k){now+=10000000;s=c.step(0.,1.,0.,0.,.01,now,now,true);
+  old_yaw=std::min(1.,old_yaw+.005);assert(s.policy_yaw<=old_yaw+1e-10);
+  assert(old_yaw-s.policy_yaw<=1./48.+1e-10);}
+ assert(s.policy_yaw==1.);
  // Repeated packets cannot renew an old measurement timestamp.
  const auto source=now;for(int k=0;k<60;++k){now+=10000000;s=c.step(.075,0.,0.,0.,.01,source,now,true);}
  assert(s.reason==speed_feedback_expired&&s.policy_x==0.);

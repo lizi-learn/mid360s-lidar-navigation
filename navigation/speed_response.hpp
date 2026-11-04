@@ -46,11 +46,16 @@ class SpeedResponse {
     state_.measured_x=measured_x;state_.measured_yaw=measured_yaw;
     state_.source_ns=source_ns;state_.valid=1;state_.reason=speed_tracking;
     // One finite jerk-constrained input trajectory at the original native tick.
-    // Ordinary lower targets and changing turn direction retain the current
-    // acceleration. A full zero remains the unclassified collision/cancel stop
-    // contract above; it must never acquire a coast-down tail.
-    const double target[2]={vx,wz}, acceleration[2]={.30,.40}, jerk[2]={.40,.60};
+    // Nonzero target changes retain the current derivative. Yaw keeps the
+    // original .5 input/s slope, with a short finite slope transition: a slow
+    // steering filter adds closed-loop phase lag and destabilizes pursuit.
+    // An axis explicitly withdrawn by the controller is zero immediately,
+    // including translation withdrawn for a collision-checked pivot. Such a
+    // zero must not acquire a hidden coast-down tail.
+    const double target[2]={vx,wz}, acceleration[2]={.30,.50}, jerk[2]={.40,6.};
+    if(target[0]==0.)axes_[0].reset();
     state_.policy_x=axes_[0].step(target[0],dt,acceleration[0],jerk[0]);
+    if(target[1]==0.)axes_[1].reset();
     state_.policy_yaw=axes_[1].step(target[1],dt,acceleration[1],jerk[1]);
     return state_;
   }
