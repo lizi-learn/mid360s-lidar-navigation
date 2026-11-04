@@ -883,6 +883,7 @@ class Console(Node):
             if operation=='map_observations':self.map_observations.set_enabled(data['enabled'])
             elif operation=='map_observations_merge':self.map_observations.request_merge()
             else:
+                self.map_observations.flush(force=True)
                 self.map_library.snapshot(self.map_name,'before_observed_map_reset')
                 self.map_observations.set_enabled(False)
                 self.map_observations.reset()

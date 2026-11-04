@@ -11,6 +11,16 @@ from observed_map import ObservedMap
 
 
 class MapBoundaryTests(unittest.TestCase):
+    def test_reset_snapshot_includes_pending_evidence_before_clearing(self):
+        c=Console.__new__(Console);c.map_name='m';c.grid=object();events=[]
+        c.map_observations=NS(flush=lambda **_:events.append('flush'),set_enabled=lambda _:None,
+            reset=lambda:events.append('reset'),status=lambda:{})
+        c.map_library=NS(snapshot=lambda *_:events.append('snapshot'))
+        c.reception=NS(observation_document=lambda:{})
+        c.publish_reception_map=Mock()
+        c.reception_save(dict(operation='map_observations_reset',map_id='m'))
+        self.assertEqual(events,['flush','snapshot','reset'])
+
     def test_unknown_boundary_and_authored_line_survive_dynamic_free_space(self):
         c=Console.__new__(Console)
         cells=[-1 if x<10 else 0 for y in range(40) for x in range(40)]
