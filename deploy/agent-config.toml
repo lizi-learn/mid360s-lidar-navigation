@@ -1,0 +1,19 @@
+[vendor]
+simple_model = "openai"
+complex_model = "openai"
+embeddings_model = "openai"
+
+[openai]
+simple_model = "deepseek-flash"
+complex_model = "deepseek-v4-pro"
+embeddings_model = ""
+base_url = "https://api.deepseek.com"
+
+[tracing]
+project = "p2-navigation-agent-local"
+[tracing.langfuse]
+use_langfuse = false
+host = ""
+[tracing.langsmith]
+use_langsmith = false
+host = ""

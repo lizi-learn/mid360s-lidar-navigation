@@ -245,6 +245,11 @@ class P2(unittest.TestCase):
                               'routes':[{'id':'r','steps':[{'point_id':'p','speak':True}]}],'edges':[],'policy':{},'doors':[],'annotations':[]}
         running=Running(self.server);running.__enter__();self.addCleanup(running.__exit__)
         self.backend=P2Backend('http://127.0.0.1:'+str(self.server.server_port))
+    def test_manual_priority_does_not_prepare_or_dispatch_a_goal(self):
+        self.server.state['session'].update(navigation_permitted=False,operator_mode='manual',notice='E右档手动优先')
+        with self.assertRaises(NavigationError)as exc:self.backend.submit({'kind':'visit','marker':'接待'})
+        self.assertEqual(exc.exception.code,'MANUAL_PRIORITY')
+        self.assertEqual(self.server.posts,[])
     def test_navigation_move_not_double_speech(self):
         ref=self.backend.submit(task_request({'kind':'move','target':{'marker':'接待'}}))
         self.assertEqual(ref['type'],'navigation');self.assertEqual([p for p,b in self.server.posts],['/api/goal','/api/confirm'])

@@ -13,6 +13,10 @@ dependencies = []
 
 [project.scripts]
 navbridge = "navigation_sdk.gateway:main"
+p2-nav-agent = "navigation_agent.server:main"
 
 [tool.setuptools]
-packages = ["navigation_sdk"]
+packages = ["navigation_sdk", "navigation_agent"]
+
+[tool.setuptools.package-data]
+navigation_agent = ["ui.html"]

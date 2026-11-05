@@ -80,6 +80,8 @@ class P2Backend:
         if not self._extension().get("conditional_task_control"):
             raise NavigationError("UNSUPPORTED_CAPABILITY","Install the additive Console SDK extension to enable concurrent-safe dispatch")
         s=self.raw_status();session=s["session"];mission=s["reception"]["mission"]
+        if not session.get("navigation_permitted"):
+            raise NavigationError("MANUAL_PRIORITY",session.get("notice") or "E左档才允许导航",status=409)
         if mission["phase"]in BUSY or session["phase"]in("starting","executing","replanning","paused"):
             raise NavigationError("TASK_BUSY","Existing navigation must finish or be explicitly cancelled")
         if request["kind"] in ("route","visit"):

@@ -5,8 +5,9 @@ import re
 
 def reception_html(root):
     root=Path(root)
-    return (root/'reception.html').read_text().replace('/*RECEPTION_TOOLS*/',
+    html=(root/'reception.html').read_text().replace('/*RECEPTION_TOOLS*/',
         (root/'reception_hash.js').read_text()+'\n'+(root/'reception_tools.js').read_text()+'\n'+(root/'reception_studio.js').read_text()+'\n'+(root/'reception_quick.js').read_text())
+    return html.replace('<select id="mapSelect"','<a href="/agent" style="color:var(--teal);white-space:nowrap;text-decoration:none">AI助手</a><select id="mapSelect"',1)
 
 def embedded_reception_html(root):
     app=reception_html(root)

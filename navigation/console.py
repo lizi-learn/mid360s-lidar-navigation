@@ -1083,6 +1083,9 @@ def main():
                 raw=gzip.compress(raw);self.send_header('Content-Encoding','gzip')
             self.send_header('Content-Length',str(len(raw)));self.end_headers();self.wfile.write(raw)
         def do_GET(self):
+            if urlsplit(self.path).path=='/agent' or urlsplit(self.path).path.startswith('/api/agent/'):
+                from agent_proxy import serve
+                return serve(self)
             if urlsplit(self.path).path in ('/','/reception'):
                 guided=urlsplit(self.path).path=='/reception' or parse_qs(urlsplit(self.path).query).get('view') in (['reception'],['operator'])
                 from reception_ui import reception_html,console_html
@@ -1096,6 +1099,9 @@ def main():
             elif self.path=='/api/map':self.send({'revision':node.display_revision(),'map':node.status()['map']})
             else:self.send({'error':'Not found'},404)
         def do_POST(self):
+            if urlsplit(self.path).path.startswith('/api/agent/'):
+                from agent_proxy import serve
+                return serve(self)
             try:
                 if not secrets.compare_digest(self.headers.get('X-Nav-Token',''),node.request_token):
                     self.send({'error':'请刷新工作台后重试'},403);return
