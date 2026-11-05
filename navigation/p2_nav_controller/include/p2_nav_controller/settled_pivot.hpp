@@ -10,6 +10,7 @@ class SettledPivot {
   double last_=-1.,start_=0.,end_=0.,quiet_=0.,from_=0.,peak_=0.;
   double command_=0.,duration_=1.1,near_level_=.5,near_duration_=1.1,near_delta_=0.,near_peak_=0.;
   double far_duration_=2.,far_delta_=0.,far_peak_=0.;
+  double response_started_=-1.;
  public:
   void reset(){*this=SettledPivot();}
   bool pending()const{return active_||coasting_;}
@@ -55,7 +56,7 @@ class SettledPivot {
     }
     if(!active_&&std::abs(error)<=tolerance)return 0.;
     if(!active_) {
-      from_=yaw;start_=now;peak_=std::abs(rate);active_=true;
+      from_=yaw;start_=now;peak_=std::abs(rate);active_=true;response_started_=-1.;
       const bool far=std::abs(error)>1.2;
       near_pulse_=!far;command_=std::copysign(far?1.:near_level_,error);
       const double far_desired=std::min(.9,std::max(.3,std::abs(error)-.7));
@@ -70,9 +71,18 @@ class SettledPivot {
       }
     }
     peak_=std::max(peak_,std::abs(rate));
+    const double displacement=std::remainder(yaw-from_,2.*std::acos(-1.))*std::copysign(1.,command_);
+    if(response_started_<0.&&rate*command_>0.&&std::abs(rate)>.06&&displacement>.02)response_started_=now;
     const bool crossed=error*command_<=0.;
     const bool far_brake=!near_pulse_&&std::abs(error)<std::max(.8,1.8*std::abs(rate));
-    if(crossed||far_brake||now-start_>=duration_) {
+    // Retain the original probe for an unknown/delayed response. Once a slow
+    // real response is established, do not restart the native yaw ramp every
+    // three seconds while the remaining angle is still large. A rate spike
+    // alone or motion that has only just begun is not that evidence.
+    const bool learned_slow=far_peak_>.03&&far_peak_<.45;
+    const bool observed_slow=peak_<.45&&displacement>.15&&response_started_>=0.&&now-response_started_>=1.2;
+    const bool continuous=!near_pulse_&&peak_<.45&&(learned_slow||observed_slow);
+    if(crossed||far_brake||(!continuous&&now-start_>=duration_)) {
       active_=false;coasting_=true;end_=now;quiet_=0.;return 0.;
     }
     return command_;

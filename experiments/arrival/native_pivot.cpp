@@ -54,7 +54,7 @@ int main(int argc,char **argv){
   geometry_msgs::msg::PoseStamped target;target.header.frame_id="fixture_world";target.header.stamp=node->now();target.pose.orientation=nav2_util::geometry_utils::orientationAroundZAxis(goal);
   nav_msgs::msg::Path path;path.header=target.header;path.poses.push_back(target);control->setPlan(path);
   p2_nav::SpeedResponse native;std::deque<double> latency(static_cast<int>(std::round(delay/dt))+1,0.);
-  double yaw=0,rate=0,quiet=0,time=0,max_input=0;int blocked=0,intrusions=0;bool reached=false,accepted=false,progress_failed=false,cancelled=false,post_cancel_nonzero=false;
+  double yaw=0,rate=0,quiet=0,time=0,max_input=0,previous_raw=0,zero_seconds=0;int blocked=0,intrusions=0,raw_starts=0;bool reached=false,accepted=false,progress_failed=false,cancelled=false,post_cancel_nonzero=false;
   std::ofstream trace(prefix+".csv");trace<<"t,yaw,rate,error,raw_z,input_z,applied,collision_exception,cancelled,progress\n";
   for(int k=0;k<900;++k){
    time=k*dt;if(rcl_set_ros_time_override(node->get_clock()->get_clock_handle(),static_cast<int64_t>((1.+time)*1e9))!=RCL_RET_OK)throw std::runtime_error("Fixture clock tick failed");
@@ -64,6 +64,9 @@ int main(int argc,char **argv){
    if(kind=="cancel"&&time>=3.&&!cancelled){cancelled=true;control->deactivate();}
    double raw=0;bool stopped=false;
    if(!cancelled&&!accepted)try{raw=control->computeVelocityCommands(pose,measured,checker.get()).twist.angular.z;}catch(const std::exception &e){++blocked;stopped=true;}
+   if(raw!=0.&&previous_raw==0.)++raw_starts;
+   if(raw==0.&&!accepted&&std::abs(std::remainder(goal-yaw,2*pi))>.15)zero_seconds+=dt;
+   previous_raw=raw;
    auto stamp=static_cast<uint64_t>((time+1)*1e9);auto input=native.step(0,raw*scale,0,rate,dt,stamp,stamp,!cancelled&&!accepted);
    if(cancelled&&(raw!=0.||input.policy_yaw!=0.))post_cancel_nonzero=true;
    max_input=std::max(max_input,std::abs(input.policy_yaw));latency.push_back(input.policy_yaw);double applied=latency.front();latency.pop_front();
@@ -79,8 +82,10 @@ int main(int argc,char **argv){
    if((kind=="blocked"||kind=="cancel")&&time>=8.)break;
    if(intrusions)break;
   }
+  std::ifstream mappings("/proc/self/maps");std::string line,loaded_library;
+  while(std::getline(mappings,line))if(line.find("libp2_nav_controller.so")!=std::string::npos){loaded_library=line.substr(line.find('/'));break;}
   std::ofstream out(prefix+".json");out<<std::boolalpha<<std::setprecision(12)<<"{\"goal_reached\":"<<reached<<",\"error_rad\":"<<std::abs(std::remainder(goal-yaw,2*pi))<<",\"duration_s\":"<<time<<",\"goal_accepted\":"<<accepted<<",\"goal_checker\":\""<<node->get_parameter("goal_checker.plugin").as_string()<<"\",\"progress_failed\":"<<progress_failed<<",\"body_intrusions\":"<<intrusions<<",\"obstacle_verified\":"<<verified<<",\"collision_stops\":"<<blocked<<",\"cancelled\":"<<cancelled<<",\"post_cancel_nonzero\":"<<post_cancel_nonzero<<",\"final_measured_rate\":"<<rate<<",\"operator_scale\":"<<scale<<",\"max_policy_input\":"<<max_input<<",\"settled_pivot_response\":"<<node->get_parameter("FollowPath.settled_pivot_response").as_bool()<<",\"movement_time_allowance\":"<<node->get_parameter("progress_checker.movement_time_allowance").as_double()<<",\"actual_footprint\":[";
-  auto body=cm->getRobotFootprint();for(size_t i=0;i<body.size();++i){if(i)out<<',';out<<'['<<body[i].x<<','<<body[i].y<<']';}out<<"]}";
+  auto body=cm->getRobotFootprint();for(size_t i=0;i<body.size();++i){if(i)out<<',';out<<'['<<body[i].x<<','<<body[i].y<<']';}out<<"],\"raw_starts\":"<<raw_starts<<",\"intermediate_zero_s\":"<<zero_seconds<<",\"controller_library\":\""<<loaded_library<<"\"}";
   if(!cancelled)control->deactivate();control->cleanup();control.reset();progress.reset();checker.reset();cm->on_cleanup(rclcpp_lifecycle::State());cm.reset();node.reset();
  }catch(const std::exception &e){std::cerr<<e.what()<<'\n';rc=1;}
  rclcpp::shutdown();return rc;
