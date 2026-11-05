@@ -73,4 +73,22 @@ class RuntimeCollisionGeometryTests(unittest.TestCase):
    before=p.read_bytes()
    with self.assertRaises(ValueError):apply_runtime_geometry(p)
    self.assertEqual(p.read_bytes(),before)
+
+
+class BoundaryRuntimeConfig(unittest.TestCase):
+ def test_cached_configuration_receives_feature_without_changing_geometry(self):
+  with tempfile.TemporaryDirectory()as d:
+   p=pathlib.Path(d)/'params.yaml';before=config(gait_profile='p2-flat-model')
+   before['controller_server']['ros__parameters']['FollowPath'].pop('boundary_forward_escape',None)
+   for name in before['planner_server']['ros__parameters']['planner_plugins']:
+    before['planner_server']['ros__parameters'][name].pop('boundary_forward_escape',None)
+   p.write_text(yaml.safe_dump(before));shape=[[.275,.275],[.275,-.275],[-.275,-.275],[-.275,.275]]
+   (p.with_name('planning_geometry.json')).write_text(json.dumps(dict(footprint=shape,footprint_padding=0.,boundary_forward_escape=True)))
+   apply_runtime_geometry(p);out=yaml.safe_load(p.read_text())
+   self.assertTrue(out['controller_server']['ros__parameters']['FollowPath']['boundary_forward_escape'])
+   self.assertTrue(out['planner_server']['ros__parameters']['PositionOnly']['boundary_forward_escape'])
+   for name in ('global_costmap','local_costmap'):
+    self.assertEqual(json.loads(out[name][name]['ros__parameters']['footprint']),shape)
+    self.assertEqual(out[name][name]['ros__parameters']['footprint_padding'],0.)
+   self.assertTrue(out['controller_server']['ros__parameters']['FollowPath']['use_collision_detection'])
 if __name__=='__main__':unittest.main()

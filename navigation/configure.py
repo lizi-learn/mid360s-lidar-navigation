@@ -228,6 +228,14 @@ def apply_runtime_geometry(params_file):
     if 'terminal_approach_continuity' in value:
         if type(value['terminal_approach_continuity'])is not bool:raise ValueError('Invalid terminal approach continuity setting')
         params['controller_server']['ros__parameters']['FollowPath']['terminal_approach_continuity']=value['terminal_approach_continuity']
+    if 'boundary_forward_escape' in value:
+        enabled=value['boundary_forward_escape']
+        if type(enabled)is not bool:raise ValueError('Invalid boundary forward escape setting')
+        params['controller_server']['ros__parameters']['FollowPath']['boundary_forward_escape']=enabled
+        planner=params['planner_server']['ros__parameters']
+        for name in planner['planner_plugins']:
+            if planner[name].get('plugin','').startswith('p2_nav_controller::'):
+                planner[name]['boundary_forward_escape']=enabled
     # The same configured body must be used by costmaps AND collision polygons.
     # Preserve existing front/rear/side clearances while replacing the body;
     # otherwise an old wide model silently remains a navigation stop condition.
