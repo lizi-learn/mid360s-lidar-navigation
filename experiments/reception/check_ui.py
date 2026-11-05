@@ -24,7 +24,7 @@ subprocess.run(['node','-e',script,str(ROOT/'navigation/reception_hash.js')],che
 # Reproduce the actual old-entry lexical collision and verify the rendered fix.
 probe=r"""const fs=require('fs'),vm=require('vm');
 const input=JSON.parse(fs.readFileSync(0,'utf8'));
-const node=()=>({style:{},dataset:{},classList:{toggle(){},add(){},remove(){}},getContext(){return {}},after(){},append(){},querySelectorAll(){return []}});
+const node=()=>({style:{},dataset:{},classList:{toggle(){},add(){},remove(){}},getContext(){return {}},before(){},after(){},append(){},querySelectorAll(){return []}});
 const elements=new Map(),document={getElementById(id){if(!elements.has(id))elements.set(id,node());return elements.get(id)},createElement:node,querySelector:node,head:node(),querySelectorAll(){return []},addEventListener(){},body:node()};
 const ctx=vm.createContext({document,location:{pathname:'/api/v1/modules/navigation/workbench',search:''},URLSearchParams,AbortController,fetch:async()=>{throw Error('offline lexical fixture')},setInterval(){return 1},setTimeout(){return 1},clearTimeout(){},ResizeObserver:class{observe(){}},addEventListener(){}});ctx.window=ctx;
 vm.runInContext("const API_BASE='parent-console',ctx={};let state='parent-state',zoom=1,view=null,pan=[0,0];",ctx);

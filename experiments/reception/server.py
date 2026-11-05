@@ -132,6 +132,7 @@ class Sandbox:
     def status(self):
         return {'simulation':True,'scope':'Synthetic planar reception workflow only; not Nav2 or physical biped validation',
                 'request_token':self.request_token,'robot_name':'P2 · 合成展厅','mode':'navigation','pose':self.pose[:],
+                'process_alive':self.thread.is_alive()and not self.closed.is_set(),
                 'map_revision':1,'maps':sorted(p.parent.name for p in (self.runtime/'maps').glob('*/mapped.yaml')),'path':self.path,'session':self.session.status(time.monotonic()),
                 'reception':{'map_id':self.map_name,'mission':self.reception.engine.status()},'hardware_control_requests':0,
                 'scan_overlay':{'source_ns':time.time_ns(),'frame_id':'map','origin':self.pose[:],'points':[],'age_s':0.,'scope':'synthetic model only'},'model_start_requests':len(self.commands),'audio_feedback':{'enabled':True,'volume':55}}
