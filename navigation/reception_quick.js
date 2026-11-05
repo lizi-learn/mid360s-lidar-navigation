@@ -15,7 +15,7 @@ function navigationMapContext(connected=true){
     if(doc?.map_id!==active)return{matches:false,label:'导航使用另一张地图',message:'导航使用的地图与当前编辑地图不同，请点地图上方“载入这张地图”，或切回导航使用的地图',load:true};
     if(!state.process_alive)return{matches:false,label:'导航地图已停止',message:'这张地图的导航进程已停止，请点地图上方“重新载入地图”',load:true};
     if(state.mode!=='navigation')return{matches:false,label:'当前正在建图',message:'当前正在建图，请载入导航地图后再前往点位',load:true};
-    return{matches:true,label:'导航地图已载入',message:'当前编辑地图与导航地图一致；定位状态以实时数据为准',load:false};
+    return{matches:true,label:state.gate?.localized?'导航地图已载入':'地图已载入 · 等待定位',warning:!state.gate?.localized,message:'当前编辑地图与导航地图一致；定位状态以实时数据为准',load:false};
 }
 async function loadEditedNavigationMap(){
     if(mapLoadPending||!doc||doc.map_id==='unselected')return;
@@ -45,7 +45,7 @@ function quickAuthorityState(connected=true){
 }
 function renderQuickState(connected=true){
     const q=quickAuthorityState(connected);$('gaitBadge').textContent=q.gait;$('automationBadge').textContent=q.automation;
-    const context=navigationMapContext(connected);$('navigationMapBadge').textContent=context.label;$('navigationMapBadge').className='chip'+(context.matches?'':' amber');navigationMapView.title=context.message;
+    const context=navigationMapContext(connected);$('navigationMapBadge').textContent=context.label;$('navigationMapBadge').className='chip'+(context.matches&&!context.warning?'':' amber');navigationMapView.title=context.message;
     $('loadEditedMap').hidden=!context.load;$('loadEditedMap').disabled=mapLoadPending||!doc||doc.map_id==='unselected';$('loadEditedMap').textContent=mapLoadPending?'正在载入…':context.label==='导航地图已停止'?'重新载入地图':'载入这张地图';
     $('gaitBadge').className='chip'+(q.gait==='D 策略'?'':' offline');$('automationBadge').className='chip'+(q.allowed?'':' amber');
     controlState.title=connected?(state?.gait_transport?.blockers||'已收到实际策略与 E 档位回执'):'未收到当前连接状态';
