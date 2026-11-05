@@ -1,5 +1,5 @@
 <library path="p2_nav_costmap">
   <class type="p2_nav_controller::TemporalObstacleLayer" base_class_type="nav2_costmap_2d::Layer">
-    <description>Source-timed global dynamic-obstacle memory; static map and unknown boundary retained.</description>
+    <description>Source-timed fixed and rolling dynamic-obstacle memory; static map and unknown boundary retained.</description>
   </class>
 </library>

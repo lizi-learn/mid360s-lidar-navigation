@@ -105,7 +105,12 @@ def config(controller='rpp', tree=None, minimum_speed=.03, footprint_vertices=No
                 # bins retain the static value; current hit endpoints remain
                 # lethal. Authored keepouts/boundaries are separate filters.
                 common['obstacle_layer']['combination_method']=0
-        elif gait_profile=='p2-flat-model':
+        if gait_profile=='p2-flat-model':
+            # Both planners and the rolling controller must forget expired
+            # dynamic hits using their ORIGINAL source times. Keeping infinite
+            # local history while the global layer expires it creates a clear
+            # global path that the controller can never follow. Static context,
+            # current hits and unknown-space/keepout semantics remain intact.
             common['obstacle_layer'].update(plugin='p2_nav_controller::TemporalObstacleLayer',
                 observation_keep_time=3.,expiration_source_max_age=.3)
         result[name]={name:{'ros__parameters':common}}

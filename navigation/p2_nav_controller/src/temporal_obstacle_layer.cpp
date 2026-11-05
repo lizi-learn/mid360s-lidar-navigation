@@ -7,9 +7,8 @@
 #include "pluginlib/class_list_macros.hpp"
 
 namespace p2_nav_controller {
-// Global dynamic observations have a finite memory. Expiration removes only
+// Dynamic observations have a finite source-timed memory. Expiration removes only
 // this layer's mark; StaticLayer and the map-boundary filter still apply.
-// Local ObstacleLayer retains its existing behavior.
 class TemporalObstacleLayer : public nav2_costmap_2d::ObstacleLayer {
   std::vector<int64_t> seen_;
   double lifetime_=3., source_age_=.3;
@@ -22,11 +21,32 @@ class TemporalObstacleLayer : public nav2_costmap_2d::ObstacleLayer {
     node->get_parameter(name_+".observation_keep_time",lifetime_);
     node->get_parameter(name_+".expiration_source_max_age",source_age_);
     if(!std::isfinite(lifetime_)||lifetime_<=0.||!std::isfinite(source_age_)||source_age_<=0.)
-      throw std::invalid_argument("Invalid global dynamic-observation lifetime");
-    if(rolling_window_)throw std::invalid_argument("TemporalObstacleLayer is for the fixed global costmap");
+      throw std::invalid_argument("Invalid dynamic-observation lifetime");
   }
   void reset() override {ObstacleLayer::reset();seen_.clear();}
   void matchSize() override {ObstacleLayer::matchSize();seen_.clear();}
+  void updateOrigin(double x,double y) override {
+    // Rolling costmaps move their cell array by whole grid cells. Move source
+    // times by the IDENTICAL realized offset; an array index is not a world
+    // location. Newly exposed cells have no remembered observation. In
+    // particular, a moving robot must not continually reset an old hit's age.
+    std::lock_guard<nav2_costmap_2d::Costmap2D::mutex_t> lock(*getMutex());
+    const double old_x=getOriginX(),old_y=getOriginY();
+    const auto nx=getSizeInCellsX(),ny=getSizeInCellsY();
+    ObstacleLayer::updateOrigin(x,y);
+    if(seen_.empty())return;
+    if(seen_.size()!=static_cast<size_t>(nx)*ny){seen_.clear();return;}
+    const int dx=static_cast<int>(std::llround((getOriginX()-old_x)/getResolution()));
+    const int dy=static_cast<int>(std::llround((getOriginY()-old_y)/getResolution()));
+    if(dx==0&&dy==0)return;
+    std::vector<int64_t> shifted(seen_.size(),0);
+    for(int iy=0;iy<static_cast<int>(ny);++iy)for(int ix=0;ix<static_cast<int>(nx);++ix){
+      const int sx=ix+dx,sy=iy+dy;
+      if(sx>=0&&sy>=0&&sx<static_cast<int>(nx)&&sy<static_cast<int>(ny))
+        shifted[static_cast<size_t>(iy)*nx+ix]=seen_[static_cast<size_t>(sy)*nx+sx];
+    }
+    seen_.swap(shifted);
+  }
   void updateBounds(double x,double y,double yaw,double *min_x,double *min_y,double *max_x,double *max_y) override {
     ObstacleLayer::updateBounds(x,y,yaw,min_x,min_y,max_x,max_y);
     if(!enabled_)return;
