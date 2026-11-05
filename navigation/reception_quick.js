@@ -1,11 +1,33 @@
 // Explicit web test controls reuse the normal mission API and manual takeover.
-let quickMapEnabled=false;
+let quickMapEnabled=false,mapLoadPending=false;
 const quickStyle=document.createElement('style');quickStyle.textContent=`
-.control-state{display:flex;gap:5px;align-items:center;flex-wrap:wrap;justify-content:flex-end}.control-state .chip{font-size:11px}.chip.offline{background:#edf0ef;color:#71807b}#mapNavigate{white-space:nowrap}#quickVisit{margin-top:8px;width:100%}.quick-visit-note{font-size:11px;line-height:1.6;color:#71847c;margin-top:7px}@media(max-width:700px){.topbar .control-state{order:3;width:100%;justify-content:flex-start}}.handheld-native #mapNavigate{font-size:11px;padding:4px 7px;min-height:24px}
+.control-state{display:flex;gap:5px;align-items:center;flex-wrap:wrap;justify-content:flex-end}.control-state .chip{font-size:11px}.chip.offline{background:#edf0ef;color:#71807b}#mapNavigate{white-space:nowrap}#quickVisit{margin-top:8px;width:100%}.quick-visit-note{font-size:11px;line-height:1.6;color:#71847c;margin-top:7px}.nav-map-state{display:flex;align-items:center;gap:6px;flex-wrap:wrap}.nav-map-state button{white-space:nowrap}.map-header{flex-wrap:wrap}.handheld-native .map-header{height:auto;min-height:32px}.handheld-native .nav-map-state .chip{font-size:10px}.handheld-native .nav-map-state button{font-size:11px;padding:4px 7px;min-height:24px}@media(max-width:700px){.topbar .control-state{order:3;width:100%;justify-content:flex-start}}.handheld-native #mapNavigate{font-size:11px;padding:4px 7px;min-height:24px}
 `;
 document.head.append(quickStyle);
 const controlState=document.createElement('div');controlState.className='control-state';controlState.id='controlState';controlState.role='status';controlState.innerHTML='<span class="chip offline" id="gaitBadge">策略未连接</span><span class="chip offline" id="automationBadge">E 档位未连接</span>';$('mapSelect').after(controlState);
 const mapNavigate=document.createElement('button');mapNavigate.id='mapNavigate';mapNavigate.type='button';mapNavigate.textContent='点图导航';$('mapHint').after(mapNavigate);
+const navigationMapView=document.createElement('div');navigationMapView.className='nav-map-state';navigationMapView.innerHTML='<span class="chip amber" id="navigationMapBadge" role="status">正在读取导航地图状态</span><button type="button" id="loadEditedMap">载入这张地图</button>';mapNavigate.before(navigationMapView);
+$('loadEditedMap').onclick=loadEditedNavigationMap;
+function navigationMapContext(connected=true){
+    const active=state?.reception?.map_id;
+    if(!connected||!active)return{matches:false,label:'导航地图状态未连接',message:'未收到导航地图状态，请检查连接',load:false};
+    if(active==='unselected')return{matches:false,label:'导航地图尚未载入',message:'导航地图尚未载入，请点地图上方“载入这张地图”；载入本身不会行走',load:true};
+    if(doc?.map_id!==active)return{matches:false,label:'导航使用另一张地图',message:'导航使用的地图与当前编辑地图不同，请点地图上方“载入这张地图”，或切回导航使用的地图',load:true};
+    if(!state.process_alive)return{matches:false,label:'导航地图已停止',message:'这张地图的导航进程已停止，请点地图上方“重新载入地图”',load:true};
+    if(state.mode!=='navigation')return{matches:false,label:'当前正在建图',message:'当前正在建图，请载入导航地图后再前往点位',load:true};
+    return{matches:true,label:'导航地图已载入',message:'当前编辑地图与导航地图一致；定位状态以实时数据为准',load:false};
+}
+async function loadEditedNavigationMap(){
+    if(mapLoadPending||!doc||doc.map_id==='unselected')return;
+    const mapId=doc.map_id;mapLoadPending=true;renderQuickState();
+    try{
+        // Loading a saved map never submits a goal or replays an earlier Start.
+        state=await request('/api/status?summary=1');
+        await mapCall('map_load',{map_id:mapId});
+        await refresh();toast('已载入所选地图，正在准备定位；没有开始行走');
+    }catch(e){toast('地图载入失败：'+e.message);}
+    finally{mapLoadPending=false;renderQuickState();}
+}
 function quickAuthorityState(connected=true){
     const g=state?.gait_transport,s=state?.session,linked=!!(connected&&g?.controller_instance&&g.phase!=='disconnected');
     const d=linked&&!!(g.readiness&1),walking=d&&!!(g.readiness&2),verified=!!(connected&&s?.operator_verified);
@@ -23,6 +45,8 @@ function quickAuthorityState(connected=true){
 }
 function renderQuickState(connected=true){
     const q=quickAuthorityState(connected);$('gaitBadge').textContent=q.gait;$('automationBadge').textContent=q.automation;
+    const context=navigationMapContext(connected);$('navigationMapBadge').textContent=context.label;$('navigationMapBadge').className='chip'+(context.matches?'':' amber');navigationMapView.title=context.message;
+    $('loadEditedMap').hidden=!context.load;$('loadEditedMap').disabled=mapLoadPending||!doc||doc.map_id==='unselected';$('loadEditedMap').textContent=mapLoadPending?'正在载入…':context.label==='导航地图已停止'?'重新载入地图':'载入这张地图';
     $('gaitBadge').className='chip'+(q.gait==='D 策略'?'':' offline');$('automationBadge').className='chip'+(q.allowed?'':' amber');
     controlState.title=connected?(state?.gait_transport?.blockers||'已收到实际策略与 E 档位回执'):'未收到当前连接状态';
     mapNavigate.textContent=quickMapEnabled?'点图即走：开':'点图导航';mapNavigate.classList.toggle('primary',quickMapEnabled);

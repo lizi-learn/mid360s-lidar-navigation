@@ -75,7 +75,7 @@ function renderMapTools(){
     $('readVersions').onclick=async()=>{try{mapVersions=(await mapCall('map_versions',{map_id:doc.map_id})).versions;renderMapTools();}catch(e){toast(e.message);}};
     $('snapshotMap').onclick=async()=>{try{await mapCall('map_snapshot',{map_id:doc.map_id});$('readVersions').click();}catch(e){toast(e.message);}};
     document.querySelectorAll('[data-restore-map]').forEach(b=>b.onclick=async()=>{try{await mapCall('map_restore',{map_id:doc.map_id,version:b.dataset.restoreMap});toast('地图版本已恢复，当前导航停止；可重新载入地图');await refresh();}catch(e){toast(e.message);}});
-    $('loadMap').onclick=async()=>{try{await mapCall('map_load',{map_id:doc.map_id});toast('正在载入地图与定位');}catch(e){toast(e.message);}};
+    $('loadMap').onclick=loadEditedNavigationMap;
     $('resumeMapping').onclick=async()=>{try{await mapCall('map_resume',{map_id:doc.map_id,...(updateRegion?{region:updateRegion}:{})});toast(updateRegion?'已启动所选区域续扫':'已从保存的位姿图继续扫描');}catch(e){toast(e.message);}};
     $('saveMapping').onclick=async()=>{try{const r=await mapCall('map_save',{map_id:doc.map_id});toast('地图已保存'+(r.local_update?' · 局部更改 '+r.local_update.changed_cells+' 格':''));}catch(e){toast(e.message);}};
     $('exportSite').onclick=exportSite;$('importSite').onclick=()=>$('siteFile').click();$('siteFile').onchange=importSite;
