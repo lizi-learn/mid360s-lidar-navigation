@@ -39,6 +39,12 @@ class TaskStore:
                 if row:
                     if row[0]!=fingerprint:raise NavigationError('IDEMPOTENCY_CONFLICT','Same key used for a different request')
                     return json.loads(row[1])
+            # Providers expose one current native run. Capture its terminal
+            # receipt before the next dispatch replaces that run's snapshot.
+            # This observes old tasks only; it never replays any request.
+            for ident,raw in self.db.execute('SELECT id,payload FROM tasks').fetchall():
+                previous=json.loads(raw)
+                if previous['state']not in TERMINAL and previous.get('native_ref'):self.get(ident)
             now=time.time();task={'id':uuid.uuid4().hex,'state':'dispatching','request':body,
                                   'created_at':now,'updated_at':now,'backend':self.backend.name,'native_ref':None}
             self.db.execute('INSERT INTO tasks VALUES(?,?,?,?)',(task['id'],key,fingerprint,json.dumps(task)));self.db.commit()

@@ -78,7 +78,7 @@ class AgentTest(unittest.TestCase):
     def test_unknown_point_id_never_generates_motion(self):
         a=self.agent([('visit_point',{'point_id':'not-real'}),'目录没有这个点位'])
         a.submit('request-1','test','去一个不存在的位置');job=self.wait(a)
-        self.assertEqual(self.backend.submissions,0);self.assertIn('不存在',job['tools'][-1]['result']['error'])
+        self.assertEqual(self.backend.submissions,0);self.assertIn('未找到',job['reply'])
     def test_route_and_cancel_use_existing_sdk_task_lifecycle(self):
         a=self.agent([('run_route',{'route_id':'sample-tour'}),'已提交'])
         a.submit('request-1','test','参观一遍');job=self.wait(a)

@@ -69,6 +69,33 @@ route directly. The UI shows current execution separately from the latest chat
 task result and updates an accepted task bubble when success is observed. A stopped
 control channel does not rewrite the saved task's successful arrival/introduction.
 
+The current request is bound to the live catalogue before an action is offered to
+the model. A query cannot dispatch, a specified point cannot be substituted, and a
+single navigation request shares one SDK submission/identity across tool calls.
+When a model omits an action or its answer fails, a unique, explicitly requested
+destination can still be submitted once. Failed or uncertain native submissions
+are never automatically retried. An accepted receipt survives model/observer errors;
+unknown acceptance remains unknown. The SDK observes prior runs before replacing
+the provider's current-run snapshot so a completed but unpolled task is retained.
+
+## Offline validation without provider credit
+
+```sh
+python scripts/check-agent-offline.py --output /tmp/agent-offline-validation.json
+node --test tests_agent/ui-state.test.cjs
+python -m unittest discover -s tests_sdk -v
+```
+
+The Agent tests use the actual upstream RAI graph with a local scripted/adversarial
+model. The child removes provider credentials and denies Python DNS/connect calls
+outside servers bound by that test process, including other localhost services.
+No DeepSeek API request is needed. Cases cover request binding, multi-turn state,
+HTTP request identity/authentication, cancel races, malformed/lost receipts and
+model failure. The integration suite uses the real Session and Mission engines for
+both20-point orders, introduction/dwell and manual takeover, with explicitly injected
+goal/audio receipts. Its result is a software-state test, not Nav2 collision/physics
+simulation, real walking acceptance, or a measurement of DeepSeek language accuracy.
+
 The first version uses saved points and routes. It does not yet create arbitrary
 new multi-point itineraries, edit product knowledge, or capture microphone audio.
 Typing works immediately; spoken-language capture can be added as a separate input

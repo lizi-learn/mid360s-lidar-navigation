@@ -13,6 +13,11 @@ jobs:
         with:
           node-version: '22'
       - run: python -m pip install . 'langchain-deepseek==1.1.1' 'numpy==1.26.4' 'opencv-python==4.11.0.86' 'opencv-python-headless==4.11.0.86' 'rai_core @ git+https://github.com/RobotecAI/rai.git@b018729833742c6f71e1e9f332ee2b435676fb4f#subdirectory=src/rai_core'
-      - run: python -m unittest discover -s tests_agent -v
+      - run: python scripts/check-agent-offline.py --output /tmp/agent-offline-validation.json
       - run: node --test tests_agent/ui-state.test.cjs
       - run: python -m unittest discover -s tests_sdk -q
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: agent-offline-validation
+          path: /tmp/agent-offline-validation.json
