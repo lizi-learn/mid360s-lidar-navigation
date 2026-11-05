@@ -42,7 +42,7 @@ def main():
     if doors:env['P2_NAV_SIM_DOORS']=json.dumps(doors)
     shell='source /opt/ros/humble/setup.bash\nsource '+shlex.quote(str(setup))+'\nexport PYTHONPATH=/usr/lib/python3/dist-packages:'+shlex.quote(str(NAV))+':${PYTHONPATH:-}\nexec /usr/bin/python3 -S '+shlex.quote(str(NAV/'console.py'))+' --simulation --gait-profile p2-flat-model --footprint-profile '+shlex.quote(str(foot))+' --runtime '+shlex.quote(str(runtime))+' --port '+str(args.port)
     log=(out/'console.log').open('w');process=subprocess.Popen(['bash','-c',shell],env=env,stdout=log,stderr=subprocess.STDOUT,start_new_session=True)
-    url=f'http://127.0.0.1:{args.port}';token='';latest={};trace=[];events=[];report={};started=time.monotonic();ros=None;presentation=None;presentation_trace=None
+    url=f'http://127.0.0.1:{args.port}';token='';latest={};trace=[];events=[];mission_events={};report={};started=time.monotonic();ros=None;presentation=None;presentation_trace=None
     def call(path,data=None):
         raw=None if data is None else json.dumps(data).encode();request=urllib.request.Request(url+path,data=raw,headers={'Content-Type':'application/json','X-Nav-Token':token})
         try:
@@ -51,6 +51,8 @@ def main():
     def status():
         nonlocal latest
         latest=call('/api/status?summary=1')
+        for event in latest.get('reception',{}).get('mission',{}).get('events',[]):
+            mission_events[(event.get('epoch'),event.get('sequence',event.get('seq')),json.dumps(event,sort_keys=True))]=event
         if presentation:
             from audio_feedback import atomic_json
             atomic_json(runtime/'audio-feedback-state.json',dict(updated_at=time.time()))
@@ -286,7 +288,7 @@ def main():
                     observed_fault_samples=sum(s['gate'].get('collision_source_valid')is False for s in witness),stopped_samples=sum(max(map(abs,s['command']))<1e-6 for s in witness),user_start_requests=1))
             parked=wait(lambda d:d['reception']['mission']['phase']=='guest_wait',45)
             assert parked['reception']['mission']['index']==1
-            error=abs(math.remainder(parked['pose'][2]-a['yaw'],2*math.pi));assert error<=math.radians(20),error
+            error=abs(math.remainder(parked['pose'][2]-a['yaw'],2*math.pi));assert error<=math.radians(10),error
             epoch=parked['reception']['mission']['epoch'];pose=parked['truth']['pose']
             time.sleep(.6);parked=status()
             assert parked['reception']['mission']['phase']=='guest_wait'
@@ -295,14 +297,17 @@ def main():
             call('/api/confirm',{'reception_command':dict(command='continue',epoch=epoch)})
             dwelling=wait(lambda d:d['reception']['mission']['phase']=='dwell',45)
             assert dwelling['reception']['mission']['index']==2
-            assert abs(math.remainder(dwelling['pose'][2]-b['yaw'],2*math.pi))<=math.radians(20)
+            second_error=abs(math.remainder(dwelling['pose'][2]-b['yaw'],2*math.pi));assert second_error<=math.radians(10),second_error
             assert dwelling['reception']['mission']['epoch']!=epoch
             assert max(map(abs,dwelling['truth']['command']))<1e-6
             d=complete()
+            spins=[e for e in mission_events.values()if e.get('kind')in ('initial_spin_started','initial_spin_finished','arrival_spin_started')]
+            assert any(e['kind']=='arrival_spin_started'for e in spins),'Final heading did not use a native Spin action'
+            assert any(e['kind']=='initial_spin_finished'and e.get('phase')=='arrived'for e in spins),'Return pivot did not complete a native Spin action'
             assert len(presentation_trace.read_text().splitlines())==2
             assert d['truth']['collision_attempts']==0
             events.append(dict(case='native_heading_then_same_product_twice_guest_continue_dwell_return',passed=True,
-                first_yaw_error=error,actual_playback_processes=2,guest_wait_held=True,dwell_observed=True,
+                first_yaw_error=error,second_yaw_error=second_error,yaw_tolerance_rad=math.radians(10),native_spin_receipts=spins,actual_playback_processes=2,guest_wait_held=True,dwell_observed=True,
                 audio_scope='Synthetic silent WAV and fake paplay; not a physical speaker test'))
         if args.scenario=='blockage':
             ros=ScenarioROS()

@@ -76,7 +76,7 @@ function compactPointPanel(){
     scriptLabel.textContent='在这个点说什么';
     const details=document.createElement('details');details.className='section-note';const summary=document.createElement('summary');summary.textContent='精确坐标、点位类型与关联产品';details.append(summary,coordinates,kindLabel,kind,productLabel,product);
     pane.replaceChildren(nameLabel,name,scriptLabel,script,yaw,yawRow,dwell,apply,buttons,details);
-    const arrivalNote=document.createElement('div');arrivalNote.className='section-note';arrivalNote.textContent='讲解停靠按大致方向：朝向允许相差20°，位置默认允许30厘米偏差；未指定朝向时不额外转身。';pane.append(arrivalNote);
+    const arrivalNote=document.createElement('div');arrivalNote.className='section-note';arrivalNote.textContent='到点使用连续原地转向，朝向进入±10°后结束；位置按当前停靠范围执行。未指定朝向时不额外转身。';pane.append(arrivalNote);
 }
 
 function renderStudioLimits(){

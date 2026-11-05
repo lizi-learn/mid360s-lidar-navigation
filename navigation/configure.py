@@ -145,7 +145,7 @@ def config(controller='rpp', tree=None, minimum_speed=.03, footprint_vertices=No
         # Authored presentation stops use approximate positioning and direction.
         # Keep ordinary route tracking/position-only navigation unchanged.
         control['goal_checker_plugins']+=['presentation_goal_checker','presentation_position_goal_checker']
-        control['presentation_goal_checker']=dict(plugin='nav2_controller::SimpleGoalChecker',xy_goal_tolerance=.30,yaw_goal_tolerance=math.radians(20),stateful=True)
+        control['presentation_goal_checker']=dict(plugin='nav2_controller::SimpleGoalChecker',xy_goal_tolerance=.30,yaw_goal_tolerance=math.radians(10),stateful=True)
         control['presentation_position_goal_checker']=dict(plugin='nav2_controller::SimpleGoalChecker',xy_goal_tolerance=.30,yaw_goal_tolerance=math.pi,stateful=True)
     add('behavior_server',dict(use_sim_time=False,costmap_topic='local_costmap/costmap_raw',
         footprint_topic='local_costmap/published_footprint',cycle_frequency=10.,behavior_plugins=['wait','spin'],

@@ -36,7 +36,7 @@ class PresentationArrivalTrees(unittest.TestCase):
   import math
   params=config(gait_profile='p2-flat-model')['controller_server']['ros__parameters']
   self.assertEqual(params['presentation_goal_checker']['xy_goal_tolerance'],.30)
-  self.assertAlmostEqual(params['presentation_goal_checker']['yaw_goal_tolerance'],math.radians(20))
+  self.assertAlmostEqual(params['presentation_goal_checker']['yaw_goal_tolerance'],math.radians(10))
   self.assertEqual(params['position_goal_checker']['xy_goal_tolerance'],.15)
   self.assertEqual(params['presentation_goal_checker']['plugin'],'nav2_controller::SimpleGoalChecker')
   nav=Path(__file__).resolve().parents[1]/'navigation'

@@ -62,6 +62,8 @@ class Console(Node):
         from audio_feedback import AudioSettings
         self.audio=AudioSettings(runtime/'audio-settings.json')
         self.minimum_speed=minimum_speed;self.footprint=footprint;self.odometry_model=odometry_model;self.gait_profile=gait_profile
+        self.native_reception_spins=gait_profile=='p2-flat-model'
+        self.presentation_yaw_tolerance=math.radians(10)
         self.maximum_speed=.8 if gait_profile=='p2-flat-model' else .30
         self.route_process=None;self.route_directory=None
         self.lock=threading.RLock();self.grid=None;self.path=[];self.gate={};self.truth={};self.goal=None
@@ -320,7 +322,7 @@ class Console(Node):
         source_ns=msg.timestamp.sec*10**9+msg.timestamp.nanosec
         now_ns=self.get_clock().now().nanoseconds
         with self.lock:
-            if self.session.phase not in ('executing','replanning','arrived') or source_ns<self.bt_goal_source_ns or not -.05<=(now_ns-source_ns)/1e9<=.5:return
+            if self.session.phase not in ('executing','replanning') or source_ns<self.bt_goal_source_ns or not -.05<=(now_ns-source_ns)/1e9<=.5:return
             for event in msg.event_log:
                 if event.node_name=='ObservedRouteWait' and event.current_status=='RUNNING':
                     self.bt_recovery_report={'source_ros_ns':str(source_ns),'generation':self.goal_generation,'node':event.node_name,'age_at_receipt_s':(now_ns-source_ns)/1e9}
@@ -725,6 +727,9 @@ class Console(Node):
         arrival_profile=data.get('_arrival_profile','standard')
         if arrival_profile not in ('standard','presentation'):raise ValueError('未知到点停靠方式')
         if arrival_profile=='presentation'and self.gait_profile!='p2-flat-model':raise ValueError('当前配置不支持讲解停靠方式')
+        native_arrival_spin=data.get('_native_arrival_spin',False)
+        if type(native_arrival_spin)is not bool or native_arrival_spin and (self.gait_profile!='p2-flat-model' or arrival_profile!='presentation'):
+            raise ValueError('原地转向停靠方式无效')
         if heading_mode=='position' and self.gait_profile!='p2-flat-model':raise ValueError('当前配置不支持位置目标规划')
         if not self.gate.get('localized'):raise ValueError('定位尚未就绪，请先设置初始位置')
         with self.lock:
@@ -739,6 +744,7 @@ class Console(Node):
                     raise ValueError('Existing mission must finish or be explicitly cancelled')
             generation=self.session.prepare(data,time.monotonic());self.path=[];self.goal=None;self.feedback={}
             self.goal_heading_mode=heading_mode;self.goal_arrival_profile=arrival_profile;self.goal_route=route_poses;self.goal_route_guided=guided;self.goal_rotation=None
+            self.goal_native_arrival_spin=native_arrival_spin
             self.pending_plan_accept=True
             self.op(armed=False,paused=True)
         try:self.wait_planner_active()
@@ -825,7 +831,7 @@ class Console(Node):
             from recovery_tree import recovery_tree
             base_tree=getattr(goal,'behavior_tree','') or str(Path(__file__).with_name('forward_navigation.xml'))
             checker=None
-            if getattr(self,'goal_arrival_profile','standard')=='presentation':checker='presentation_position_goal_checker'if getattr(self,'goal_heading_mode','pose')=='position'else'presentation_goal_checker'
+            if getattr(self,'goal_arrival_profile','standard')=='presentation':checker='presentation_position_goal_checker'if getattr(self,'goal_heading_mode','pose')=='position' or getattr(self,'goal_native_arrival_spin',False) else'presentation_goal_checker'
             goal.behavior_tree=recovery_tree(base_tree,self.runtime/'recovery-trees',self.session.replan_timeout,checker,
                 keep_tracking_on_plan_retry=getattr(self,'gait_profile',None)=='p2-flat-model')
         with self.lock:
