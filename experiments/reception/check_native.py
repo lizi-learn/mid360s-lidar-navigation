@@ -437,7 +437,10 @@ def main():
             call('/api/confirm',{'reception_command':{'command':'resume','epoch':d['reception']['mission']['epoch']}})
             d=complete();events.append({'case':'middle_pause_then_explicit_resume_native','passed':True})
             doc['points']=[point('finish',10.5,2.5,'visit')];doc=save(doc);start(doc)
-            wait(lambda d:d['reception']['mission']['phase']=='navigating',8)
+            # Take over the actual accepted action, including an initial Spin.
+            # Mission stays dispatching until that pivot completes; waiting for
+            # the subsequent translation would skip the turn takeover check.
+            wait(lambda d:d['session']['phase']=='executing'and d['reception']['mission']['phase']in ('dispatching','navigating'),8)
             call('/api/sim_operator',{'mode':'manual'})
             d=wait(lambda d:d['reception']['mission']['phase']=='manual'and not d['session']['cancel_pending']and max(map(abs,d['truth']['command']))<1e-6,8)
             call('/api/sim_operator',{'mode':'navigation_allowed'});d=wait(lambda d:d['session']['navigation_permitted'],3)
