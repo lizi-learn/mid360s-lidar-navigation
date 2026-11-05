@@ -23,6 +23,25 @@ class P2Backend:
         self.http = JsonHTTP(base_url, timeout=timeout)
 
     def raw_status(self): return self.http.request("GET", "/api/status?summary=1")
+    @staticmethod
+    def current_task(status):
+        session=status.get("session") or {};mission=(status.get("reception")or{}).get("mission")or{}
+        if mission.get("phase")in BUSY:
+            return {"type":"mission","phase":mission["phase"],"run_id":mission.get("run_id"),
+                    "route_name":mission.get("route_name"),"point":mission.get("point"),
+                    "station_index":mission.get("index"),"station_total":mission.get("total")}
+        if session.get("cancel_pending"):
+            return {"type":"cancellation","phase":"cancelling","generation":session.get("generation")}
+        phase=session.get("phase")
+        # E-middle sets the session to paused even before any goal exists, and
+        # E-left deliberately does not resume it. This is idle switch state,
+        # not an occupied task. A completed/cancelled goal can also be retained.
+        paused_goal=(phase=="paused" and session.get("goal")is not None
+                     and not session.get("terminal_receipt")
+                     and (not session.get("last_stop")or session["last_stop"].get("phase")=="paused"))
+        if phase in("starting","executing","replanning")or paused_goal:
+            return {"type":"navigation","phase":phase,"generation":session.get("generation")}
+        return None
     def _post(self, path, body):
         token = self.raw_status().get("request_token")
         if not token: raise NavigationError("BACKEND_PROTOCOL", "Console request token missing", status=502)
@@ -47,11 +66,15 @@ class P2Backend:
 
     def status(self):
         s=self.raw_status();pose=s.get("pose");gate=s.get("gate") or {};session=s.get("session") or {}
+        current=self.current_task(s)
+        state=SESSION_STATE.get(session.get("phase"),"unknown")
+        if current and current["type"]=="mission":state=MISSION_STATE[current["phase"]]
+        elif not current and session.get("phase")=="paused":state="idle"
         return {"backend":self.name,"robot_id":s.get("robot_name"),"map_id":(s.get("reception")or{}).get("map_id"),
                 "pose":None if not pose else {"x":pose[0],"y":pose[1],"theta":pose[2],"frame":"map"},
                 "data_fresh":gate.get("data_fresh"),"localized":gate.get("localized"),
                 "operator_mode":session.get("operator_mode"),"navigation_permitted":session.get("navigation_permitted"),
-                "navigation_state":SESSION_STATE.get(session.get("phase"),"unknown"),
+                "navigation_state":state,"task_active":current is not None,"current_task":current,
                 "notice":session.get("notice"),"battery_percent":None,"charging":None,
                 "hardware_estop":None,"software_estop":None,
                 "unknown_fields":["battery_percent","charging","hardware_estop","software_estop"]}
@@ -82,8 +105,9 @@ class P2Backend:
         s=self.raw_status();session=s["session"];mission=s["reception"]["mission"]
         if not session.get("navigation_permitted"):
             raise NavigationError("MANUAL_PRIORITY",session.get("notice") or "E左档才允许导航",status=409)
-        if mission["phase"]in BUSY or session["phase"]in("starting","executing","replanning","paused"):
-            raise NavigationError("TASK_BUSY","Existing navigation must finish or be explicitly cancelled")
+        current=self.current_task(s)
+        if current:
+            raise NavigationError("TASK_BUSY","Existing navigation must finish or be explicitly cancelled",details={"current_task":current})
         if request["kind"] in ("route","visit"):
             d=self._document();body={"command":"start","revision":d["revision"]}
             if request["kind"]=="route":body["route_id"]=request["route_id"]

@@ -55,6 +55,13 @@ E-right/stick takeover terminates automatic intent as before. The Agent does not
 re-arm or replay an ended task on its own. Direction and speech are executed by the
 existing Mission, not by a duplicate Agent sequence.
 
+P2 status includes `task_active` and `current_task` from the native Mission/session,
+including tasks started outside this chat. An E-middle/left transition can leave an
+empty session in `paused` without a goal; the SDK reports that as idle and accepts a
+new explicit visit without a stop/cancel round trip. A real paused task, introduction,
+guest wait, or outstanding cancellation still occupies the task slot. Failed SDK
+submissions remain in the journal as failures and are not running tasks or replayed.
+
 The first version uses saved points and routes. It does not yet create arbitrary
 new multi-point itineraries, edit product knowledge, or capture microphone audio.
 Typing works immediately; spoken-language capture can be added as a separate input

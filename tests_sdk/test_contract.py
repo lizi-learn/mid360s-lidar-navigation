@@ -250,6 +250,45 @@ class P2(unittest.TestCase):
         with self.assertRaises(NavigationError)as exc:self.backend.submit({'kind':'visit','marker':'接待'})
         self.assertEqual(exc.exception.code,'MANUAL_PRIORITY')
         self.assertEqual(self.server.posts,[])
+    def test_empty_paused_switch_state_is_idle_and_accepts_visit_without_stop(self):
+        self.server.state['session'].update(phase='paused',goal=None,cancel_pending=False)
+        status=self.backend.status()
+        self.assertEqual(status['navigation_state'],'idle')
+        self.assertFalse(status['task_active']);self.assertIsNone(status['current_task'])
+        ref=self.backend.submit({'kind':'visit','marker':'接待'})
+        self.assertEqual(ref['type'],'mission')
+        self.assertEqual([path for path,body in self.server.posts],['/api/confirm'])
+        self.assertEqual(self.backend.status()['current_task']['run_id'],ref['run_id'])
+        self.assertEqual(self.backend.status()['navigation_state'],'running')
+    def test_real_paused_goal_and_cancel_ack_pending_are_still_busy(self):
+        for changes in (
+            dict(phase='paused',goal={'x':1,'y':2,'yaw':0},last_stop={'phase':'paused'},terminal_receipt=None),
+            dict(phase='paused',goal=None,cancel_pending=True),
+            dict(phase='executing',goal={'x':1,'y':2,'yaw':0},cancel_pending=False),
+        ):
+            with self.subTest(changes=changes):
+                self.server.state['session'].update(changes)
+                with self.assertRaises(NavigationError)as exc:self.backend.submit({'kind':'visit','marker':'接待'})
+                self.assertEqual(exc.exception.code,'TASK_BUSY')
+                self.assertTrue(exc.exception.details['current_task'])
+                self.assertEqual(self.server.posts,[])
+    def test_retained_terminal_goal_does_not_become_busy_on_switch_pause(self):
+        for changes in (
+            dict(terminal_receipt={'succeeded':True},last_stop=None),
+            dict(terminal_receipt=None,last_stop={'phase':'manual'}),
+            dict(terminal_receipt=None,last_stop={'phase':'cancelled'}),
+        ):
+            with self.subTest(changes=changes):
+                self.server.state['session'].update(phase='paused',goal={'x':1,'y':2,'yaw':0},**changes)
+                self.assertFalse(self.backend.status()['task_active'])
+                self.assertEqual(self.backend.status()['navigation_state'],'idle')
+    def test_paused_mission_still_owns_task_even_when_session_has_no_goal(self):
+        self.server.state['session'].update(phase='paused',goal=None)
+        self.server.state['reception']['mission'].update(phase='paused',run_id='existing-tour')
+        self.assertTrue(self.backend.status()['task_active'])
+        with self.assertRaises(NavigationError)as exc:self.backend.submit({'kind':'visit','marker':'接待'})
+        self.assertEqual(exc.exception.details['current_task']['run_id'],'existing-tour')
+        self.assertEqual(self.server.posts,[])
     def test_navigation_move_not_double_speech(self):
         ref=self.backend.submit(task_request({'kind':'move','target':{'marker':'接待'}}))
         self.assertEqual(ref['type'],'navigation');self.assertEqual([p for p,b in self.server.posts],['/api/goal','/api/confirm'])
