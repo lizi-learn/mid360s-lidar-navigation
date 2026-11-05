@@ -6,7 +6,7 @@ const input=JSON.parse(fs.readFileSync(0,'utf8'));
 const tick=()=>new Promise(r=>setImmediate(r));
 async function page(html,embedded=false,fixture=input.fixture,overrides={},autoEdit=true){
  const requests=[],missions=[],stops=[],mapOperations=[],errors=[],intervals=[];let hold=false,release=null,offline=false;
- let liveStatus={robot_name:'synthetic editor',simulation:true,maps:['fixture'],reception:{map_id:'fixture'},session:{operator_verified:true,operator_mode:'manual',navigation_permitted:false},gait_transport:{controller_instance:1,readiness:3,phase:'stopped'},request_token:'synthetic',map_revision:-1,...overrides};
+ let liveStatus={robot_name:'synthetic editor',simulation:true,mode:'navigation',process_alive:true,maps:['fixture'],reception:{map_id:'fixture'},session:{operator_verified:true,operator_mode:'manual',navigation_permitted:false},gait_transport:{controller_instance:1,readiness:3,phase:'stopped'},request_token:'synthetic',map_revision:-1,...overrides};
  let catalog=structuredClone(fixture);
  const dom=new JSDOM(html,{url:embedded?'http://fixture/api/v1/modules/navigation/workbench?route=tour':'http://fixture/reception?route=tour',runScripts:'dangerously',pretendToBeVisual:true,virtualConsole:new VirtualConsole().on('jsdomError',e=>errors.push(e.message)),beforeParse(w){
   w.ResizeObserver=class{observe(){}};w.HTMLCanvasElement.prototype.getContext=()=>new Proxy({measureText:t=>({width:String(t).length*8})},{get:(o,k)=>o[k]??(()=>{})});w.HTMLCanvasElement.prototype.setPointerCapture=()=>{};w.requestAnimationFrame=()=>1;w.cancelAnimationFrame=()=>{};w.setInterval=(fn,ms)=>{intervals.push([fn,ms]);return intervals.length};w.TextEncoder=TextEncoder;
@@ -17,6 +17,7 @@ async function page(html,embedded=false,fixture=input.fixture,overrides={},autoE
    if(String(url).endsWith('/api/confirm')){missions.push(structuredClone(q));return liveStatus.session.navigation_permitted?response({phase:'navigating'}):{ok:false,json:async()=>({error:'当前 E 档位或摇杆未允许导航'})}}
    if(String(url).endsWith('/api/stop')){stops.push(q);return response({stopped:true})}
    if(r?.operation==='read')return response({document:catalog,voice:{}});
+   if(r?.operation==='map_load'){mapOperations.push(structuredClone(r));liveStatus={...liveStatus,mode:'navigation',process_alive:true,reception:{...liveStatus.reception,map_id:r.map_id}};return response({mode:'navigation'});}
    if(r?.operation==='map_raster')return{ok:false,json:async()=>({error:'synthetic fixture has no raster'})};
    if(['map_observations','map_observations_reset','map_observations_merge'].includes(r?.operation)){mapOperations.push(structuredClone(r));liveStatus.reception={...liveStatus.reception,map_observations:r.operation==='map_observations'?{enabled:r.enabled,cleared_cells:7,pending_cells:3}:r.operation==='map_observations_merge'?{enabled:false,cleared_cells:7,pending_cells:3,merge_requested:true}:{enabled:false,cleared_cells:0,pending_cells:0}};return response(liveStatus.reception.map_observations)}
    assert.equal(r?.operation,'save','Only content saving is allowed in editor fixture');requests.push(structuredClone(q));
@@ -51,6 +52,17 @@ async function page(html,embedded=false,fixture=input.fixture,overrides={},autoE
   assert.equal(mapPage.requests.length,0);assert.equal(mapPage.missions.length,0);assert.equal(mapPage.stops.length,0);
   results.push({variant,case:'map_auto_update_pause_and_versioned_reset_without_navigation_actions',passed:true});mapPage.close();
   const left={operator_verified:true,operator_mode:'navigation_allowed',navigation_permitted:true};
+  const unloaded=await page(embedded?input.embedded:input.direct,embedded,input.fixture,{mode:'idle',process_alive:false,reception:{map_id:'unselected'},session:left});
+  assert.match(unloaded.d.getElementById('navigationMapBadge').textContent,/尚未载入/);
+  assert.equal(unloaded.d.getElementById('loadEditedMap').hidden,false);
+  unloaded.d.getElementById('quickVisit').click();for(let i=0;i<8;i++)await tick();
+  assert.equal(unloaded.missions.length,0);assert.match(unloaded.d.getElementById('toast').textContent,/尚未载入/);
+  unloaded.d.getElementById('loadEditedMap').click();await unloaded.until(()=>unloaded.mapOperations.length===1);for(let i=0;i<8;i++)await tick();
+  assert.equal(unloaded.mapOperations[0].operation,'map_load');assert.equal(unloaded.mapOperations[0].map_id,'fixture');
+  assert.equal(unloaded.missions.length,0,'Loading cannot replay the old Start');
+  assert.match(unloaded.d.getElementById('navigationMapBadge').textContent,/已载入/);assert.equal(unloaded.d.getElementById('loadEditedMap').hidden,true);
+  unloaded.d.getElementById('quickVisit').click();await unloaded.until(()=>unloaded.missions.length===1);
+  assert.equal(unloaded.errors.length,0);results.push({variant,case:'unloaded_map_visible_explicit_load_never_replays_old_start',passed:true});unloaded.close();
   let locked=await page(embedded?input.embedded:input.direct,embedded,input.fixture,{},false);
   assert.ok(locked.d.getElementById('pName').readOnly);assert.ok(locked.d.getElementById('pX').readOnly);assert.ok(locked.d.getElementById('fixedYaw').disabled);assert.ok(locked.d.getElementById('deletePoint').classList.contains('hidden'));assert.ok(locked.d.getElementById('applyPoint').classList.contains('hidden'));
   const mouse=(x,y)=>({pointerId:1,pointerType:'mouse',button:0,clientX:x,clientY:y});let lockedMap=locked.map();lockedMap.onpointerdown(mouse(400,300));lockedMap.onpointermove(mouse(452,326));lockedMap.onpointerup(mouse(452,326));
