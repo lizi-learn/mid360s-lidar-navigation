@@ -84,4 +84,27 @@ class ConsoleCancellationTests(unittest.TestCase):
         self.assertTrue(c.session.cancel_pending);self.assertIs(c.goal_handle,h)
         self.assertEqual(h.cancel_count,1);self.assertEqual(c.emitted[-1],{'armed':False,'paused':True})
 
+class AcceptanceAuthorityClockTests(unittest.TestCase):
+    def test_original_observer_advance_while_waiting_session_lock_does_not_reject_accepted_goal(self):
+        c,g=fixture();c.session.planned(g,8,time.monotonic());c.session.start(g,time.monotonic(),True,True)
+        underlying=c.session.lock
+        class ObservedLock:
+            injected=False
+            def __enter__(self):
+                underlying.acquire()
+                if not self.injected:
+                    self.injected=True;time.sleep(.025);fresh=time.monotonic()
+                    c.session.operator('navigation_allowed',True,True,False,c.session.source,c.session.sequence+1,fresh,fresh)
+            def __exit__(self,*args):underlying.release()
+        c.session.lock=ObservedLock();h=Handle();f=Future();f.set_result(h)
+        c.track_acceptance('nav',g,f)
+        self.assertEqual(c.session.phase,'executing');self.assertEqual(h.cancel_count,0)
+        self.assertTrue(c.emitted[-1]['armed'])
+    def test_manual_takeover_while_waiting_for_acceptance_still_cancels(self):
+        c,g=fixture();c.session.planned(g,8,time.monotonic());c.session.start(g,time.monotonic(),True,True)
+        fresh=time.monotonic();c.session.operator('manual',True,True,False,c.session.source,c.session.sequence+1,fresh,fresh)
+        h=Handle();f=Future();f.set_result(h);c.track_acceptance('nav',g,f)
+        self.assertEqual(c.session.phase,'manual');self.assertEqual(h.cancel_count,1)
+        self.assertFalse(any(v.get('armed')is True for v in c.emitted))
+
 if __name__=='__main__':unittest.main()

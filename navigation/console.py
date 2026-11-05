@@ -320,7 +320,7 @@ class Console(Node):
         source_ns=msg.timestamp.sec*10**9+msg.timestamp.nanosec
         now_ns=self.get_clock().now().nanoseconds
         with self.lock:
-            if self.session.phase not in ('executing','replanning') or source_ns<self.bt_goal_source_ns or not -.05<=(now_ns-source_ns)/1e9<=.5:return
+            if self.session.phase not in ('executing','replanning','arrived') or source_ns<self.bt_goal_source_ns or not -.05<=(now_ns-source_ns)/1e9<=.5:return
             for event in msg.event_log:
                 if event.node_name=='ObservedRouteWait' and event.current_status=='RUNNING':
                     self.bt_recovery_report={'source_ros_ns':str(source_ns),'generation':self.goal_generation,'node':event.node_name,'age_at_receipt_s':(now_ns-source_ns)/1e9}
@@ -632,7 +632,9 @@ class Console(Node):
             if self.session.generation!=generation or self.session.phase!=expected:
                 handle.cancel_goal_async();self.cancel_sent_handles.append(handle)
             elif kind=='nav':
-                if self.session.started(generation,time.monotonic()):self.op(armed=True,paused=False,speed=self.speed_value,arm_generation=generation)
+                with self.session.lock:
+                    started=self.session.started(generation,time.monotonic())
+                if started:self.op(armed=True,paused=False,speed=self.speed_value,arm_generation=generation)
                 else:handle.cancel_goal_async();self.cancel_sent_handles.append(handle)
             return handle
     def action_terminal(self,kind,generation,handle,future):
@@ -773,7 +775,8 @@ class Console(Node):
             # Planning can outlast the cached authority view. Consume the
             # current original receiver packet immediately before starting.
             if ready:self.poll_gait_authority(time.monotonic())
-            self.session.start(generation,time.monotonic(),ready,self.health_ready(),execution_reason=reason)
+            with self.session.lock:
+                self.session.start(generation,time.monotonic(),ready,self.health_ready(),execution_reason=reason)
             self.goal_generation=generation
             pose=self.checked_pose(self.session.goal,require_free=False) if getattr(self,'goal_rotation',None)is not None else self.checked_pose(self.session.goal)
             self.pending_nav_accept=True
@@ -818,7 +821,9 @@ class Console(Node):
         handle=self.track_acceptance('nav',generation,future)
         if handle is None or not handle.accepted:
             self.session.cancel();self.acknowledge_if_quiet(generation);raise ValueError('导航请求被拒绝')
-        if self.session.phase!='executing':raise ValueError('开始过程中已取消或手动接管')
+        with self.lock:
+            if self.session.generation!=generation or self.session.phase not in ('executing','replanning','arrived'):
+                raise ValueError('导航启动未保持有效：'+self.session.message)
         return {'accepted':True,'generation':generation,'hardware_execution_enabled':bool(gait and gait.status()['navigation_owned'])}
     def reception_pose(self):
         if not self.health_ready():return None

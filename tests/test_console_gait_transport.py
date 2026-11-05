@@ -198,4 +198,43 @@ class ConsoleGaitTests(unittest.TestCase):
         self.assertTrue(c.session.cancel_pending);self.assertEqual(c.emitted[-1],{'armed':False,'paused':True})
         self.assertFalse(any(e[0]=='arm' for e in c.gait.events))
 
+class ConfirmAcceptancePhaseTests(unittest.TestCase):
+    setup_console=ConsoleGaitTests.setup_console
+    def accepted_console(self,phase):
+        from pathlib import Path
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        import tempfile
+        c,g=self.setup_console();tmp=tempfile.TemporaryDirectory();self.addCleanup(tmp.cleanup)
+        c.runtime=Path(tmp.name);c.get_clock=lambda:SimpleNamespace(now=lambda:SimpleNamespace(nanoseconds=time.monotonic_ns()))
+        globals_=c.confirm_goal.__func__.__globals__
+        globals_['Path']=Path;globals_['__file__']=str(Path(__file__).resolve().parents[1]/'navigation/console.py')
+        globals_['NavigateToPose']=SimpleNamespace(Goal=SimpleNamespace)
+        c.gait.operator_authority=lambda:dict(mode='navigation_allowed',verified=True,connected=True,activity=False,source=c.session.source,sequence=c.session.sequence+1,stamp=time.monotonic(),reply_stamp=None,source_transport='native_packet_snapshot')
+        c.gait.status=lambda:dict(phase=c.gait.phase,cancel_pending=False,navigation_owned=c.gait.phase=='active')
+        handle=Handle();future=Future();future.set_result(handle)
+        c.nav=SimpleNamespace(wait_for_server=lambda timeout_sec:True,send_goal_async=lambda goal,feedback_callback:future)
+        original=c.track_acceptance
+        def acceptance(*args):
+            result=original(*args)
+            if phase=='replanning':c.session.obstacle(time.monotonic())
+            elif phase=='arrived':c.session.finished(g,True)
+            elif phase=='manual':
+                fresh=time.monotonic();c.session.operator('manual',True,True,False,c.session.source,c.session.sequence+1,fresh,fresh)
+            return result
+        c.track_acceptance=acceptance
+        return c,g,handle
+    def test_accepted_goal_can_enter_checked_obstacle_wait_before_http_returns(self):
+        c,g,h=self.accepted_console('replanning');r=c.confirm_goal({'generation':g})
+        self.assertTrue(r['accepted']);self.assertEqual(c.session.phase,'replanning');self.assertEqual(h.cancel_count,0)
+        self.assertTrue(c.session.status(time.monotonic())['force_navigation_zero'])
+    def test_actual_success_before_http_returns_is_accepted_without_new_motion(self):
+        c,g,h=self.accepted_console('arrived');r=c.confirm_goal({'generation':g})
+        self.assertTrue(r['accepted']);self.assertEqual(c.session.phase,'arrived')
+        self.assertTrue(c.session.status(time.monotonic())['force_navigation_zero'])
+    def test_actual_manual_takeover_before_http_returns_is_not_accepted(self):
+        c,g,h=self.accepted_console('manual')
+        with self.assertRaises(ValueError):c.confirm_goal({'generation':g})
+        self.assertEqual(c.session.phase,'manual');self.assertTrue(c.session.status(time.monotonic())['force_navigation_zero'])
+
 if __name__=='__main__':unittest.main()
