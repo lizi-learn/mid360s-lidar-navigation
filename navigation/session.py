@@ -71,6 +71,8 @@ class NavigationSession:
             return self.status(now)
     def prepare(self,goal,now):
         with self.lock:
+            expected=goal.get('_sdk_expected_generation')
+            if expected is not None and (type(expected) is not int or expected!=self.generation):raise ValueError('SDK task generation changed; goal was not replaced')
             if self.cancel_pending:raise ValueError('正在确认上个目标已取消，请稍候')
             if self.phase in ACTIVE:raise ValueError('请先取消当前导航再选择新目标')
             if not all(math.isfinite(float(goal[k])) for k in ('x','y','yaw')):raise ValueError('目标坐标无效')

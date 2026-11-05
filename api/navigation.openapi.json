@@ -1,0 +1,810 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "P2 Navigation SDK / NavBridge",
+    "version": "0.1.0",
+    "description": "Unified P2 and documented WATER subset. Coordinates metres/radians. Static docs never connect to hardware. Not a vendor-certified all-product API."
+  },
+  "servers": [
+    {
+      "url": "http://127.0.0.1:18940",
+      "description": "Local companion"
+    }
+  ],
+  "security": [
+    {
+      "bearerAuth": []
+    },
+    {}
+  ],
+  "components": {
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": [
+              "code",
+              "message",
+              "details"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "details": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      },
+      "Target": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "marker"
+            ],
+            "properties": {
+              "marker": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 80
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "x",
+              "y"
+            ],
+            "properties": {
+              "x": {
+                "type": "number"
+              },
+              "y": {
+                "type": "number"
+              },
+              "theta": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "minimum": -3.141592653589793,
+                "maximum": 3.141592653589793
+              }
+            }
+          }
+        ]
+      },
+      "TaskRequest": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "target"
+            ],
+            "properties": {
+              "kind": {
+                "const": "move"
+              },
+              "target": {
+                "$ref": "#/components/schemas/Target"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "marker"
+            ],
+            "properties": {
+              "kind": {
+                "const": "visit"
+              },
+              "marker": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 80
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "route_id"
+            ],
+            "properties": {
+              "kind": {
+                "const": "route"
+              },
+              "route_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              }
+            }
+          }
+        ]
+      },
+      "Task": {
+        "type": "object",
+        "required": [
+          "id",
+          "state",
+          "backend",
+          "request",
+          "created_at",
+          "updated_at",
+          "native_ref"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "dispatching",
+              "accepted",
+              "running",
+              "blocked",
+              "paused",
+              "presenting",
+              "waiting",
+              "dwelling",
+              "succeeded",
+              "failed",
+              "cancelled",
+              "interrupted",
+              "unknown"
+            ]
+          },
+          "backend": {
+            "type": "string"
+          },
+          "request": {
+            "$ref": "#/components/schemas/TaskRequest"
+          },
+          "native_ref": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "created_at": {
+            "type": "number"
+          },
+          "updated_at": {
+            "type": "number"
+          },
+          "observation_stale": {
+            "type": "boolean"
+          },
+          "observation": {
+            "type": "object"
+          }
+        }
+      },
+      "Marker": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "readOnly": true
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "x": {
+            "type": "number"
+          },
+          "y": {
+            "type": "number"
+          },
+          "theta": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "script": {
+            "type": "string"
+          },
+          "dwell": {
+            "type": "number",
+            "minimum": 0
+          },
+          "guest_wait": {
+            "type": "boolean"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "visit",
+              "transit",
+              "home"
+            ]
+          }
+        }
+      },
+      "Object": {
+        "type": "object"
+      },
+      "Objects": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        }
+      },
+      "Empty": {
+        "type": "object",
+        "maxProperties": 0
+      }
+    },
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Required when the gateway is configured with NAVBRIDGE_API_KEY"
+      }
+    }
+  },
+  "paths": {
+    "/v1/capabilities": {
+      "get": {
+        "operationId": "capabilities",
+        "summary": "Provider capabilities",
+        "responses": {
+          "200": {
+            "description": "Result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error; unsupported capabilities are explicit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/status": {
+      "get": {
+        "operationId": "status",
+        "summary": "Measured provider state; absent hardware fields are null",
+        "responses": {
+          "200": {
+            "description": "Result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error; unsupported capabilities are explicit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/maps": {
+      "get": {
+        "operationId": "maps",
+        "summary": "Map list when supported",
+        "responses": {
+          "200": {
+            "description": "Result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Objects"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error; unsupported capabilities are explicit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/markers": {
+      "get": {
+        "operationId": "markers",
+        "summary": "Marker list",
+        "responses": {
+          "200": {
+            "description": "Result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Objects"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error; unsupported capabilities are explicit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "saveMarker",
+        "summary": "Upsert marker by normalized unique name",
+        "responses": {
+          "200": {
+            "description": "Result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Marker"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error; unsupported capabilities are explicit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Marker"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/routes": {
+      "get": {
+        "operationId": "routes",
+        "summary": "Saved routes when supported",
+        "responses": {
+          "200": {
+            "description": "Result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Objects"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error; unsupported capabilities are explicit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/tasks": {
+      "post": {
+        "operationId": "submit",
+        "summary": "Dispatch move, visit or saved route; accepted is not arrival",
+        "responses": {
+          "202": {
+            "description": "Result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Task"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error; unsupported capabilities are explicit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaskRequest"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "description": "Persisted per state directory. Same key + different request returns 409. No automatic replay after uncertain dispatch."
+          }
+        ]
+      }
+    },
+    "/v1/tasks/{task_id}": {
+      "get": {
+        "operationId": "task",
+        "summary": "Observe this task only",
+        "responses": {
+          "200": {
+            "description": "Result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Task"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error; unsupported capabilities are explicit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/v1/tasks/{task_id}/cancel": {
+      "post": {
+        "operationId": "cancelTask",
+        "summary": "Conditional task control; supported operations depend on provider",
+        "responses": {
+          "200": {
+            "description": "Result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Task"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error; unsupported capabilities are explicit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Empty"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/v1/tasks/{task_id}/pause": {
+      "post": {
+        "operationId": "pauseTask",
+        "summary": "Conditional task control; supported operations depend on provider",
+        "responses": {
+          "200": {
+            "description": "Result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Task"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error; unsupported capabilities are explicit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Empty"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/v1/tasks/{task_id}/resume": {
+      "post": {
+        "operationId": "resumeTask",
+        "summary": "Conditional task control; supported operations depend on provider",
+        "responses": {
+          "200": {
+            "description": "Result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Task"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error; unsupported capabilities are explicit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Empty"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/v1/tasks/{task_id}/continue": {
+      "post": {
+        "operationId": "continueTask",
+        "summary": "Conditional task control; supported operations depend on provider",
+        "responses": {
+          "200": {
+            "description": "Result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Task"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error; unsupported capabilities are explicit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Empty"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/v1/stop": {
+      "post": {
+        "operationId": "stop",
+        "summary": "Global current navigation stop; never motor power-off",
+        "responses": {
+          "200": {
+            "description": "Result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error; unsupported capabilities are explicit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Empty"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/markers/{name}": {
+      "delete": {
+        "operationId": "deleteMarker",
+        "summary": "Delete marker; referenced P2 points are not silently removed from routes",
+        "responses": {
+          "200": {
+            "description": "Result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error; unsupported capabilities are explicit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    }
+  }
+}
