@@ -5,6 +5,10 @@ import urllib.parse
 import urllib.request
 from .errors import NavigationError
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
 class JsonHTTP:
     def __init__(self, base_url, *, api_key=None, timeout=20., maximum_bytes=2000000):
         url = urllib.parse.urlsplit(base_url)
@@ -24,13 +28,17 @@ class JsonHTTP:
             h["Content-Type"] = "application/json"
         req = urllib.request.Request(self.base + path, data=raw, headers=h, method=method)
         try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as response:
+            with urllib.request.build_opener(_NoRedirect()).open(req, timeout=self.timeout) as response:
                 body = response.read(self.maximum_bytes + 1)
         except urllib.error.HTTPError as exc:
             body = exc.read(self.maximum_bytes + 1)
             try: error = json.loads(body).get("error", {})
             except (ValueError, UnicodeError): error = {}
             if not isinstance(error, dict): error = {"message": str(error)}
+            if method != "GET" and (exc.code >= 500 or 300 <= exc.code < 400):
+                raise NavigationError("UPSTREAM_UNCERTAIN", "Upstream failure after mutation; outcome unknown and not replayed", status=503) from None
+            if 300 <= exc.code < 400:
+                raise NavigationError("UPSTREAM_REDIRECT", "Redirects are not followed; configure the actual backend URL", status=502) from None
             raise NavigationError(error.get("code", "UPSTREAM_REJECTED"),
                                   error.get("message", "HTTP request rejected"),
                                   status=exc.code, details=error.get("details")) from None

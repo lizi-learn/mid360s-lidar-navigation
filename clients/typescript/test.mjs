@@ -4,6 +4,7 @@ import {spawn} from 'node:child_process';
 import {mkdtemp, rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
+import {createServer} from 'node:http';
 import {NavigationClient, NavigationError} from './index.js';
 let process, directory, client;
 before(async () => {
@@ -29,4 +30,19 @@ test('Marker CRUD preserves Unicode',async()=>{
   await client.saveMarker({name:'节点 &? 中文',x:1,y:2,theta:0});
   assert.ok((await client.markers()).some(m=>m.name==='节点 &? 中文'));
   await client.deleteMarker('节点 &? 中文');
+});
+
+test('HTTP mutation 500 is uncertain and redirects are not followed',async()=>{
+  const calls=[];const upstream=createServer((request,response)=>{
+    calls.push(request.url);
+    if(request.method==='POST'){response.writeHead(500,{'Content-Type':'application/json'});response.end('{"error":"after dispatch"}');}
+    else{response.writeHead(302,{Location:'/unexpected'});response.end();}
+  });
+  await new Promise(resolve=>upstream.listen(0,'127.0.0.1',resolve));
+  try{
+    const nav=new NavigationClient('http://127.0.0.1:'+upstream.address().port);
+    await assert.rejects(nav.move({x:1,y:0}),e=>e.code==='UPSTREAM_UNCERTAIN');
+    await assert.rejects(nav.status(),e=>e.code==='UPSTREAM_UNAVAILABLE');
+    assert.deepEqual(calls,['/v1/tasks','/v1/status']);
+  }finally{await new Promise(resolve=>upstream.close(resolve));}
 });

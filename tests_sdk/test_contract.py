@@ -307,4 +307,26 @@ class Correlation(unittest.TestCase):
         with self.assertRaises(NavigationError)as exc:c.move(marker='x')
         self.assertEqual(exc.exception.code,'UPSTREAM_UNCERTAIN');self.assertEqual(len(calls),1)
 
+class HTTPOutcome(unittest.TestCase):
+    def server(self):
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self,*_):pass
+            def do_GET(self):
+                self.server.calls.append(self.path)
+                self.send_response(302);self.send_header('Location','/must-not-follow');self.end_headers()
+            def do_POST(self):
+                self.server.calls.append(self.path)
+                self.send_response(500);self.end_headers();self.wfile.write(b'{"error":"failure after dispatch"}')
+        s=ThreadingHTTPServer(('127.0.0.1',0),Handler);s.calls=[]
+        run=Running(s);run.__enter__();self.addCleanup(run.__exit__)
+        return s,JsonHTTP('http://127.0.0.1:'+str(s.server_port),api_key='test-only')
+    def test_redirect_is_not_followed(self):
+        s,c=self.server()
+        with self.assertRaises(NavigationError)as exc:c.request('GET','/redirect')
+        self.assertEqual(exc.exception.code,'UPSTREAM_REDIRECT');self.assertEqual(s.calls,['/redirect'])
+    def test_http_500_mutation_outcome_is_unknown(self):
+        s,c=self.server()
+        with self.assertRaises(NavigationError)as exc:c.request('POST','/dispatch',{})
+        self.assertEqual(exc.exception.code,'UPSTREAM_UNCERTAIN');self.assertEqual(s.calls,['/dispatch'])
+
 if __name__=='__main__':unittest.main()

@@ -17,9 +17,19 @@ export class NavigationClient {
       if (this.apiKey) headers.Authorization = `Bearer ${this.apiKey}`;
       if (data !== undefined) headers['Content-Type'] = 'application/json';
       if (key) headers['Idempotency-Key'] = key;
-      const response = await fetch(this.base + path, {method, headers, signal:controller.signal, ...(data !== undefined ? {body:JSON.stringify(data)} : {})});
-      const text = await response.text();
-      if (new TextEncoder().encode(text).length > 2000000) throw new NavigationError('RESPONSE_TOO_LARGE','Response limit exceeded',502);
+      const response = await fetch(this.base + path, {method, headers, redirect:'error', signal:controller.signal, ...(data !== undefined ? {body:JSON.stringify(data)} : {})});
+      const reader = response.body?.getReader(), chunks = []; let size = 0;
+      if (reader) { try { while (true) { const {done,value} = await reader.read(); if (done) break;
+        size += value.byteLength;
+        if (size > 2000000) { await reader.cancel(); throw new NavigationError('RESPONSE_TOO_LARGE','Response limit exceeded',502); }
+        chunks.push(value);
+      } } finally { reader.releaseLock(); } }
+      const bytes = new Uint8Array(size); let offset = 0;
+      for (const chunk of chunks) { bytes.set(chunk,offset); offset += chunk.byteLength; }
+      let text;
+      try { text = new TextDecoder('utf-8',{fatal:true}).decode(bytes); }
+      catch { throw new NavigationError(method === 'GET' ? 'INVALID_RESPONSE' : 'UPSTREAM_UNCERTAIN','Invalid UTF-8 reply',502); }
+      if (method !== 'GET' && response.status >= 500) throw new NavigationError('UPSTREAM_UNCERTAIN','Server error after mutation; outcome unknown',503);
       let result;
       try { result = JSON.parse(text); }
       catch { throw new NavigationError(method === 'GET' ? 'INVALID_RESPONSE' : 'UPSTREAM_UNCERTAIN','Invalid JSON reply; mutations are not replayed',502); }

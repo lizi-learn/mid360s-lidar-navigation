@@ -4,8 +4,8 @@
 
 已执行：
 
-- 40项Python SDK合同测试通过：真实loopback HTTP/TCP，中文和特殊字符，每个UTF-8/JSON切分点，粘包/分帧，订阅，任务生命周期，幂等并发，未知派发不重放，重启不自动继续，点位CRUD，P2状态/导览适配与签名向量。
-- 3项Node客户端测试通过：跨进程启动Python网关，实际HTTP任务、等待超时和中文点位CRUD。
+- 42项Python SDK合同测试通过：真实loopback HTTP/TCP，中文和特殊字符，每个UTF-8/JSON切分点，粘包/分帧，订阅，任务生命周期，幂等并发，未知派发不重放，重启不自动继续，HTTP500结果未知与禁止隐式重定向，点位CRUD，P2状态/导览适配与签名向量。
+- 4项Node客户端测试通过：跨进程启动Python网关，实际HTTP任务、等待超时和中文点位CRUD。
 - 原项目484项回归测试通过（原478项加6项SDK条件控制测试）。
 - 构建实际Python wheel与TypeScript TGZ；独立venv安装wheel，实际CLI可运行；TypeScript示例按类型声明进行编译检查。
 - 浏览器检查桌面/390px手机手册布局，搜索、Python/TypeScript页签切换、合成演示的开始、阻挡停车、解除、暂停与主动恢复；控制台未记录错误。
