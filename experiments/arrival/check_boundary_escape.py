@@ -12,7 +12,7 @@ mf=out/'synthetic.map';mf.write_text(f'{w} {h} {r} {ox} {oy}\n'+' '.join(map(str
 geometry=out/'synthetic.geometry';geometry.write_text(f'{w} {h} {r} {ox} {oy} 0 0 0\n'+' '.join(map(str,cells)))
 unit=subprocess.run([str(b/'boundary_escape'),str(geometry)],capture_output=True,text=True,timeout=10);(out/'geometry.log').write_text(unit.stdout+unit.stderr);assert unit.returncode==0,unit.stderr
 rows=[]
-for name,enabled,obstacle in [('old',False,False),('fixed',True,False),('fixed_obstacle',True,True)]:
+for name,enabled,obstacle in [('old',False,False),('fixed',True,False),('fixed_obstacle',True,True),('fixed_pose_ripple',True,False)]:
  prefix=out/name
  pp=dict(params);pp['FollowPath']=dict(params['FollowPath'],boundary_forward_escape=enabled)
  pp['GridBased']=dict(planner,boundary_forward_escape=enabled)
@@ -24,6 +24,7 @@ for name,enabled,obstacle in [('old',False,False),('fixed',True,False),('fixed_o
  if not enabled:path.write_text('x,y,yaw\n0,0,0\n.6,0,0\n')
  env=dict(os.environ,P2_TEST_BOUNDARY_ESCAPE='1',P2_TEST_REPLAY_MAP=str(mf),P2_TEST_REPLAY_CSV=str(path),P2_TEST_FIXED_REFERENCE='1',P2_TEST_POSITION_GOAL='1')
  if obstacle:env['P2_TEST_BOUNDARY_OBSTACLE']='1'
+ if name=='fixed_pose_ripple':env.update(P2_TEST_POSE_XY_NOISE='.003',P2_TEST_POSE_YAW_NOISE='.001')
  cmd=[str(b/'tracking_replay'),str(prefix),'straight','0.7','.3','--ros-args','--params-file',str(pf),'--log-level','error']
  run=subprocess.run(cmd,capture_output=True,text=True,env=env,timeout=50);prefix.with_suffix('.log').write_text(run.stdout+run.stderr);assert run.returncode==0,run.stderr
  result=json.loads(prefix.with_suffix('.json').read_text());actual=json.loads(Path(str(prefix)+'.actual-parameters.json').read_text());assert actual['boundary_forward_escape']==enabled and actual['use_collision_detection']

@@ -58,6 +58,8 @@ int main(int argc,char **argv){
  if(argc<5){std::cerr<<"usage: fixture output-prefix path-kind gain delay [--ros-args ...]\n";return 2;}
  const std::string prefix=argv[1],kind=argv[2];const double gain=std::stod(argv[3]),delay=std::stod(argv[4]);
  const double yaw_deadzone=std::getenv("P2_TEST_YAW_DEADZONE")?std::stod(std::getenv("P2_TEST_YAW_DEADZONE")):0.;
+ const double pose_xy_noise=std::getenv("P2_TEST_POSE_XY_NOISE")?std::stod(std::getenv("P2_TEST_POSE_XY_NOISE")):0.;
+ if(!std::isfinite(pose_xy_noise)||pose_xy_noise<0.||pose_xy_noise>.02)throw std::runtime_error("Invalid synthetic XY pose noise");
  const double pose_yaw_noise=std::getenv("P2_TEST_POSE_YAW_NOISE")?std::stod(std::getenv("P2_TEST_POSE_YAW_NOISE")):0.;
  if(!std::isfinite(pose_yaw_noise)||pose_yaw_noise<0.||pose_yaw_noise>.1)throw std::runtime_error("Invalid synthetic pose yaw noise");
  const double input_scale=std::getenv("P2_TEST_INPUT_SCALE")?std::stod(std::getenv("P2_TEST_INPUT_SCALE")):1.;
@@ -136,7 +138,7 @@ int main(int argc,char **argv){
  for(int step=0;step<2400;++step){
   time=step*dt;
   if(rcl_set_ros_time_override(parent->get_clock()->get_clock_handle(),static_cast<int64_t>((time+1.)*1e9))!=RCL_RET_OK)throw std::runtime_error("Fixture clock tick failed");
-  geometry_msgs::msg::PoseStamped pose;pose.header.frame_id="fixture_world";pose.header.stamp=parent->now();pose.pose.position.x=x;pose.pose.position.y=y;pose.pose.orientation=nav2_util::geometry_utils::orientationAroundZAxis(yaw+pose_yaw_noise*std::sin(10.*pi*time));
+  geometry_msgs::msg::PoseStamped pose;pose.header.frame_id="fixture_world";pose.header.stamp=parent->now();pose.pose.position.x=x+pose_xy_noise*std::sin(4*pi*time);pose.pose.position.y=y+pose_xy_noise*std::sin(4*pi*time+.3);pose.pose.orientation=nav2_util::geometry_utils::orientationAroundZAxis(yaw+pose_yaw_noise*std::sin(10.*pi*time));
   if(!actual_progress->check(pose)){std::cout<<"Actual configured progress allowance exceeded\n";break;}
   geometry_msgs::msg::TransformStamped tr;tr.header=pose.header;tr.child_frame_id="fixture_base";tr.transform.translation.x=x;tr.transform.translation.y=y;tr.transform.rotation=pose.pose.orientation;if(!tf->setTransform(tr,"synthetic_planar_fixture"))throw std::runtime_error("fixture TF rejected");
   const double ripple=lateral_ripple*std::sin(4*pi*time);
