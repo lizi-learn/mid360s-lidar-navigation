@@ -5,6 +5,7 @@ takeover, collision and health loss bypass the ramp. Parameters are candidates,
 not measured P2 stopping performance or proof of dynamic balance.
 """
 import math
+from collections import deque
 from gate import Limits
 
 class MotionBuffer:
@@ -81,19 +82,39 @@ class MeasuredMotionMean:
     Step-frequency ripple must not look like sustained opposite yaw. Collision,
     operator and stale-source stops do not pass through this estimator.
     """
-    def __init__(self, time_constant=.15):
+    def __init__(self, time_constant=.15, translation_window=0.):
         if not math.isfinite(time_constant) or time_constant<=0:
             raise ValueError('positive_finite_mean_time_required')
-        self.time_constant=time_constant;self.source=None;self.value=None
+        if not math.isfinite(translation_window) or not 0<=translation_window<=.5:
+            raise ValueError('invalid_translation_window')
+        self.time_constant=time_constant;self.translation_window=translation_window
+        self.source=None;self.value=None;self.translation=deque()
     def step(self, measured, source):
         measured=tuple(measured)
         if len(measured)!=3 or not all(math.isfinite(v) for v in (*measured,source)):
-            self.source=None;self.value=None;return measured
+            self.source=None;self.value=None;self.translation.clear();return measured
         if self.source is not None and source<=self.source:
             return self.value
         if self.source is None or source-self.source>.5:
-            self.value=measured
+            self.value=measured;self.translation.clear()
         else:
             dt=source-self.source;alpha=dt/(self.time_constant+dt)
             self.value=tuple(a+alpha*(b-a) for a,b in zip(self.value,measured))
+        if self.translation_window:
+            self.translation.append((source,*measured[:2]))
+            cutoff=source-self.translation_window
+            while len(self.translation)>2 and self.translation[1][0]<=cutoff:self.translation.popleft()
+            # Signed, source-time-weighted translation over a stride. Averaging
+            # speed magnitudes turns zero-net biped sway into sustained drift;
+            # a short EMA still passes much of that step-frequency component.
+            # Retain the fast yaw estimator and every original freshness check.
+            area=[0.,0.];span=0.
+            for a,b in zip(self.translation,list(self.translation)[1:]):
+                lo=max(a[0],cutoff);dt=b[0]-a[0]
+                if dt<=0 or lo>=b[0]:continue
+                fraction=(lo-a[0])/dt;width=b[0]-lo;span+=width
+                for axis in range(2):
+                    left=a[axis+1]+fraction*(b[axis+1]-a[axis+1])
+                    area[axis]+=.5*(left+b[axis+1])*width
+            if span>1e-9:self.value=(area[0]/span,area[1]/span,self.value[2])
         self.source=source;return self.value

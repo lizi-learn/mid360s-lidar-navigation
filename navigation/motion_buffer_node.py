@@ -15,7 +15,8 @@ class MotionBufferNode(Node):
         super().__init__('gait_motion_buffer')
         native_ramp=self.declare_parameter('native_input_ramp',False).value
         self.buffer=MotionBuffer(accel=.4,decel=.8,angular_accel=.5,ramp_enabled=not native_ramp);self.target=(0.,0.,0.)
-        self.motion_mean=MeasuredMotionMean();self.measured=(0.,0.,0.);self.command_time=0.;self.odom_stamp=0.
+        self.motion_mean=MeasuredMotionMean(translation_window=.5 if native_ramp else 0.);self.measured=(0.,0.,0.);self.command_time=0.;self.odom_stamp=0.
+        self.diagnostic=self.get_logger().info;self.diagnostic_time=0.;self.was_suppressed=False
         self.armed=False;self.paused=True;self.collision=True;self.reference=False;self.reference_time=0.
         self.output=self.create_publisher(Twist,'/p2_nav/cmd_buffered',10)
         self.create_subscription(Twist,'/p2_nav/cmd_raw',self.command,10)
@@ -57,6 +58,15 @@ class MotionBufferNode(Node):
             normal_stop=False,
             frame_verified=self.reference and now-self.reference_time<.2)
         m=Twist();m.linear.x,m.linear.y,m.angular.z=out;self.output.publish(m)
+        suppressed=any(abs(v)>1e-6 for v in self.target) and not any(abs(v)>1e-6 for v in out)
+        diagnostic=getattr(self,'diagnostic',None)
+        if diagnostic and now-getattr(self,'diagnostic_time',0.)>=1. and (suppressed or getattr(self,'was_suppressed',False)):
+            diagnostic('Motion buffer evidence: '+json.dumps(dict(suppressed=suppressed,phase=self.buffer.phase,
+                target=self.target,output=out,measured_mean=self.measured,odom_source_s=self.odom_stamp,
+                odom_age_s=age,command_age_s=now-self.command_time,reference_age_s=now-self.reference_time,
+                armed=self.armed,paused=self.paused,collision=self.collision,reference=self.reference),separators=(',',':')))
+            self.diagnostic_time=now
+        self.was_suppressed=suppressed
 def main():
     rclpy.init();node=MotionBufferNode()
     try:rclpy.spin(node)

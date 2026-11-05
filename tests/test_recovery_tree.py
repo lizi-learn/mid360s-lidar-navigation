@@ -3,6 +3,20 @@ from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'navigation'))
 from recovery_tree import recovery_tree
 class RecoveryTreeTests(unittest.TestCase):
+ def test_p2_action_acknowledgement_budget_does_not_change_sensor_expiry(self):
+  from configure import config
+  self.assertEqual(config(gait_profile='p2-flat-model')['bt_navigator']['ros__parameters']['default_server_timeout'],200)
+  self.assertEqual(config()['bt_navigator']['ros__parameters']['default_server_timeout'],20)
+ def test_path_refresh_retry_does_not_start_a_robot_wait_action(self):
+  nav=Path(__file__).resolve().parents[1]/'navigation'
+  with tempfile.TemporaryDirectory()as d:
+   for name in ['forward_navigation.xml','forward_position_navigation.xml','forward_through_poses.xml','forward_position_through_poses.xml','forward_directed_route.xml']:
+    before=(nav/name).read_bytes();target=recovery_tree(nav/name,d,25.,keep_tracking_on_plan_retry=True);root=ET.parse(target).getroot()
+    retry=root.find('.//RecoveryNode[@name="RetryPathRefresh"]');self.assertIsNotNone(retry)
+    self.assertEqual(retry.get('number_of_retries'),'1');self.assertIsNotNone(retry.find('./Delay/AlwaysSuccess'))
+    self.assertEqual(len(root.findall('.//Wait')),1)
+    self.assertEqual(root.find('.//Wait').get('name'),'ObservedRouteWait')
+    self.assertEqual(before,(nav/name).read_bytes())
  def test_policy_waits_and_cancel_nodes_preserved(self):
   nav=Path(__file__).resolve().parents[1]/'navigation'
   with tempfile.TemporaryDirectory()as d:

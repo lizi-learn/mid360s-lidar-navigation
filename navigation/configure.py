@@ -155,7 +155,7 @@ def config(controller='rpp', tree=None, minimum_speed=.03, footprint_vertices=No
         rotational_acc_lim=.5,simulate_ahead_time=2.,
         global_frame='odom',robot_base_frame='base_link',transform_tolerance=.2))
     add('bt_navigator',dict(use_sim_time=False,global_frame='map',robot_base_frame='base_link',odom_topic='/odom',
-        bt_loop_duration=10,default_server_timeout=20,wait_for_service_timeout=1000,
+        bt_loop_duration=10,default_server_timeout=200 if gait_profile=='p2-flat-model' else 20,wait_for_service_timeout=1000,
         default_nav_to_pose_bt_xml=str(tree or Path(__file__).with_name('forward_navigation.xml')),
         default_nav_through_poses_bt_xml=str(Path(tree).with_name('forward_through_poses.xml') if tree else Path(__file__).with_name('forward_through_poses.xml')),
         plugin_lib_names=['nav2_compute_path_to_pose_action_bt_node','nav2_follow_path_action_bt_node',

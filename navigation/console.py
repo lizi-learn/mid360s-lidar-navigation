@@ -822,7 +822,8 @@ class Console(Node):
             base_tree=getattr(goal,'behavior_tree','') or str(Path(__file__).with_name('forward_navigation.xml'))
             checker=None
             if getattr(self,'goal_arrival_profile','standard')=='presentation':checker='presentation_position_goal_checker'if getattr(self,'goal_heading_mode','pose')=='position'else'presentation_goal_checker'
-            goal.behavior_tree=recovery_tree(base_tree,self.runtime/'recovery-trees',self.session.replan_timeout,checker)
+            goal.behavior_tree=recovery_tree(base_tree,self.runtime/'recovery-trees',self.session.replan_timeout,checker,
+                keep_tracking_on_plan_retry=getattr(self,'gait_profile',None)=='p2-flat-model')
         with self.lock:
             self.bt_goal_source_ns=self.get_clock().now().nanoseconds;self.bt_recovery_report={}
             if self.session.generation!=generation or self.session.phase!='starting':
