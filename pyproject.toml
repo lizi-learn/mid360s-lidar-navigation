@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=65", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "p2-navigation-sdk"
+version = "0.1.0"
+description = "Unified navigation client and documented WATER protocol bridge"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+readme = "docs/sdk/README.md"
+dependencies = []
+
+[project.scripts]
+navbridge = "navigation_sdk.gateway:main"
+
+[tool.setuptools]
+packages = ["navigation_sdk"]

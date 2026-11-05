@@ -1,0 +1,7 @@
+{
+  "name":"@p2-navigation/sdk", "version":"0.1.0", "type":"module",
+  "description":"Unified P2 / WATER navigation HTTP client",
+  "main":"index.js", "types":"index.d.ts", "exports":{".":{"types":"./index.d.ts","import":"./index.js"}},
+  "files":["index.js","index.d.ts","README.md","LICENSE"],
+  "license":"MIT", "engines":{"node":">=18"}, "scripts":{"test":"node --test test.mjs"}
+}

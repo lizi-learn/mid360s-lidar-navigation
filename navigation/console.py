@@ -712,6 +712,11 @@ class Console(Node):
             # including when its persistent revocation status was received late.
             fault=self.gate.get('collision_fault_generation',-1)
             if type(fault)is int:self.session.generation=max(self.session.generation,fault)
+            if '_sdk_expected' in data:
+                from sdk_control import verify
+                verify(self,data['_sdk_expected'])
+                if self.reception.engine.phase in ('dispatching','navigating','presenting','guest_wait','dwell','rerouting','waiting_route','paused'):
+                    raise ValueError('Existing mission must finish or be explicitly cancelled')
             generation=self.session.prepare(data,time.monotonic());self.path=[];self.goal=None;self.feedback={}
             self.goal_heading_mode=heading_mode;self.goal_arrival_profile=arrival_profile;self.goal_route=route_poses;self.goal_route_guided=guided;self.goal_rotation=None
             self.pending_plan_accept=True
@@ -948,13 +953,18 @@ class Console(Node):
         self.reception_voice.auto_prepare(document);return document
     def reception_api_goal(self,data):
         if 'reception_command' in data:raise ValueError('开始任务应通过开始接口提交')
-        if self.reception.engine.phase in ('dispatching','navigating','presenting','guest_wait','dwell','rerouting','waiting_route'):
+        if '_sdk_expected_generation' in data:
+            with self.lock:
+                if data['_sdk_expected_generation']!=self.session.generation:raise ValueError('SDK task generation changed')
+                if self.reception.engine.phase in ('dispatching','navigating','presenting','guest_wait','dwell','rerouting','waiting_route','paused'):
+                    raise ValueError('Existing mission must finish or be explicitly cancelled')
+        elif self.reception.engine.phase in ('dispatching','navigating','presenting','guest_wait','dwell','rerouting','waiting_route'):
             self.stop()
         return self.set_goal(data)
     def reception_api_confirm(self,data):
         if 'reception_command' in data:
-            if set(data)!={'reception_command'}:raise ValueError('导览命令不能与单点开始混合提交')
-            return self.reception.command(data['reception_command'])
+            from sdk_control import mission
+            return mission(self,data)
         return self.confirm_goal(data)
     def on_feedback(self,feedback,generation=None):
         f=feedback.feedback;self.feedback={'distance_remaining':f.distance_remaining,'recoveries':f.number_of_recoveries}
@@ -1072,6 +1082,9 @@ def main():
                 self.send(html.encode(),content_type='text/html; charset=utf-8')
             elif urlsplit(self.path).path=='/api/status':self.send(node.status(include_cells=parse_qs(urlsplit(self.path).query).get('summary')!=['1']))
             elif urlsplit(self.path).path=='/api/reception':self.send(node.reception_status(full=True))
+            elif self.path=='/api/sdk/version':
+                from sdk_control import version
+                self.send(version())
             elif self.path=='/api/map':self.send({'revision':node.display_revision(),'map':node.status()['map']})
             else:self.send({'error':'Not found'},404)
         def do_POST(self):
@@ -1087,7 +1100,7 @@ def main():
                     '/api/save':lambda:save_resource(node,d),'/api/goal':lambda:node.reception_api_goal(d),'/api/rotate':lambda:node.prepare_rotation(d),
                     '/api/confirm':lambda:node.reception_api_confirm(d),'/api/sim_operator':lambda:node.simulation_operator(d),
                     '/api/initialpose':lambda:node.set_pose(d),'/api/speed':lambda:node.speed(d['speed'],d.get('velocity_scale')),
-                    '/api/stop':lambda:(node.stop() or {'stopped':True})}
+                    '/api/stop':lambda:__import__('sdk_control').stop(node,d)}
                 if self.path not in routes:self.send({'error':'Not found'},404);return
                 self.send(routes[self.path]())
             except (ValueError,KeyError,TypeError,TimeoutError) as e:self.send({'error':str(e)},409)

@@ -24,6 +24,10 @@ V2 固定55cm方块、实时射线清障、点位40cm/20°到达容差、S形前
 - [历史验证与已知问题](docs/VALIDATION.md)
 - [第三方依赖与许可](THIRD_PARTY_NOTICES.md)
 
+## 统一导航 SDK 与完整手册（V2 之后的扩展）
+
+[在线文档站](https://navigation.bismih520.com/)提供完整导航手册、Python / TypeScript SDK、OpenAPI 和明确范围的 WATER 兼容子集。入门见 [SDK 指南](docs/sdk/README.md)，详细流程见 [项目手册](docs/sdk/PROJECT_GUIDE.md)，云迹适配边界见 [兼容矩阵](docs/sdk/COMPATIBILITY.md)。SDK 0.1.0 独立版本，不移动 `baseline-v1` / `baseline-v2`；本次没有替换实机控制程序。已验证的是本地合同与既有会话回归，尚未验证同事实际 SDK / 云迹固件互通，未宣称全系列完整兼容。
+
 ## 能做什么
 
 | 功能 | 范围 |
