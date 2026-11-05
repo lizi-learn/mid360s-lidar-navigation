@@ -43,3 +43,17 @@ class RelativeTests(unittest.TestCase):
         before=node.reception_catalog.read(node.map_name)
         with self.assertRaises(ValueError):node.reception.command(dict(command='start',point_ids=[before['points'][0]['id'],'missing'],revision=before['revision']))
         self.assertEqual(node.reception.engine.phase,'idle')
+    def test_phase_compare_is_atomic_with_prepare_even_when_generation_did_not_change(self):
+        from session import NavigationSession
+        import time
+        s=NavigationSession();s.phase='arrived';s.generation=3
+        now=time.monotonic();s.operator('manual',True,True,False,1,1,now,now)
+        s.operator('navigation_allowed',True,True,False,1,2,now+.01,now+.01)
+        with self.assertRaises(ValueError):s.prepare(dict(x=1,y=0,yaw=0,_sdk_expected_generation=3,_sdk_expected_phase='arrived'),now+.01)
+        self.assertEqual(s.generation,3);self.assertEqual(s.phase,'manual')
+    def test_rotation_endpoint_preserves_previous_phase_compare(self):
+        setup=rotations.RotationTests();c=setup.setup_console();self.addCleanup(setup.doCleanups)
+        c.reception_pose=lambda:[0.,0.,0.];c.checked_pose=lambda d,**kw:object()
+        c.session.phase='manual'
+        with self.assertRaises(ValueError):c.prepare_rotation(dict(radians=1.,_sdk_expected_phase='arrived'))
+        self.assertFalse(c.nav.sent)

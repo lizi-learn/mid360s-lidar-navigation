@@ -14,6 +14,9 @@ for kind,key,spec in [('forward','meters',{'type':'number','exclusiveMinimum':0,
                       ('rotate','radians',{'type':'number','minimum':-100000,'maximum':100000,'not':{'const':0},'description':'Accumulated angle, left positive; retain full revolutions.'}),
                       ('tour','markers',{'type':'array','minItems':1,'maxItems':100,'items':{'type':'string','minLength':1,'maxLength':80}})]:
     S['TaskRequest']['oneOf'].append(dict(type='object',additionalProperties=False,required=['kind',key],properties={'kind':{'const':kind},key:spec}))
+S['RelativeAction']={'oneOf':S['TaskRequest']['oneOf'][3:5]}
+S['TaskRequest']['oneOf'].append(dict(type='object',additionalProperties=False,required=['kind','steps'],properties={
+    'kind':{'const':'sequence'},'steps':{'type':'array','minItems':2,'maxItems':100,'items':{'$ref':'#/components/schemas/RelativeAction'}}}))
 def ref(name):return {'$ref':'#/components/schemas/'+name}
 def operation(name,summary,response='Object',body=None,parameter=None,status='200'):
     obj={'operationId':name,'summary':summary,'responses':{status:{'description':'Result','content':{'application/json':{'schema':ref(response)}}},'default':{'description':'Structured error; unsupported capabilities are explicit','content':{'application/json':{'schema':ref('Error')}}}}}

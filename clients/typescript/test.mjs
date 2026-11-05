@@ -40,6 +40,18 @@ test('Relative units, full revolutions and ordered tours retain exact request id
   }
 });
 
+test('Ordered motion is one task and continues independently after first-step success',async()=>{
+  const steps=[{kind:'rotate',radians:-Math.PI/2},{kind:'forward',meters:5}];
+  const t=await client.sequence(steps,{idempotencyKey:'ts-sequence'});
+  assert.deepEqual(t.request,{kind:'sequence',steps});
+  await client.request('POST','/mock/advance',{state:'succeeded'});
+  const deadline=Date.now()+3000;
+  while((await client.task(t.id)).sequence.index<1&&Date.now()<deadline)await new Promise(resolve=>setTimeout(resolve,20));
+  assert.equal((await client.task(t.id)).sequence.index,1);
+  await client.request('POST','/mock/advance',{state:'succeeded'});
+  assert.equal((await client.wait(t.id,{timeout:3000,interval:20})).state,'succeeded');
+});
+
 test('HTTP mutation 500 is uncertain and redirects are not followed',async()=>{
   const calls=[];const upstream=createServer((request,response)=>{
     calls.push(request.url);

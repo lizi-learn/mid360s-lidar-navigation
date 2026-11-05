@@ -51,6 +51,7 @@ export class NavigationClient {
   forward(meters, {idempotencyKey} = {}) { return this.request('POST','/v1/tasks',{kind:'forward',meters},idempotencyKey); }
   rotate(radians, {idempotencyKey} = {}) { return this.request('POST','/v1/tasks',{kind:'rotate',radians},idempotencyKey); }
   tour(markers, {idempotencyKey} = {}) { return this.request('POST','/v1/tasks',{kind:'tour',markers},idempotencyKey); }
+  sequence(steps, {idempotencyKey} = {}) { return this.request('POST','/v1/tasks',{kind:'sequence',steps},idempotencyKey); }
   task(id) { return this.request('GET',`/v1/tasks/${encodeURIComponent(id)}`); }
   control(id, operation) { return this.request('POST',`/v1/tasks/${encodeURIComponent(id)}/${operation}`,{}); }
   cancel(id) { return this.control(id,'cancel'); }

@@ -8,7 +8,7 @@ from .motion_request import motion_request
 
 
 def fold(value):return re.sub(r'[\s·•，,。！!？?"“”\'‘’]','',unicodedata.normalize('NFKC',value)).casefold()
-def clauses(text):return [x.strip()for x in re.split(r'[，,。；;\n]',unicodedata.normalize('NFKC',text))if x.strip()]
+def clauses(text):return [x.strip()for x in re.split(r'[，,。；;\n]|然后|接着',unicodedata.normalize('NFKC',text))if x.strip()]
 def imperative(clause):
     return re.sub(r'^(?:(?:请|帮我|帮忙|麻烦你?|现在|立即|立刻|马上|先|然后|并|再|接着|你|我想|我要|能不能|可以)\s*)+','',clause.strip())
 def control_question(clause):
@@ -69,8 +69,12 @@ def request_scope(text,points,routes,history=()):
         out['error']='这条指令包含备选动作，请指定要执行的一个目标或明确参观顺序。';return out
     motions=[motion_request(imperative(p))for p in nav_parts]
     if any(plan or error for plan,error in motions):
-        if len(nav_parts)!=1:out['error']='这条指令包含多个相对动作或目的地，请一次指定一个相对动作；未执行部分指令。'
-        else:out['navigation'],out['error']=motions[0]
+        action_parts=[p for p in parts if not requested_controls(p)]
+        actions=[motion_request(imperative(p))for p in action_parts]
+        if any(not plan or error for plan,error in actions):out['error']='组合指令中有动作无法明确识别，本次未执行部分指令；可用“右转90度，然后前进5m”。'
+        elif len(actions)>1:out['navigation']=dict(kind='sequence',steps=[plan for plan,error in actions])
+        elif actions:out['navigation']=actions[0][0]
+        else:out['error']='请明确相对动作。'
         return out
     # Enumerated products must all resolve; an unknown second destination must
     # never silently turn "A, B" into a single visit to A.

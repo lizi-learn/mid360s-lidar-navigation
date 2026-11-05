@@ -11,7 +11,13 @@ class RelativeLanguage(unittest.TestCase):
         for text,radians in [('左转90度',math.pi/2),('原地向右转两圈',-4*math.pi),('顺时针旋转半圈',-math.pi),('转一圈',math.tau),('左转一百八十度',math.pi)]:
             with self.subTest(text=text):self.assertAlmostEqual(self.scope(text)['navigation']['radians'],radians)
     def test_queries_negation_and_compounds_do_not_move_partially(self):
-        for text in ('不要前进2米','前进2米了吗？','为什么左转90度','能不能支持前进2米和转两圈','先前进2米，然后右转90度','前进2','原地转几圈'):
+        for text in ('不要前进2米','前进2米了吗？','为什么左转90度','能不能支持前进2米和转两圈','前进2','原地转几圈'):
+            with self.subTest(text=text):self.assertIsNone(self.scope(text)['navigation'])
+    def test_turn_then_forward_is_one_ordered_task_with_metric_units(self):
+        expected=dict(kind='sequence',steps=[dict(kind='rotate',radians=-math.pi/2),dict(kind='forward',meters=5.)])
+        for text in ('右转90度，然后前进5m','右转90度然后前进5米','先右转90度，接着往前走500厘米'):
+            with self.subTest(text=text):self.assertEqual(self.scope(text)['navigation'],expected)
+        for text in ('右转90度，然后后退5米','右转90度，然后不要前进5米','右转90度，然后去不存在的点'):
             with self.subTest(text=text):self.assertIsNone(self.scope(text)['navigation'])
     def test_product_names_and_order_are_bound_to_real_points(self):
         self.assertEqual(self.scope('去介绍A产品')['navigation'],dict(kind='visit',point_id='a'))
@@ -48,3 +54,17 @@ class RelativeAgent(unittest.TestCase):
         a=self.agent([('relative_motion',{'kind':'forward','value':2.}),'已处理'])
         a.submit('request-1','test','前进2米了吗？');self.wait(a)
         self.assertEqual(self.backend.submissions,0)
+    def test_model_cannot_reverse_or_partially_dispatch_a_sequence(self):
+        steps=[dict(kind='rotate',radians=-math.pi/2),dict(kind='forward',meters=5.)]
+        a=self.agent([('relative_motion',{'kind':'forward','value':5.}),('run_motion_sequence',{'steps':list(reversed(steps))}),'完成'])
+        a.submit('request-1','test','右转90度，然后前进5m');j=self.wait(a)
+        self.assertEqual(j['task']['request'],dict(kind='sequence',steps=steps));self.assertEqual(self.backend.submissions,1)
+        self.assertEqual(self.backend.current['request'],steps[0]);self.assertNotEqual(j['task']['state'],'succeeded')
+    def test_sequence_finishes_after_chat_reply_without_another_model_turn(self):
+        import time
+        a=self.agent(['执行']);a.submit('request-1','test','右转90度，然后前进5m');self.wait(a)
+        self.backend.advance('succeeded');deadline=time.monotonic()+3
+        while self.backend.submissions<2 and time.monotonic()<deadline:time.sleep(.01)
+        self.assertEqual(self.backend.submissions,2);self.backend.advance('succeeded')
+        while a.status('test')['task']['state']!='succeeded'and time.monotonic()<deadline:time.sleep(.01)
+        self.assertEqual(a.status('test')['task']['state'],'succeeded');self.assertEqual(a.llm._index,1)

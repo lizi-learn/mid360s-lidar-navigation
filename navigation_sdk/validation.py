@@ -13,6 +13,11 @@ def text(value, name, maximum=80):
 
 def task_request(data):
     if not isinstance(data, dict): raise NavigationError("INVALID_ARGUMENT", "Expected an object", status=400)
+    if data.get('kind')=='sequence'and set(data)=={'kind','steps'}:
+        steps=data['steps']
+        if not isinstance(steps,list)or not 2<=len(steps)<=100 or any(not isinstance(s,dict)or s.get('kind')not in('forward','rotate')for s in steps):
+            raise NavigationError('INVALID_ARGUMENT','Sequence needs 2 to 100 relative forward/rotate steps',status=400)
+        return dict(kind='sequence',steps=[task_request(s)for s in steps])
     if data.get('kind')in('forward','rotate')and set(data)=={'kind','meters'if data['kind']=='forward'else'radians'}:
         key='meters'if data['kind']=='forward'else'radians';value=finite(data[key],key)
         if value==0 or key=='meters'and value<0:raise NavigationError('INVALID_ARGUMENT','Distance must be positive; rotation must be nonzero',status=400)

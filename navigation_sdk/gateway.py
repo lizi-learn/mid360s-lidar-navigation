@@ -40,7 +40,7 @@ class Handler(BaseHTTPRequestHandler):
                 raise NavigationError('ORIGIN_REJECTED','Use the server-side SDK or a same-origin application',status=403)
             path=urllib.parse.urlsplit(self.path).path;parts=[urllib.parse.unquote(x)for x in path.split('/')if x]
             store=self.server.store;backend=store.backend;method=self.command
-            gets={'/v1/capabilities':backend.capabilities,'/v1/status':backend.status,'/v1/maps':backend.maps,
+            gets={'/v1/capabilities':backend.capabilities,'/v1/status':store.status,'/v1/maps':backend.maps,
                   '/v1/markers':backend.markers,'/v1/routes':backend.routes}
             if method=='GET' and path in gets:return self.send_json(gets[path]())
             if method=='POST' and path=='/v1/tasks':return self.send_json(store.submit(self.body(),self.headers.get('Idempotency-Key')),202)

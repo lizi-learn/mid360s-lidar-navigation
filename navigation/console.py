@@ -677,10 +677,11 @@ class Console(Node):
         with self.goal_request_lock:return self._set_goal(data)
     def prepare_relative(self,data):
         from relative_intent import forward_goal
-        if set(data)-{'meters','_sdk_expected'}:raise ValueError('相对前进字段无效')
+        if set(data)-{'meters','_sdk_expected','_sdk_expected_phase'}:raise ValueError('相对前进字段无效')
         with self.goal_request_lock:
             goal=forward_goal(self.reception_pose(),data.get('meters'))
             if '_sdk_expected'in data:goal['_sdk_expected']=data['_sdk_expected']
+            if '_sdk_expected_phase'in data:goal['_sdk_expected_phase']=data['_sdk_expected_phase']
             return self.set_goal(goal)
     def prepare_rotation(self,data):
         from rotation_intent import rotation_goal
@@ -688,6 +689,7 @@ class Console(Node):
         radians=data.get('radians')
         with self.goal_request_lock:
             goal=rotation_goal(self.reception_pose(),radians)
+            if '_sdk_expected_phase'in data:goal['_sdk_expected_phase']=data['_sdk_expected_phase']
             # The current measured centre stays fixed. Spin uses the live local
             # costmap/footprint and odometry; no global path is invented here.
             self.checked_pose(goal,require_free=False)

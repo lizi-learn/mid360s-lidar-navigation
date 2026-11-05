@@ -72,6 +72,8 @@ class NavigationSession:
             return self.status(now)
     def prepare(self,goal,now):
         with self.lock:
+            phase=goal.get('_sdk_expected_phase')
+            if phase is not None and self.phase!=phase:raise ValueError('SDK previous phase changed; sequence was not resumed')
             expected=goal.get('_sdk_expected_generation')
             if expected is not None and (type(expected) is not int or expected!=self.generation):raise ValueError('SDK task generation changed; goal was not replaced')
             if self.cancel_pending:raise ValueError('正在确认上个目标已取消，请稍候')

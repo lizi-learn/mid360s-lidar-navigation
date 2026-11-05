@@ -59,6 +59,9 @@ Console SDK 扩展1.1还支持 `forward(meters)`、`rotate(radians)` 和 `tour([
 `rotate(-4*math.pi)` 为右转两整圈，保留累计角度。`tour(['A产品','B产品'])` 依次执行两点的介绍、方向和停留，不改写已保存路线。
 这三个能力通过 `relative_forward`、`relative_rotation`、`visit_sequence` 单独报告；WATER provider目前不实现这些新能力。
 
+扩展1.2的 `motion_sequence` 可执行 `sequence([{'kind':'rotate','radians':-math.pi/2},{'kind':'forward','meters':5}])`。
+它是一项任务：收到转向成功回执后才根据实际新朝向准备前进目标。后台工作线程执行后续步骤，无需网页持续轮询或模型再次调用；失败、取消、接管和重启不会重放余下动作。
+
 ## WATER 兼容入口
 
 本项目兼容服务的请求必须以 LF 或 CRLF 结束，命名合同 `navbridge-water-lf/1`。原生 WATER 手册未定义请求结束符，本实现不靠 TCP 分包/静默时间猜测运动请求是否完整。

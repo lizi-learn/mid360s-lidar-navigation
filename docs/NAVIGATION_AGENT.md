@@ -47,6 +47,7 @@ Open `/agent` on the existing Console. Examples:
 - “按20到1的路线参观”：resolve and run the matching saved reverse route.
 - “往前走2米” / “前进50厘米”：resolve a target from the fresh body pose, in metres.
 - “右转90度” / “原地向左转两圈”：signed accumulated rotation; preserve whole turns.
+- “右转90度，然后前进5m”：one ordered relative-motion task; resolve the forward target after actual rotation success.
 - “去介绍A产品” / “去介绍A产品，B产品”：visit named saved points in that order.
 - “现在到哪里了？”
 - “暂停” / “继续导航” / “介绍完了，继续下一站”。
@@ -120,6 +121,17 @@ These new relative/tour capabilities require Console SDK extension1.1; older
 Consoles explicitly advertise them as unsupported. Their local tests include the
 real Console intent methods and Session/Mission with injected receipts; they do not
 claim real walking-distance accuracy or physical multi-turn acceptance.
+Ordered relative-motion sequences require extension1.2 with an atomic previous-phase
+comparison. A gateway worker advances only on actual native success, independently
+of browser/model polling, and journals each transition before dispatch. The entire
+request has one idempotency key. Failure, uncertain acceptance, manual takeover,
+cancel or restart never replays remaining steps. E-middle holds the sequence; E-left
+alone does not continue it. Explicit resume of a paused forward leg keeps its original
+world target; a paused turn up to180degrees uses the remaining measured angle. Paused
+multi-turn rotation lacks native accumulated-angle feedback and reports that specific
+unsupported resume case rather than repeating the entire turn. Stop/cancel remains
+available. Combining point visits with relative actions in the same sequence is not
+implemented; named product sequences remain supported separately.
 This version does not edit product knowledge or capture microphone audio.
 Typing works immediately; spoken-language capture can be added as a separate input
 without changing the navigation task tools. Product information is not invented.

@@ -1,6 +1,6 @@
 """Optional SDK compare-and-control. Existing APP requests remain unchanged."""
 def version():
-    return {'version':'1.1','conditional_task_control':True,
+    return {'version':'1.2','conditional_task_control':True,'conditional_relative_chaining':True,
             'relative_forward':True,'relative_rotation':True,'visit_sequence':True}
 
 def verify(node, expected):

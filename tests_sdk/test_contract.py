@@ -208,7 +208,7 @@ class P2Fixture(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path=='/api/status?summary=1':return self.send(self.server.state)
         if self.path=='/api/reception':return self.send({'document':self.server.document})
-        if self.path=='/api/sdk/version':return self.send({'conditional_task_control':True,'relative_forward':True,'relative_rotation':True,'visit_sequence':True} if self.server.extension else {'error':'missing'},200 if self.server.extension else 404)
+        if self.path=='/api/sdk/version':return self.send({'conditional_task_control':True,'relative_forward':True,'relative_rotation':True,'visit_sequence':True,'conditional_relative_chaining':True} if self.server.extension else {'error':'missing'},200 if self.server.extension else 404)
         self.send({},404)
     def do_POST(self):
         body=json.loads(self.rfile.read(int(self.headers['Content-Length'])));s=self.server.state;m=s['reception']['mission'];ss=s['session']
@@ -217,7 +217,12 @@ class P2Fixture(BaseHTTPRequestHandler):
         expected=body.get('_sdk_expected')
         if expected and expected!={'generation':ss['generation'],'run_id':m['run_id'],'epoch':m['epoch'],'map_id':s['reception']['map_id']}:return self.send({'error':'changed'},409)
         if self.path in('/api/goal','/api/relative-goal','/api/rotate'):
+            if '_sdk_expected_phase'in body and body['_sdk_expected_phase']!=ss['phase']:return self.send({'error':'phase changed'},409)
             if self.path=='/api/goal'and body.get('_sdk_expected_generation')!=ss['generation']:return self.send({'error':'changed'},409)
+            if self.path=='/api/relative-goal':
+                x,y,yaw=s['pose'];ss['goal']={'x':x+body['meters']*math.cos(yaw),'y':y+body['meters']*math.sin(yaw),'yaw':yaw}
+            elif self.path=='/api/rotate':ss['goal']={'x':s['pose'][0],'y':s['pose'][1],'yaw':math.remainder(s['pose'][2]+body['radians'],math.tau)}
+            else:ss['goal']={k:body[k]for k in('x','y','yaw')}
             ss['generation']+=1;ss['phase']='ready';return self.send({'generation':ss['generation']})
         if self.path=='/api/confirm':
             if 'reception_command'in body:

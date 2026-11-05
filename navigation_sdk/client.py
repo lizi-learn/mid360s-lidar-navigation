@@ -39,6 +39,10 @@ class NavigationClient:
         """One temporary ordered visit mission, preserving saved introduction/wait settings."""
         return self._task(dict(kind='tour',markers=markers),idempotency_key)
 
+    def sequence(self, steps, *, idempotency_key=None):
+        """Submit one ordered relative-motion task; later targets resolve after prior success."""
+        return self._task(dict(kind='sequence',steps=steps),idempotency_key)
+
     def _task(self, body, key):
         return self.http.request("POST", "/v1/tasks", body,
                                  {"Idempotency-Key": key} if key else None)

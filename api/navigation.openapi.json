@@ -204,6 +204,27 @@
                 }
               }
             }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "steps"
+            ],
+            "properties": {
+              "kind": {
+                "const": "sequence"
+              },
+              "steps": {
+                "type": "array",
+                "minItems": 2,
+                "maxItems": 100,
+                "items": {
+                  "$ref": "#/components/schemas/RelativeAction"
+                }
+              }
+            }
           }
         ]
       },
@@ -325,6 +346,50 @@
       "Empty": {
         "type": "object",
         "maxProperties": 0
+      },
+      "RelativeAction": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "meters"
+            ],
+            "properties": {
+              "kind": {
+                "const": "forward"
+              },
+              "meters": {
+                "type": "number",
+                "exclusiveMinimum": 0,
+                "maximum": 100000
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "radians"
+            ],
+            "properties": {
+              "kind": {
+                "const": "rotate"
+              },
+              "radians": {
+                "type": "number",
+                "minimum": -100000,
+                "maximum": 100000,
+                "not": {
+                  "const": 0
+                },
+                "description": "Accumulated angle, left positive; retain full revolutions."
+              }
+            }
+          }
+        ]
       }
     },
     "securitySchemes": {
