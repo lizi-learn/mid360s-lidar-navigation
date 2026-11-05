@@ -57,6 +57,8 @@ int main(int argc,char **argv){
  if(argc<5){std::cerr<<"usage: fixture output-prefix path-kind gain delay [--ros-args ...]\n";return 2;}
  const std::string prefix=argv[1],kind=argv[2];const double gain=std::stod(argv[3]),delay=std::stod(argv[4]);
  const double yaw_deadzone=std::getenv("P2_TEST_YAW_DEADZONE")?std::stod(std::getenv("P2_TEST_YAW_DEADZONE")):0.;
+ const double pose_yaw_noise=std::getenv("P2_TEST_POSE_YAW_NOISE")?std::stod(std::getenv("P2_TEST_POSE_YAW_NOISE")):0.;
+ if(!std::isfinite(pose_yaw_noise)||pose_yaw_noise<0.||pose_yaw_noise>.1)throw std::runtime_error("Invalid synthetic pose yaw noise");
  const double input_scale=std::getenv("P2_TEST_INPUT_SCALE")?std::stod(std::getenv("P2_TEST_INPUT_SCALE")):1.;
  const double x_deadzone=std::getenv("P2_TEST_X_DEADZONE")?std::stod(std::getenv("P2_TEST_X_DEADZONE")):0.;
  if(!std::isfinite(input_scale)||input_scale<=0.||input_scale>1.||!std::isfinite(x_deadzone)||x_deadzone<0.||x_deadzone>=.75)throw std::runtime_error("Invalid synthetic input scale/deadzone");
@@ -99,7 +101,7 @@ int main(int argc,char **argv){
    throw std::runtime_error("Loaded controller library identity unavailable");
  const std::string controller_library=controller_image.dli_fname;
  std::ofstream actual(prefix+".actual-parameters.json");actual<<"{";
- const std::vector<std::string> names={"min_lookahead_dist","max_lookahead_dist","lookahead_time","rotate_to_heading_angular_vel","rotate_to_heading_min_angle","regulated_linear_scaling_min_speed","use_collision_detection","allow_reversing","corner_preview","curved_forward_input","minimum_pivot_input","settled_pivot_response","terminal_input_response"};
+ const std::vector<std::string> names={"min_lookahead_dist","max_lookahead_dist","lookahead_time","rotate_to_heading_angular_vel","rotate_to_heading_min_angle","regulated_linear_scaling_min_speed","use_collision_detection","allow_reversing","corner_preview","curved_forward_input","minimum_pivot_input","settled_pivot_response","terminal_input_response","terminal_approach_continuity"};
  for(size_t i=0;i<names.size();++i){if(i)actual<<",";actual<<"\""<<names[i]<<"\":"<<parent->get_parameter("FollowPath."+names[i]).value_to_string();}
  actual<<",\"actual_footprint\":[";auto footprint=cm->getRobotFootprint();for(size_t i=0;i<footprint.size();++i){if(i)actual<<",";actual<<"["<<footprint[i].x<<","<<footprint[i].y<<"]";}actual<<"]}";actual.close();
  pluginlib::ClassLoader<nav2_core::GoalChecker> goals("nav2_core","nav2_core::GoalChecker");
@@ -130,7 +132,7 @@ int main(int argc,char **argv){
  for(int step=0;step<2400;++step){
   time=step*dt;
   if(rcl_set_ros_time_override(parent->get_clock()->get_clock_handle(),static_cast<int64_t>((time+1.)*1e9))!=RCL_RET_OK)throw std::runtime_error("Fixture clock tick failed");
-  geometry_msgs::msg::PoseStamped pose;pose.header.frame_id="fixture_world";pose.header.stamp=parent->now();pose.pose.position.x=x;pose.pose.position.y=y;pose.pose.orientation=nav2_util::geometry_utils::orientationAroundZAxis(yaw);
+  geometry_msgs::msg::PoseStamped pose;pose.header.frame_id="fixture_world";pose.header.stamp=parent->now();pose.pose.position.x=x;pose.pose.position.y=y;pose.pose.orientation=nav2_util::geometry_utils::orientationAroundZAxis(yaw+pose_yaw_noise*std::sin(10.*pi*time));
   if(!actual_progress->check(pose)){std::cout<<"Actual configured progress allowance exceeded\n";break;}
   geometry_msgs::msg::TransformStamped tr;tr.header=pose.header;tr.child_frame_id="fixture_base";tr.transform.translation.x=x;tr.transform.translation.y=y;tr.transform.rotation=pose.pose.orientation;if(!tf->setTransform(tr,"synthetic_planar_fixture"))throw std::runtime_error("fixture TF rejected");
   const double ripple=lateral_ripple*std::sin(4*pi*time);
