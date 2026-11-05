@@ -648,7 +648,7 @@ class Console(Node):
             if kind=='nav' and self.goal_handle is handle:self.goal_handle=None
             self.cancel_sent_handles=[h for h in self.cancel_sent_handles if h is not handle]
             if kind=='nav':
-                if self.session.finished(generation,status==4):
+                if self.session.finished(generation,status==4,action_status=status):
                     self.op(armed=False,paused=True);self.last_action=self.session.message
             self.acknowledge_if_quiet(generation)
     def route_final_goal(self,data,final_pose,prefix="RouteDirected"):

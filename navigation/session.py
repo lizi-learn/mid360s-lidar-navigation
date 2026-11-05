@@ -22,6 +22,7 @@ class NavigationSession:
         self.blocked_since=None;self.replans=0;self.clear_since=None;self.last_now=None;self.prepared_with_authority=False
         self.obstruction_policy=None;self.obstruction_decision='continue';self.obstruction_plan_seen=False
         self.last_stop=None
+        self.terminal_receipt=None
     def configure_obstruction(self,policy):
         from reception_routes import ObstructionPolicy
         with self.lock:
@@ -78,6 +79,7 @@ class NavigationSession:
             if not all(math.isfinite(float(goal[k])) for k in ('x','y','yaw')):raise ValueError('目标坐标无效')
             self.generation+=1;self.goal={k:float(goal[k]) for k in ('x','y','yaw')};self.task_kind='navigation'
             self.last_stop=None
+            self.terminal_receipt=None
             self.prepared_with_authority=self._fresh(now);self.phase='planning';self.path_points=0;self._notice('正在预览路径，尚未开始行走');return self.generation
     def planned(self,generation,path_points,now):
         with self.lock:
@@ -140,14 +142,16 @@ class NavigationSession:
             if new_path and clear and self._fresh(now) and self.mode=='navigation_allowed' and not self.manual_activity and self.clear_since is not None and now-self.clear_since>=.75:
                 self.phase='executing';self.blocked_since=None;self._notice('已找到可通行绕行路径，继续导航')
             elif self.replans>=self.max_replans and not clear:self._cancel('多次规划后障碍仍阻挡，速度已归零','blocked')
-    def finished(self,generation,succeeded):
+    def finished(self,generation,succeeded,*,action_status=None):
         with self.lock:
             if generation!=self.generation or self.phase not in ACTIVE:return False
+            self.terminal_receipt=dict(generation=generation,status=action_status,task_kind=self.task_kind,succeeded=succeeded)
             self.phase='arrived' if succeeded else 'blocked';self._notice(('原地转向完成，速度归零' if self.task_kind=='rotation' else '已到达，速度归零') if succeeded else '无法完成导航，速度已归零，请手动处理');return True
     def status(self,now):
         with self.lock:
             fresh=self._fresh(now)
             return {'phase':self.phase,'generation':self.generation,'goal':self.goal,'path_points':self.path_points,'task_kind':self.task_kind,'last_stop':self.last_stop,
+                'terminal_receipt':dict(self.terminal_receipt)if self.terminal_receipt else None,
                 'operator_mode':self.mode if fresh else 'unknown','operator_verified':fresh,
                 'manual_activity':self.manual_activity,'navigation_permitted':fresh and self.mode=='navigation_allowed' and not self.manual_activity,
                 'force_navigation_zero':self.phase!='executing' or not fresh or self.mode!='navigation_allowed' or self.manual_activity,

@@ -35,7 +35,7 @@ def preferred_side(node, pose, goal):
     return side
 
 
-def plan_after_turn(node, engine, epoch, data, original_error, *, now=time.monotonic, sleep=time.sleep):
+def plan_after_turn(node, engine, epoch, data, original_error, *, require_turn_progress=False, now=time.monotonic, sleep=time.sleep):
     """Return a new plan, or None after takeover; never replace the target."""
     def permitted():
         s = node.session_state()
@@ -114,6 +114,12 @@ def plan_after_turn(node, engine, epoch, data, original_error, *, now=time.monot
             return None
         if not permitted():
             return None
+        if require_turn_progress and s['phase'] in ('blocked', 'failed') and (moved is None or abs(moved)<.03):
+            # A tracking abort can still have a valid global plan. Repeating
+            # that unchanged plan after a stationary rejected Spin recreates
+            # the same local deadlock; try the other checked direction first.
+            engine.event('heading_recovery_no_progress',generation=generation,measured_radians=moved)
+            continue
         # A stopped Spin may have genuinely changed the observed direction.
         # Replan against the current data, including after a collision abort.
         # The original goal, yaw, route, and mission epoch stay identical.
