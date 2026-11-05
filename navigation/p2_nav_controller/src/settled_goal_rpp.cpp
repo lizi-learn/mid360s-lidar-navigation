@@ -9,6 +9,7 @@
 #include "tf2/utils.h"
 #include "p2_nav_controller/terminal_heading.hpp"
 #include "p2_nav_controller/terminal_velocity.hpp"
+#include "p2_nav_controller/terminal_input.hpp"
 #include "p2_nav_controller/pivot_breakaway.hpp"
 #include "p2_nav_controller/settled_pivot.hpp"
 #include "p2_nav_controller/reference_goal.hpp"
@@ -33,6 +34,8 @@ class SettledGoalRPP : public nav2_regulated_pure_pursuit_controller::RegulatedP
     node->get_parameter(name+".settled_pivot_response",settled_pivot_response_);
     nav2_util::declare_parameter_if_not_declared(node,name+".curved_forward_input",rclcpp::ParameterValue(0.));
     node->get_parameter(name+".curved_forward_input",curved_forward_input_);
+    nav2_util::declare_parameter_if_not_declared(node,name+".terminal_input_response",rclcpp::ParameterValue(false));
+    node->get_parameter(name+".terminal_input_response",terminal_input_response_);
     if(!std::isfinite(curved_forward_input_)||curved_forward_input_<0.)throw nav2_core::PlannerException("Invalid curved forward input");
     if(!std::isfinite(collision_lookahead_floor_)||collision_lookahead_floor_<0||collision_lookahead_floor_>min_lookahead_dist_)
       throw nav2_core::PlannerException("Invalid collision lookahead floor");
@@ -41,14 +44,14 @@ class SettledGoalRPP : public nav2_regulated_pure_pursuit_controller::RegulatedP
   }
   void setPlan(const nav_msgs::msg::Path &path) override {
     std::lock_guard<std::mutex> lock(phase_mutex_);
-    if (path.poses.empty()) { reference_pivot_=false; phase_.reset(); settled_pivot_.reset(); throw nav2_core::PlannerException("Empty terminal path"); }
+    if (path.poses.empty()) { terminal_input_.reset(); reference_pivot_=false; phase_.reset(); settled_pivot_.reset(); throw nav2_core::PlannerException("Empty terminal path"); }
     auto goal=path.poses.back(); goal.header.frame_id=path.header.frame_id;
     const auto &q=goal.pose.orientation;
     const double norm=std::sqrt(q.x*q.x+q.y*q.y+q.z*q.z+q.w*q.w);
     if (!std::isfinite(norm) || norm<.8 || norm>1.2) { reference_pivot_=false; phase_.reset(); settled_pivot_.reset(); throw nav2_core::PlannerException("Invalid terminal quaternion"); }
     if(!have_goal_||goal.header.frame_id!=goal_.header.frame_id||
       std::hypot(goal.pose.position.x-goal_.pose.position.x,goal.pose.position.y-goal_.pose.position.y)>1e-4||
-      (!position_only_goal_&&std::abs(std::remainder(tf2::getYaw(q)-tf2::getYaw(goal_.pose.orientation),2*std::acos(-1.)))>1e-4)){reference_pivot_=false;response_braking_=false;response_pivot_.reset();breakaway_.reset();settled_pivot_.reset();}
+      (!position_only_goal_&&std::abs(std::remainder(tf2::getYaw(q)-tf2::getYaw(goal_.pose.orientation),2*std::acos(-1.)))>1e-4)){terminal_input_.reset();reference_pivot_=false;response_braking_=false;response_pivot_.reset();breakaway_.reset();settled_pivot_.reset();}
     have_goal_=true;
     phase_.set_goal(goal.pose.position.x,goal.pose.position.y,tf2::getYaw(q),goal.header.frame_id);
     // Pure-pursuit skips repeated-XY poses and can therefore drive forward
@@ -67,8 +70,8 @@ class SettledGoalRPP : public nav2_regulated_pure_pursuit_controller::RegulatedP
     else reference_pivot_=false;
     goal_=goal; plan_source_ns_=rclcpp::Time(path.header.stamp).nanoseconds(); Base::setPlan(path);
   }
-  void activate() override { lateral_motion_.reset(); response_braking_=false; response_pivot_.reset(); reference_pivot_=false; phase_.reset(); breakaway_.reset(); settled_pivot_.reset(); Base::activate(); }
-  void deactivate() override { lateral_motion_.reset(); response_braking_=false; response_pivot_.reset(); reference_pivot_=false; phase_.reset(); breakaway_.reset(); settled_pivot_.reset(); Base::deactivate(); }
+  void activate() override { terminal_input_.reset(); lateral_motion_.reset(); response_braking_=false; response_pivot_.reset(); reference_pivot_=false; phase_.reset(); breakaway_.reset(); settled_pivot_.reset(); Base::activate(); }
+  void deactivate() override { terminal_input_.reset(); lateral_motion_.reset(); response_braking_=false; response_pivot_.reset(); reference_pivot_=false; phase_.reset(); breakaway_.reset(); settled_pivot_.reset(); Base::deactivate(); }
   geometry_msgs::msg::TwistStamped computeVelocityCommands(
       const geometry_msgs::msg::PoseStamped &pose,const geometry_msgs::msg::Twist &speed,
       nav2_core::GoalChecker *checker) override {
@@ -94,6 +97,7 @@ class SettledGoalRPP : public nav2_regulated_pure_pursuit_controller::RegulatedP
     const bool rotate_final=phase_.step(distance,tolerance.position.x,now,aligned);
     const bool position_only=std::abs(tf2::getYaw(tolerance.orientation))>3.14;position_only_goal_=position_only;
     if (position_only || !use_rotate_to_heading_ || (!rotate_final && distance>2.*tolerance.position.x)) {
+      terminal_input_.reset();
       breakaway_.reset();
       return collision_aware_base(pose,speed,checker,distance,base_lock);
     }
@@ -103,7 +107,7 @@ class SettledGoalRPP : public nav2_regulated_pure_pursuit_controller::RegulatedP
     const double bearing=std::remainder(std::atan2(transformed.pose.position.y-pose.pose.position.y,
       transformed.pose.position.x-pose.pose.position.x)-tf2::getYaw(pose.pose.orientation),2.*std::acos(-1.));
     const auto command=terminal_velocity(distance,bearing,error,rotate_final,rotate_to_heading_angular_vel_);
-    const double v=command[0];
+    const double v=terminal_input_response_?terminal_input_.step(command[0],distance,now,desired_linear_vel_):command[0];
     const double pivot_error=rotate_final?error:bearing;
     const double requested_w=v==0.?(settled_pivot_response_?settled_pivot_.step(pivot_error,tf2::getYaw(pose.pose.orientation),speed.angular.z,now,rotate_final?std::abs(tf2::getYaw(tolerance.orientation)):.15):breakaway_.step(command[1],pivot_error,speed.angular.z,
       rotate_final?std::abs(tf2::getYaw(tolerance.orientation)):.15,minimum_pivot_,rotate_to_heading_angular_vel_,now)):command[1];
@@ -332,6 +336,7 @@ class SettledGoalRPP : public nav2_regulated_pure_pursuit_controller::RegulatedP
     }
   }
   bool response_braking_=false;
+  TerminalInput terminal_input_;bool terminal_input_response_=false;
   LateralMotion lateral_motion_;
   double lateral_velocity_=0.;
   bool reference_pivot_=false;geometry_msgs::msg::PoseStamped reference_target_;

@@ -57,6 +57,9 @@ int main(int argc,char **argv){
  if(argc<5){std::cerr<<"usage: fixture output-prefix path-kind gain delay [--ros-args ...]\n";return 2;}
  const std::string prefix=argv[1],kind=argv[2];const double gain=std::stod(argv[3]),delay=std::stod(argv[4]);
  const double yaw_deadzone=std::getenv("P2_TEST_YAW_DEADZONE")?std::stod(std::getenv("P2_TEST_YAW_DEADZONE")):0.;
+ const double input_scale=std::getenv("P2_TEST_INPUT_SCALE")?std::stod(std::getenv("P2_TEST_INPUT_SCALE")):1.;
+ const double x_deadzone=std::getenv("P2_TEST_X_DEADZONE")?std::stod(std::getenv("P2_TEST_X_DEADZONE")):0.;
+ if(!std::isfinite(input_scale)||input_scale<=0.||input_scale>1.||!std::isfinite(x_deadzone)||x_deadzone<0.||x_deadzone>=.75)throw std::runtime_error("Invalid synthetic input scale/deadzone");
  const double lateral_ratio=std::getenv("P2_TEST_LATERAL_RATIO")?std::stod(std::getenv("P2_TEST_LATERAL_RATIO")):0.;
  const double lateral_ripple=std::getenv("P2_TEST_LATERAL_RIPPLE")?std::stod(std::getenv("P2_TEST_LATERAL_RIPPLE")):0.;
  if(!std::isfinite(lateral_ripple)||lateral_ripple<0.||lateral_ripple>.3)throw std::runtime_error("Invalid synthetic lateral ripple");
@@ -96,7 +99,7 @@ int main(int argc,char **argv){
    throw std::runtime_error("Loaded controller library identity unavailable");
  const std::string controller_library=controller_image.dli_fname;
  std::ofstream actual(prefix+".actual-parameters.json");actual<<"{";
- const std::vector<std::string> names={"min_lookahead_dist","max_lookahead_dist","lookahead_time","rotate_to_heading_angular_vel","rotate_to_heading_min_angle","regulated_linear_scaling_min_speed","use_collision_detection","allow_reversing","corner_preview","curved_forward_input","minimum_pivot_input","settled_pivot_response"};
+ const std::vector<std::string> names={"min_lookahead_dist","max_lookahead_dist","lookahead_time","rotate_to_heading_angular_vel","rotate_to_heading_min_angle","regulated_linear_scaling_min_speed","use_collision_detection","allow_reversing","corner_preview","curved_forward_input","minimum_pivot_input","settled_pivot_response","terminal_input_response"};
  for(size_t i=0;i<names.size();++i){if(i)actual<<",";actual<<"\""<<names[i]<<"\":"<<parent->get_parameter("FollowPath."+names[i]).value_to_string();}
  actual<<",\"actual_footprint\":[";auto footprint=cm->getRobotFootprint();for(size_t i=0;i<footprint.size();++i){if(i)actual<<",";actual<<"["<<footprint[i].x<<","<<footprint[i].y<<"]";}actual<<"]}";actual.close();
  pluginlib::ClassLoader<nav2_core::GoalChecker> goals("nav2_core","nav2_core::GoalChecker");
@@ -140,12 +143,13 @@ int main(int argc,char **argv){
   try{if(planning_failed)throw nav2_core::PlannerException("No replay plan");raw=control->computeVelocityCommands(pose,measured,checker.get()).twist;}
   catch(const nav2_core::PlannerException &e){stopped=true;if(++control_errors[e.what()]==1)diagnostics<<"control t="<<time<<" "<<e.what()<<std::endl;if(std::string(e.what()).find("collision")!=std::string::npos)++stops;raw=geometry_msgs::msg::Twist();}
   if(raw.linear.y!=0.)throw std::runtime_error("Unexpected lateral command");
-  auto stamp=static_cast<std::uint64_t>((time+1)*1e9);auto input=native.step(std::min(.75,raw.linear.x),raw.angular.z,v,w,dt,stamp,stamp,true);
+  auto stamp=static_cast<std::uint64_t>((time+1)*1e9);auto input=native.step(std::min(.75,raw.linear.x)*input_scale,raw.angular.z*input_scale,v,w,dt,stamp,stamp,true);
   // Already queued physical response drains after a stop. Erasing it hid the
   // overshoot being measured by this delayed-plant regression.
   latency.push_back({input.policy_x,input.policy_yaw});auto applied=latency.front();latency.pop_front();
   const double response_yaw=std::abs(applied[1])<yaw_deadzone?0.:gain*applied[1];
-  v+=(.95*applied[0]-v)*(1-std::exp(-dt/.2));w+=(response_yaw-w)*(1-std::exp(-dt/.15));
+  const double response_x=std::abs(applied[0])<x_deadzone?0.:.95*applied[0];
+  v+=(response_x-v)*(1-std::exp(-dt/.2));w+=(response_yaw-w)*(1-std::exp(-dt/.15));
   const double old_x=x,old_y=y,old_yaw=yaw;
   const double sideways=lateral_ratio*v+ripple;
   x+=dt*(v*std::cos(yaw+w*dt/2)-sideways*std::sin(yaw+w*dt/2));y+=dt*(v*std::sin(yaw+w*dt/2)+sideways*std::cos(yaw+w*dt/2));yaw=wrap(yaw+w*dt);
