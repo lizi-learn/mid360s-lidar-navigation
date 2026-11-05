@@ -31,6 +31,7 @@
 #include "tf2/utils.h"
 #include "nav2_util/geometry_utils.hpp"
 #include "speed_response.hpp"
+#include "p2_nav_controller/boundary_escape.hpp"
 
 constexpr double pi=3.14159265358979323846,dt=.05,half=.275;
 struct Point{double x,y;double yaw=std::numeric_limits<double>::quiet_NaN();};
@@ -101,7 +102,7 @@ int main(int argc,char **argv){
    throw std::runtime_error("Loaded controller library identity unavailable");
  const std::string controller_library=controller_image.dli_fname;
  std::ofstream actual(prefix+".actual-parameters.json");actual<<"{";
- const std::vector<std::string> names={"min_lookahead_dist","max_lookahead_dist","lookahead_time","rotate_to_heading_angular_vel","rotate_to_heading_min_angle","regulated_linear_scaling_min_speed","use_collision_detection","allow_reversing","corner_preview","curved_forward_input","minimum_pivot_input","settled_pivot_response","terminal_input_response","terminal_approach_continuity"};
+ const std::vector<std::string> names={"min_lookahead_dist","max_lookahead_dist","lookahead_time","rotate_to_heading_angular_vel","rotate_to_heading_min_angle","regulated_linear_scaling_min_speed","use_collision_detection","allow_reversing","corner_preview","curved_forward_input","minimum_pivot_input","settled_pivot_response","terminal_input_response","terminal_approach_continuity","boundary_forward_escape"};
  for(size_t i=0;i<names.size();++i){if(i)actual<<",";actual<<"\""<<names[i]<<"\":"<<parent->get_parameter("FollowPath."+names[i]).value_to_string();}
  actual<<",\"actual_footprint\":[";auto footprint=cm->getRobotFootprint();for(size_t i=0;i<footprint.size();++i){if(i)actual<<",";actual<<"["<<footprint[i].x<<","<<footprint[i].y<<"]";}actual<<"]}";actual.close();
  pluginlib::ClassLoader<nav2_core::GoalChecker> goals("nav2_core","nav2_core::GoalChecker");
@@ -119,6 +120,9 @@ int main(int argc,char **argv){
  bool planning_failed=false;int planning_failures=0,replans=0;std::map<std::string,int> plan_errors,control_errors;std::ofstream diagnostics(prefix+".diagnostics.log");
  double x=0.,y=.25,yaw=.15,v=0.,w=0.,time=0.,rms=0.,max_error=0.,last_sign=0.,progress=0.;int counted=0,reversals=0,collisions=0,stops=0;bool reached=false,obstacle=false,triggered=false,verified_obstacle=false,cleared=false;double obstacle_at=-1,ox=0,oy=0;
  if(std::getenv("P2_TEST_REPLAY_CSV")){x=points.front().x;y=points.front().y;yaw=points.front().yaw;}
+ const bool boundary_case=std::getenv("P2_TEST_BOUNDARY_ESCAPE")!=nullptr;
+ const auto initial_body=p2_nav_controller::boundary_geometry::at(cm->getRobotFootprint(),x,y,yaw);
+ int existing_overlap_samples=0;
  p2_nav::SpeedResponse native;
  std::array<double,2> queued{0.,0.};
  if(const char *initial=std::getenv("P2_TEST_INITIAL_SPEED")) {
@@ -139,6 +143,11 @@ int main(int argc,char **argv){
   geometry_msgs::msg::Twist measured;measured.linear.x=v;measured.linear.y=lateral_ratio*v+ripple;measured.angular.z=w;
   if(step%20==0&&!std::getenv("P2_TEST_FIXED_REFERENCE")){try{auto fresh=planner->createPlan(pose,requested_goal);if(fresh.poses.empty())throw std::runtime_error("Empty replan");control->setPlan(fresh);planning_failed=false;++replans;}catch(const std::exception &e){planning_failed=true;++planning_failures;if(++plan_errors[e.what()]==1)diagnostics<<"plan t="<<time<<" "<<e.what()<<std::endl;}}
   if(checker->isGoalReached(pose.pose,requested_goal.pose,measured)){reached=true;break;}
+  if(std::getenv("P2_TEST_BOUNDARY_OBSTACLE")&&!triggered&&time>=.25) {
+    triggered=true;obstacle=true;obstacle_at=time;ox=.75;oy=0.;
+    for(unsigned iy=0;iy<map->getSizeInCellsY();++iy)for(unsigned ix=0;ix<map->getSizeInCellsX();++ix){double px,py;map->mapToWorld(ix,iy,px,py);if(std::abs(px-ox)<.08&&std::abs(py-oy)<.15)map->setCost(ix,iy,254);}
+    unsigned ix,iy;if(!map->worldToMap(ox,oy,ix,iy)||map->getCost(ix,iy)!=254)throw std::runtime_error("Boundary forward obstacle not applied");verified_obstacle=true;
+  }
   if(kind=="obstacle"&&!triggered&&x>=6.){triggered=true;obstacle=true;obstacle_at=time;ox=x+.95;oy=0.;paint(true,ox,oy);unsigned ix,iy;if(!map->worldToMap(ox,oy,ix,iy)||map->getCost(ix,iy)!=254)throw std::runtime_error("obstacle did not reach actual costmap");verified_obstacle=true;}
   if(obstacle&&time-obstacle_at>=2.){obstacle=false;cleared=true;paint(false,0,0);}
   geometry_msgs::msg::Twist raw;bool stopped=false;
@@ -162,14 +171,23 @@ int main(int argc,char **argv){
   for(int sub=1;sub<=5&&!intrusion;++sub){
   const double f=sub/5.,sx=old_x+(x-old_x)*f,sy=old_y+(y-old_y)*f,syaw=old_yaw+wrap(yaw-old_yaw)*f;
   int lx=static_cast<int>((sx-.425-map->getOriginX())/.05),ux=static_cast<int>((sx+.425-map->getOriginX())/.05),ly=static_cast<int>((sy-.425-map->getOriginY())/.05),uy=static_cast<int>((sy+.425-map->getOriginY())/.05);
-  for(int iy=ly;iy<=uy&&!intrusion;iy++)for(int ix=lx;ix<=ux;ix++){if(ix<0||iy<0||ix>=static_cast<int>(map->getSizeInCellsX())||iy>=static_cast<int>(map->getSizeInCellsY())){intrusion=true;break;}if(map->getCost(ix,iy)>=254){double cx,cy;map->mapToWorld(ix,iy,cx,cy);if(cell_overlap(sx,sy,syaw,cx,cy,.025)){intrusion=true;break;}}}
+  for(int iy=ly;iy<=uy&&!intrusion;iy++)for(int ix=lx;ix<=ux;ix++){if(ix<0||iy<0||ix>=static_cast<int>(map->getSizeInCellsX())||iy>=static_cast<int>(map->getSizeInCellsY())){intrusion=true;break;}if(map->getCost(ix,iy)>=254){double cx,cy;map->mapToWorld(ix,iy,cx,cy);if(cell_overlap(sx,sy,syaw,cx,cy,.025)){
+      bool existing=false;
+      if(boundary_case&&map->getCost(ix,iy)==254){
+        using namespace p2_nav_controller::boundary_geometry;
+        auto current=at(cm->getRobotFootprint(),sx,sy,syaw);auto combined=initial_body;combined.insert(combined.end(),current.begin(),current.end());
+        const double before=area(cell_clip(initial_body,cx-.025,cy-.025,.05));
+        existing=before>1e-12&&area(cell_clip(hull(combined),cx-.025,cy-.025,.05))<=before+1e-10;
+      }
+      if(existing)++existing_overlap_samples;else{intrusion=true;break;}
+    }}}
   }
   if(intrusion)++collisions;
   trace<<std::setprecision(10)<<time<<','<<x<<','<<y<<','<<yaw<<','<<raw.linear.x<<','<<raw.angular.z<<','<<input.policy_x<<','<<input.policy_yaw<<','<<v<<','<<w<<','<<best<<','<<stopped<<','<<obstacle<<'\n';
   if(intrusion)break;
  }
  double error=std::hypot(x-points.back().x,y-points.back().y),yaw_error=std::abs(wrap(yaw-tf2::getYaw(path.poses.back().pose.orientation)));
- std::ofstream out(prefix+".json");out<<std::boolalpha<<"{\"loaded_controller_library\":\""<<controller_library<<"\",\"actual_plugin\":\"p2_nav_controller::SettledGoalRPP\",\"scope\":\"Synthetic planar lag/gain model, no biped dynamics or hardware\",\"seed\":0,\"kind\":\""<<kind<<"\",\"gain\":"<<gain<<",\"delay_s\":"<<delay<<",\"yaw_deadzone\":"<<yaw_deadzone<<",\"lateral_ratio\":"<<lateral_ratio<<",\"lateral_ripple_mps\":"<<lateral_ripple<<",\"static_obstacle_probe_verified\":"<<static_probe_verified<<",\"lateral_ripple_hz\":2,\"commanded_y\":0,\"dt_s\":"<<dt<<",\"duration_s\":"<<time<<",\"goal_reached\":"<<reached<<",\"goal_error_m\":"<<error<<",\"goal_yaw_error_rad\":"<<yaw_error<<",\"cross_track_rms_m\":"<<std::sqrt(rms/std::max(1,counted))<<",\"cross_track_max_m\":"<<max_error<<",\"yaw_reversals\":"<<reversals<<",\"body_intrusions\":"<<collisions<<",\"controller_collision_stops\":"<<stops<<",\"obstacle_injected\":"<<triggered<<",\"obstacle_verified_in_costmap\":"<<verified_obstacle<<",\"obstacle_cleared_after_two_seconds\":"<<cleared<<",\"progress_x\":"<<progress<<"}\n";
+ std::ofstream out(prefix+".json");out<<std::boolalpha<<"{\"loaded_controller_library\":\""<<controller_library<<"\",\"actual_plugin\":\"p2_nav_controller::SettledGoalRPP\",\"scope\":\"Synthetic planar lag/gain model, no biped dynamics or hardware\",\"seed\":0,\"kind\":\""<<kind<<"\",\"gain\":"<<gain<<",\"delay_s\":"<<delay<<",\"yaw_deadzone\":"<<yaw_deadzone<<",\"lateral_ratio\":"<<lateral_ratio<<",\"lateral_ripple_mps\":"<<lateral_ripple<<",\"static_obstacle_probe_verified\":"<<static_probe_verified<<",\"lateral_ripple_hz\":2,\"commanded_y\":0,\"dt_s\":"<<dt<<",\"duration_s\":"<<time<<",\"goal_reached\":"<<reached<<",\"goal_error_m\":"<<error<<",\"goal_yaw_error_rad\":"<<yaw_error<<",\"cross_track_rms_m\":"<<std::sqrt(rms/std::max(1,counted))<<",\"cross_track_max_m\":"<<max_error<<",\"yaw_reversals\":"<<reversals<<",\"existing_boundary_overlap_samples\":"<<existing_overlap_samples<<",\"body_intrusions\":"<<collisions<<",\"controller_collision_stops\":"<<stops<<",\"obstacle_injected\":"<<triggered<<",\"obstacle_verified_in_costmap\":"<<verified_obstacle<<",\"obstacle_cleared_after_two_seconds\":"<<cleared<<",\"progress_x\":"<<progress<<"}\n";
  std::cout<<kind<<" reached="<<reached<<" error="<<error<<" intrusions="<<collisions<<" reversals="<<reversals<<'\n';
  std::cout<<"replans="<<replans<<" failed="<<planning_failures<<"\n";planner->deactivate();planner->cleanup();planner.reset();
  control->deactivate();control->cleanup();control.reset();actual_progress.reset();checker.reset();cm->on_cleanup(rclcpp_lifecycle::State());cm.reset();parent.reset();

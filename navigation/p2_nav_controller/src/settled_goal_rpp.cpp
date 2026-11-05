@@ -15,6 +15,7 @@
 #include "p2_nav_controller/reference_goal.hpp"
 #include "p2_nav_controller/curved_forward.hpp"
 #include "p2_nav_controller/filled_footprint.hpp"
+#include "p2_nav_controller/boundary_escape.hpp"
 #include "p2_nav_controller/lateral_motion.hpp"
 
 namespace p2_nav_controller {
@@ -38,6 +39,8 @@ class SettledGoalRPP : public nav2_regulated_pure_pursuit_controller::RegulatedP
     node->get_parameter(name+".terminal_input_response",terminal_input_response_);
     nav2_util::declare_parameter_if_not_declared(node,name+".terminal_approach_continuity",rclcpp::ParameterValue(false));
     node->get_parameter(name+".terminal_approach_continuity",terminal_approach_continuity_);
+    nav2_util::declare_parameter_if_not_declared(node,name+".boundary_forward_escape",rclcpp::ParameterValue(false));
+    node->get_parameter(name+".boundary_forward_escape",boundary_escape_);
     if(!std::isfinite(curved_forward_input_)||curved_forward_input_<0.)throw nav2_core::PlannerException("Invalid curved forward input");
     if(!std::isfinite(collision_lookahead_floor_)||collision_lookahead_floor_<0||collision_lookahead_floor_>min_lookahead_dist_)
       throw nav2_core::PlannerException("Invalid collision lookahead floor");
@@ -46,14 +49,14 @@ class SettledGoalRPP : public nav2_regulated_pure_pursuit_controller::RegulatedP
   }
   void setPlan(const nav_msgs::msg::Path &path) override {
     std::lock_guard<std::mutex> lock(phase_mutex_);
-    if (path.poses.empty()) { terminal_approach_.reset();terminal_input_.reset(); reference_pivot_=false; phase_.reset(); settled_pivot_.reset(); throw nav2_core::PlannerException("Empty terminal path"); }
+    if (path.poses.empty()) { boundary_origin_.reset();terminal_approach_.reset();terminal_input_.reset(); reference_pivot_=false; phase_.reset(); settled_pivot_.reset(); throw nav2_core::PlannerException("Empty terminal path"); }
     auto goal=path.poses.back(); goal.header.frame_id=path.header.frame_id;
     const auto &q=goal.pose.orientation;
     const double norm=std::sqrt(q.x*q.x+q.y*q.y+q.z*q.z+q.w*q.w);
     if (!std::isfinite(norm) || norm<.8 || norm>1.2) { reference_pivot_=false; phase_.reset(); settled_pivot_.reset(); throw nav2_core::PlannerException("Invalid terminal quaternion"); }
     if(!have_goal_||goal.header.frame_id!=goal_.header.frame_id||
       std::hypot(goal.pose.position.x-goal_.pose.position.x,goal.pose.position.y-goal_.pose.position.y)>1e-4||
-      (!position_only_goal_&&std::abs(std::remainder(tf2::getYaw(q)-tf2::getYaw(goal_.pose.orientation),2*std::acos(-1.)))>1e-4)){terminal_approach_.reset();terminal_input_.reset();reference_pivot_=false;response_braking_=false;response_pivot_.reset();breakaway_.reset();settled_pivot_.reset();}
+      (!position_only_goal_&&std::abs(std::remainder(tf2::getYaw(q)-tf2::getYaw(goal_.pose.orientation),2*std::acos(-1.)))>1e-4)){boundary_origin_.reset();terminal_approach_.reset();terminal_input_.reset();reference_pivot_=false;response_braking_=false;response_pivot_.reset();breakaway_.reset();settled_pivot_.reset();}
     have_goal_=true;
     phase_.set_goal(goal.pose.position.x,goal.pose.position.y,tf2::getYaw(q),goal.header.frame_id);
     // Pure-pursuit skips repeated-XY poses and can therefore drive forward
@@ -72,8 +75,8 @@ class SettledGoalRPP : public nav2_regulated_pure_pursuit_controller::RegulatedP
     else reference_pivot_=false;
     goal_=goal; plan_source_ns_=rclcpp::Time(path.header.stamp).nanoseconds(); Base::setPlan(path);
   }
-  void activate() override { terminal_approach_.reset();terminal_input_.reset(); lateral_motion_.reset(); response_braking_=false; response_pivot_.reset(); reference_pivot_=false; phase_.reset(); breakaway_.reset(); settled_pivot_.reset(); Base::activate(); }
-  void deactivate() override { terminal_approach_.reset();terminal_input_.reset(); lateral_motion_.reset(); response_braking_=false; response_pivot_.reset(); reference_pivot_=false; phase_.reset(); breakaway_.reset(); settled_pivot_.reset(); Base::deactivate(); }
+  void activate() override { boundary_origin_.reset();terminal_approach_.reset();terminal_input_.reset(); lateral_motion_.reset(); response_braking_=false; response_pivot_.reset(); reference_pivot_=false; phase_.reset(); breakaway_.reset(); settled_pivot_.reset(); Base::activate(); }
+  void deactivate() override { boundary_origin_.reset();terminal_approach_.reset();terminal_input_.reset(); lateral_motion_.reset(); response_braking_=false; response_pivot_.reset(); reference_pivot_=false; phase_.reset(); breakaway_.reset(); settled_pivot_.reset(); Base::deactivate(); }
   geometry_msgs::msg::TwistStamped computeVelocityCommands(
       const geometry_msgs::msg::PoseStamped &pose,const geometry_msgs::msg::Twist &speed,
       nav2_core::GoalChecker *checker) override {
@@ -94,6 +97,20 @@ class SettledGoalRPP : public nav2_regulated_pure_pursuit_controller::RegulatedP
     const double distance=std::hypot(transformed.pose.position.x-pose.pose.position.x,
                                     transformed.pose.position.y-pose.pose.position.y);
     const double now=clock_->now().seconds();
+    if(boundary_escape_&&use_collision_detection_&&distance>tolerance.position.x) {
+      auto *map=costmap_ros_->getCostmap();std::unique_lock<nav2_costmap_2d::Costmap2D::mutex_t> map_lock(*map->getMutex());
+      const double x=pose.pose.position.x,y=pose.pose.position.y,a=tf2::getYaw(pose.pose.orientation);
+      if(filled_footprint_clear(map,costmap_ros_->getRobotFootprint(),x,y,a))boundary_origin_.reset();
+      if(boundary_forward_escape(map,costmap_ros_->getRobotFootprint(),x,y,a,.6,boundary_origin_?&*boundary_origin_:nullptr)) {
+        if(!boundary_origin_)boundary_origin_=std::array<double,3>{x,y,a};
+        // Only the proven straight translation uses this recovery. It never
+        // relaxes the normal arc/pivot checker or carries an old costmap grant.
+        reference_pivot_=false;settled_pivot_.reset();response_pivot_.reset();response_braking_=false;
+        geometry_msgs::msg::TwistStamped out;out.header=pose.header;out.twist.linear.x=desired_linear_vel_;
+        RCLCPP_INFO_THROTTLE(costmap_ros_->get_logger(),*clock_,1000,"Boundary-cell forward escape: no new occupied swept area, x=%.3f",out.twist.linear.x);
+        return out;
+      }
+    }
     const double error=std::remainder(tf2::getYaw(transformed.pose.orientation)-tf2::getYaw(pose.pose.orientation),2.*std::acos(-1.));
     const bool aligned=std::abs(error)<std::abs(tf2::getYaw(tolerance.orientation));
     const bool rotate_final=phase_.step(distance,tolerance.position.x,now,aligned);
@@ -337,7 +354,8 @@ class SettledGoalRPP : public nav2_regulated_pure_pursuit_controller::RegulatedP
       else response_pivot_.reset();
     }
   }
-  bool response_braking_=false;
+  bool response_braking_=false,boundary_escape_=false;
+  std::optional<std::array<double,3>> boundary_origin_;
   TerminalApproach terminal_approach_;TerminalInput terminal_input_;bool terminal_input_response_=false,terminal_approach_continuity_=false;
   LateralMotion lateral_motion_;
   double lateral_velocity_=0.;

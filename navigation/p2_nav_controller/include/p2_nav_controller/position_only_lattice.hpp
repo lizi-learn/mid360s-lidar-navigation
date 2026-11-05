@@ -13,10 +13,12 @@
 #include "p2_nav_controller/terminal_path.hpp"
 #include "p2_nav_controller/position_guide.hpp"
 #include "p2_nav_controller/route_rejoin.hpp"
+#include "p2_nav_controller/boundary_escape.hpp"
 namespace p2_nav_controller {
 class PositionOnlyLattice : public nav2_smac_planner::SmacPlannerLattice {
   std::vector<unsigned> occupied_;
   double route_rejoin_distance_=2.;
+  bool boundary_escape_=false;
   // A route preference, never an enlarged accepted footprint. Keep full-body
   // narrow fallbacks below when no roomier complete route can be found.
   static constexpr double tracking_room_preference_=.30;
@@ -162,6 +164,8 @@ class PositionOnlyLattice : public nav2_smac_planner::SmacPlannerLattice {
     SmacPlannerLattice::configure(parent,name,tf,cm);auto node=parent.lock();
     nav2_util::declare_parameter_if_not_declared(node,name+".route_rejoin_distance",rclcpp::ParameterValue(2.));
     node->get_parameter(name+".route_rejoin_distance",route_rejoin_distance_);
+    nav2_util::declare_parameter_if_not_declared(node,name+".boundary_forward_escape",rclcpp::ParameterValue(false));
+    node->get_parameter(name+".boundary_forward_escape",boundary_escape_);
     if(!std::isfinite(route_rejoin_distance_)||route_rejoin_distance_<=0.)throw nav2_core::PlannerException("Invalid route rejoin distance");
   }
   void cleanup() override {
@@ -263,6 +267,30 @@ class PositionOnlyLattice : public nav2_smac_planner::SmacPlannerLattice {
                                 const geometry_msgs::msg::PoseStamped &goal) override {
     std::lock_guard<std::mutex> stable_lock(stable_mutex_);
     select_route(goal);
+    if(boundary_escape_) {
+      bool escape=false;
+      {std::unique_lock<nav2_costmap_2d::Costmap2D::mutex_t> lock(*_costmap->getMutex());
+        escape=boundary_forward_escape(_costmap,_costmap_ros->getRobotFootprint(),start.pose.position.x,start.pose.position.y,tf2::getYaw(start.pose.orientation),.6);}
+      if(escape) {
+        auto anchor=start;const double a=tf2::getYaw(start.pose.orientation);
+        anchor.pose.position.x+=.6*std::cos(a);anchor.pose.position.y+=.6*std::sin(a);
+        auto tail=clear_start_plan(anchor,goal);
+        std::vector<std::array<double,3>> prefix;
+        for(int i=0;i<=60;++i)prefix.push_back({start.pose.position.x+i*.01*std::cos(a),start.pose.position.y+i*.01*std::sin(a),a});
+        {std::unique_lock<nav2_costmap_2d::Costmap2D::mutex_t> lock(*_costmap->getMutex());
+          prepare_map();
+          if(!boundary_forward_escape(_costmap,_costmap_ros->getRobotFootprint(),start.pose.position.x,start.pose.position.y,a,.6))throw nav2_core::PlannerException("Boundary escape changed during planning");
+          std::vector<std::array<double,3>> remaining;for(const auto &p:tail.poses)remaining.push_back({p.pose.position.x,p.pose.position.y,tf2::getYaw(p.pose.orientation)});
+          if(!swept_clear(remaining,0.))throw nav2_core::PlannerException("Boundary escape tail changed during planning");}
+        auto path=message(prefix,goal.header);path.poses.insert(path.poses.end(),tail.poses.begin()+1,tail.poses.end());
+        RCLCPP_INFO(_logger,"Boundary-cell escape: unchanged footprint, no additional occupied sweep, forward 0.6 m before normal plan");
+        return retain_route(completed(std::move(path)),goal);
+      }
+    }
+    return clear_start_plan(start,goal);
+  }
+ private:
+  nav_msgs::msg::Path clear_start_plan(const geometry_msgs::msg::PoseStamped &start,const geometry_msgs::msg::PoseStamped &goal) {
     try { return retain_route(plan_once(start,goal),goal); }
     catch(const nav2_core::PlannerException &original_error) {
       // A locally curved exit can defeat the long-distance point guide even

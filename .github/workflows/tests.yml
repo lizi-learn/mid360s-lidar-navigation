@@ -129,6 +129,7 @@ jobs:
           python3 experiments/arrival/check_route_reply.py --output /tmp/arrival/route-reply.json
           /tmp/arrival-build/rotation_progress > /tmp/arrival/rotation-progress.json
           /tmp/arrival-build/filled_footprint > /tmp/arrival/filled-footprint.json
+          python3 experiments/arrival/check_boundary_escape.py --binary-dir /tmp/arrival-build --output /tmp/arrival/boundary-escape
           python3 experiments/arrival/check_rejoin.py --binary /tmp/arrival-build/route_rejoin_replay --output /tmp/arrival/rejoin
           python3 experiments/arrival/check_turn_response.py --binary /tmp/arrival-build/tracking_replay --output /tmp/arrival/turn-response
           python3 experiments/arrival/check_lateral_tracking.py --binary /tmp/arrival-build/tracking_replay --output /tmp/arrival/lateral-tracking
