@@ -36,7 +36,7 @@ class EngineProvider(P2Backend):
         self.mode=mode;self.sequence+=1
         self.session.operator(mode,True,True,False,1,self.sequence,self.now,self.now)
         self.engine.tick(self.session.status(self.now),self.now)
-    def _extension(self):return {'conditional_task_control':True}
+    def _extension(self):return sdk_control.version()
     def _document(self):return copy.deepcopy(self.doc)
     def raw_status(self):
         self.operator(self.mode)
@@ -59,6 +59,9 @@ class EngineProvider(P2Backend):
         if op=='start':
             if not self.session.status(self.now)['navigation_permitted']:raise ValueError('manual priority')
             d=copy.deepcopy(self.doc);rid=data.get('route_id')
+            if data.get('point_ids'):
+                from relative_intent import visit_sequence
+                rid=visit_sequence(d,data['point_ids'])
             if data.get('point_id'):
                 rid='single';d['routes'].append(dict(id=rid,name='单点',mode='showcase',loops=1,description='',steps=[dict(point_id=data['point_id'],speak=True)]))
             self.engine.start(d,rid,self.now)
@@ -147,3 +150,15 @@ class MissionIntegration(unittest.TestCase):
         count=len(self.backend.posts)
         with self.assertRaises(NavigationError):self.backend.control(old['native_ref'],'cancel')
         self.assertEqual(len(self.backend.posts),count);self.assertEqual(self.nav.task(new['id'])['state'],'accepted')
+    def test_named_products_complete_speech_and_wait_in_requested_order(self):
+        self.backend.doc['points'][0].update(name='A产品',yaw=.7,dwell=.3)
+        self.backend.doc['points'][4].update(name='B产品',yaw=-1.)
+        original=copy.deepcopy(self.backend.doc);a=self.agent(['提交'])
+        j=self.request(a,'去介绍A产品，B产品');self.assertEqual(j['task']['request']['kind'],'tour')
+        self.assertEqual([s['point']['yaw']for s in self.backend.engine.steps],[.7,-1.])
+        self.backend.drain();self.assertEqual(self.nav.task(j['task']['id'])['state'],'succeeded')
+        self.assertEqual([e['point']for e in self.backend.events if e['kind']=='arrived'],['p1','p5'])
+        self.assertEqual(sum(e['kind']=='speech_completed'for e in self.backend.events),2)
+        self.assertEqual(self.backend.doc,original)
+        self.assertEqual([p for p,b in self.backend.posts],['/api/confirm'])
+        EVIDENCE.append(dict(scenario='A产品→B产品',arrived=['p1','p5'],speech_completed=2,task='succeeded',injected_receipts=True,initial_dispatches=1))

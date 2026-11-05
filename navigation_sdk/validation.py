@@ -13,6 +13,14 @@ def text(value, name, maximum=80):
 
 def task_request(data):
     if not isinstance(data, dict): raise NavigationError("INVALID_ARGUMENT", "Expected an object", status=400)
+    if data.get('kind')in('forward','rotate')and set(data)=={'kind','meters'if data['kind']=='forward'else'radians'}:
+        key='meters'if data['kind']=='forward'else'radians';value=finite(data[key],key)
+        if value==0 or key=='meters'and value<0:raise NavigationError('INVALID_ARGUMENT','Distance must be positive; rotation must be nonzero',status=400)
+        return dict(kind=data['kind'],**{key:value})
+    if data.get('kind')=='tour'and set(data)=={'kind','markers'}:
+        if not isinstance(data['markers'],list)or not 1<=len(data['markers'])<=100:
+            raise NavigationError('INVALID_ARGUMENT','Tour needs 1 to 100 saved markers',status=400)
+        return dict(kind='tour',markers=[text(p,'marker')for p in data['markers']])
     if data.get("kind") == "visit" and set(data) == {"kind", "marker"}:
         return {"kind":"visit", "marker":text(data["marker"], "marker")}
     if data.get("kind") == "route" and set(data) == {"kind", "route_id"}:

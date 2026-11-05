@@ -30,7 +30,7 @@ class RotationTests(unittest.TestCase):
         self.assertFalse(c.nav.sent)
 
     def test_rotation_validation_and_preserved_centre(self):
-        for value in [None,True,0.,float('nan'),float('inf'),4.]:
+        for value in [None,True,0.,float('nan'),float('inf'),1e6]:
             with self.assertRaises(ValueError):rotation_goal([3.,4.,.2],value)
         with self.assertRaises(ValueError):rotation_goal(None,-1.)
         with tempfile.TemporaryDirectory()as f:
@@ -41,3 +41,13 @@ class RotationTests(unittest.TestCase):
         c=self.setup_console();c.goal_rotation=-1.
         c.set_goal(dict(x=1.,y=1.,yaw=0.))
         self.assertIsNone(c.goal_rotation)
+
+    def test_multiple_revolutions_keep_unwrapped_action_distance(self):
+        c=self.setup_console();c.reception_pose=lambda:[3.,4.,.2];c.checked_pose=lambda d,**kw:object()
+        r=c.prepare_rotation({'radians':-4*math.pi})
+        self.assertAlmostEqual(c.session.goal['yaw'],.2)
+        c.confirm_goal({'generation':r['generation']})
+        spin=ET.parse(c.nav.sent[0].behavior_tree).find('.//Spin')
+        self.assertAlmostEqual(float(spin.get('spin_dist')),-4*math.pi)
+        self.assertEqual(float(spin.get('time_allowance')),180.)
+        self.assertEqual(c.session.phase,'executing','same final heading is not an arrival receipt')

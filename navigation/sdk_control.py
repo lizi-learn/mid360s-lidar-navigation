@@ -1,6 +1,7 @@
 """Optional SDK compare-and-control. Existing APP requests remain unchanged."""
 def version():
-    return {'version':'1.0','conditional_task_control':True}
+    return {'version':'1.1','conditional_task_control':True,
+            'relative_forward':True,'relative_rotation':True,'visit_sequence':True}
 
 def verify(node, expected):
     if not isinstance(expected,dict) or set(expected)!={'generation','run_id','epoch','map_id'}:

@@ -45,6 +45,9 @@ Open `/agent` on the existing Console. Examples:
 - “有哪些点位和路线？”
 - “去点位2”：run the saved visit, including its existing heading, introduction and wait.
 - “按20到1的路线参观”：resolve and run the matching saved reverse route.
+- “往前走2米” / “前进50厘米”：resolve a target from the fresh body pose, in metres.
+- “右转90度” / “原地向左转两圈”：signed accumulated rotation; preserve whole turns.
+- “去介绍A产品” / “去介绍A产品，B产品”：visit named saved points in that order.
 - “现在到哪里了？”
 - “暂停” / “继续导航” / “介绍完了，继续下一站”。
 - “停止导航”：bypasses cloud inference and requests navigation stop.
@@ -96,8 +99,28 @@ both20-point orders, introduction/dwell and manual takeover, with explicitly inj
 goal/audio receipts. Its result is a software-state test, not Nav2 collision/physics
 simulation, real walking acceptance, or a measurement of DeepSeek language accuracy.
 
-The first version uses saved points and routes. It does not yet create arbitrary
-new multi-point itineraries, edit product knowledge, or capture microphone audio.
+Named-product tours build a temporary Mission snapshot and do not save or alter the
+catalogue. Each product must resolve to a real saved point. The point's own script,
+linked product script, heading, dwell and guest-wait remain native Mission behavior.
+An unknown second product does not dispatch only the first. No product claims are
+generated from a name. Configure product/point names and speech on `/reception`.
+
+Relative forward uses the fresh `map -> base_link` pose when the Console prepares
+the task, not a lidar-head frame or input multiplied by time. It means a target
+offset along the initial body-forward axis, not accumulated path length: obstacle
+avoidance may make the travelled path longer. Arrival uses existing navigation
+tolerances, not centimetre precision. Rotation uses the native Nav2 Spin accumulated
+angle, retaining the unwrapped action distance even when the final heading wraps.
+Positive is left/counterclockwise; unspecified direction defaults left. Whole turns
+are never considered complete just because the start/end headings are equal.
+The generated Spin timeout scales with angle from the existing45seconds per180deg;
+the existing obstacle/authority checks, gait inputs and S-shaped start remain.
+
+These new relative/tour capabilities require Console SDK extension1.1; older
+Consoles explicitly advertise them as unsupported. Their local tests include the
+real Console intent methods and Session/Mission with injected receipts; they do not
+claim real walking-distance accuracy or physical multi-turn acceptance.
+This version does not edit product knowledge or capture microphone audio.
 Typing works immediately; spoken-language capture can be added as a separate input
 without changing the navigation task tools. Product information is not invented.
 

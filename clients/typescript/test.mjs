@@ -31,6 +31,14 @@ test('Marker CRUD preserves Unicode',async()=>{
   assert.ok((await client.markers()).some(m=>m.name==='节点 &? 中文'));
   await client.deleteMarker('节点 &? 中文');
 });
+test('Relative units, full revolutions and ordered tours retain exact request identity',async()=>{
+  for(const [method,value,expected] of [['forward',.5,{kind:'forward',meters:.5}],['rotate',-4*Math.PI,{kind:'rotate',radians:-4*Math.PI}],['tour',['产品展示','接待起点'],{kind:'tour',markers:['产品展示','接待起点']}]]){
+    const task=await client[method](value,{idempotencyKey:'ts-relative-'+method});
+    assert.deepEqual(task.request,expected);
+    assert.equal((await client[method](value,{idempotencyKey:'ts-relative-'+method})).id,task.id);
+    await client.cancel(task.id);
+  }
+});
 
 test('HTTP mutation 500 is uncertain and redirects are not followed',async()=>{
   const calls=[];const upstream=createServer((request,response)=>{

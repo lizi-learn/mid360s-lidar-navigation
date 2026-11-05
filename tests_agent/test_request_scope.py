@@ -31,7 +31,7 @@ class Scope(unittest.TestCase):
         self.assertEqual(self.scope('去',h)['navigation'],{'kind':'visit','point_id':'p2'})
     def test_short_go_without_target_clarifies(self):self.assertTrue(self.scope('去')['error'])
     def test_multiple_points_are_not_silently_reduced_to_first(self):
-        self.assertIsNone(self.scope('去点位1，然后去点位4')['navigation'])
+        self.assertEqual(self.scope('去点位1，然后去点位4')['navigation'],{'kind':'tour','point_ids':['p1','p4']})
         self.assertIsNone(self.scope('去点位1，然后去不存在的地方')['navigation'])
     def test_saved_matching_multi_point_route_is_resolved_once(self):
         self.routes.append({'id':'two','name':'两点路线','steps':[{'point_id':'p1'},{'point_id':'p4'}]})

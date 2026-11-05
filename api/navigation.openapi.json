@@ -141,6 +141,69 @@
                 "maxLength": 64
               }
             }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "meters"
+            ],
+            "properties": {
+              "kind": {
+                "const": "forward"
+              },
+              "meters": {
+                "type": "number",
+                "exclusiveMinimum": 0,
+                "maximum": 100000
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "radians"
+            ],
+            "properties": {
+              "kind": {
+                "const": "rotate"
+              },
+              "radians": {
+                "type": "number",
+                "minimum": -100000,
+                "maximum": 100000,
+                "not": {
+                  "const": 0
+                },
+                "description": "Accumulated angle, left positive; retain full revolutions."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "markers"
+            ],
+            "properties": {
+              "kind": {
+                "const": "tour"
+              },
+              "markers": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 100,
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 80
+                }
+              }
+            }
           }
         ]
       },
@@ -452,7 +515,7 @@
     "/v1/tasks": {
       "post": {
         "operationId": "submit",
-        "summary": "Dispatch move, visit or saved route; accepted is not arrival",
+        "summary": "Dispatch move, visit, saved route, relative forward/rotation or temporary ordered tour; accepted is not arrival",
         "responses": {
           "202": {
             "description": "Result",

@@ -208,7 +208,7 @@ class P2Fixture(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path=='/api/status?summary=1':return self.send(self.server.state)
         if self.path=='/api/reception':return self.send({'document':self.server.document})
-        if self.path=='/api/sdk/version':return self.send({'conditional_task_control':True} if self.server.extension else {'error':'missing'},200 if self.server.extension else 404)
+        if self.path=='/api/sdk/version':return self.send({'conditional_task_control':True,'relative_forward':True,'relative_rotation':True,'visit_sequence':True} if self.server.extension else {'error':'missing'},200 if self.server.extension else 404)
         self.send({},404)
     def do_POST(self):
         body=json.loads(self.rfile.read(int(self.headers['Content-Length'])));s=self.server.state;m=s['reception']['mission'];ss=s['session']
@@ -216,8 +216,8 @@ class P2Fixture(BaseHTTPRequestHandler):
         self.server.posts.append((self.path,body))
         expected=body.get('_sdk_expected')
         if expected and expected!={'generation':ss['generation'],'run_id':m['run_id'],'epoch':m['epoch'],'map_id':s['reception']['map_id']}:return self.send({'error':'changed'},409)
-        if self.path=='/api/goal':
-            if body.get('_sdk_expected_generation')!=ss['generation']:return self.send({'error':'changed'},409)
+        if self.path in('/api/goal','/api/relative-goal','/api/rotate'):
+            if self.path=='/api/goal'and body.get('_sdk_expected_generation')!=ss['generation']:return self.send({'error':'changed'},409)
             ss['generation']+=1;ss['phase']='ready';return self.send({'generation':ss['generation']})
         if self.path=='/api/confirm':
             if 'reception_command'in body:

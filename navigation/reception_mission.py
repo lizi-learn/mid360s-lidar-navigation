@@ -242,6 +242,10 @@ class MissionService:
                 if self.node.session.phase in ('starting', 'executing', 'replanning'): raise ValueError('已有导航正在执行')
                 if self.future is not None and not self.future.done(): raise ValueError('上一任务正在退出，请稍候')
                 route_id=data.get('route_id')
+                if 'point_ids'in data:
+                    if any(k in data for k in ('route_id','point_id','target','dock_pose')):raise ValueError('参观序列不能混用其他目标')
+                    from relative_intent import visit_sequence
+                    route_id=visit_sequence(doc,data['point_ids'])
                 if data.get('target') is not None:
                     target=data['target']
                     if not isinstance(target,dict) or any(type(target.get(k)) not in (int,float) or not math.isfinite(target[k]) or abs(target[k])>1e5 for k in ('x','y')):

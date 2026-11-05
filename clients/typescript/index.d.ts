@@ -12,6 +12,9 @@ export class NavigationClient {
  move(target:Target, options?:{idempotencyKey?:string}):Promise<Task>;
  visit(marker:string,options?:{idempotencyKey?:string}):Promise<Task>;
  route(routeId:string,options?:{idempotencyKey?:string}):Promise<Task>;
+ forward(meters:number,options?:{idempotencyKey?:string}):Promise<Task>;
+ rotate(radians:number,options?:{idempotencyKey?:string}):Promise<Task>;
+ tour(markers:string[],options?:{idempotencyKey?:string}):Promise<Task>;
  task(id:string):Promise<Task>;cancel(id:string):Promise<Task>;pause(id:string):Promise<Task>;
  resume(id:string):Promise<Task>;continueVisit(id:string):Promise<Task>;stop():Promise<{stop_requested:boolean;scope:string}>;
  saveMarker(marker:Marker):Promise<Marker>;deleteMarker(name:string):Promise<{deleted:boolean;name:string}>;

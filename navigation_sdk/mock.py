@@ -18,7 +18,7 @@ class MockBackend:
         self.submissions = 0
     def capabilities(self):
         return {'backend':'mock','api_version':'1.0','hardware':False,'verification':'synthetic contract fixture only',
-                'features':{k:True for k in ('move_pose','move_marker','marker_crud','saved_routes','visit_introduction','conditional_task_control','global_cancel')},
+                'features':{k:True for k in ('move_pose','move_marker','marker_crud','saved_routes','visit_introduction','conditional_task_control','global_cancel','relative_forward','relative_rotation','visit_sequence')},
                 'units':{'position':'m','theta':'rad'}}
     def status(self):
         with self.lock:
@@ -39,6 +39,8 @@ class MockBackend:
             marker = request.get('marker') or request.get('target',{}).get('marker')
             if marker and not any(marker in (p['id'],p['name']) for p in self.points):
                 raise NavigationError('MARKER_NOT_FOUND','Unknown synthetic marker',status=404)
+            if request['kind']=='tour'and any(not any(m in(p['id'],p['name'])for p in self.points)for m in request['markers']):
+                raise NavigationError('MARKER_NOT_FOUND','Unknown synthetic tour marker',status=404)
             ident = uuid.uuid4().hex
             self.current = {'id':ident,'state':'accepted','arrival_reached':False,'request':copy.deepcopy(request)}
             self.submissions += 1

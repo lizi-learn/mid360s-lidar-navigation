@@ -54,6 +54,11 @@ navbridge --backend p2 --p2-url http://127.0.0.1:8930 \
 
 `move` 只导航；`visit` 执行“导航→朝向→介绍→停留/等待”；`route` 执行已保存的路线。避免业务程序自己讲解、SDK 又重复讲解。
 
+Console SDK 扩展1.1还支持 `forward(meters)`、`rotate(radians)` 和 `tour([marker,...])`。
+`forward(2)` 按发起时机身前方计算2米外的地图目标，经过正常避障；这是起终点位移，不是累计路径长度。
+`rotate(-4*math.pi)` 为右转两整圈，保留累计角度。`tour(['A产品','B产品'])` 依次执行两点的介绍、方向和停留，不改写已保存路线。
+这三个能力通过 `relative_forward`、`relative_rotation`、`visit_sequence` 单独报告；WATER provider目前不实现这些新能力。
+
 ## WATER 兼容入口
 
 本项目兼容服务的请求必须以 LF 或 CRLF 结束，命名合同 `navbridge-water-lf/1`。原生 WATER 手册未定义请求结束符，本实现不靠 TCP 分包/静默时间猜测运动请求是否完整。

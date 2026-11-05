@@ -55,11 +55,12 @@ class P2Backend:
             raise
 
     def capabilities(self):
-        enabled=bool(self._extension().get("conditional_task_control"))
+        extension=self._extension();enabled=bool(extension.get("conditional_task_control"))
         return {"backend":self.name, "api_version":"1.0", "hardware":True,
                 "features":{"move_pose":enabled,"move_marker":enabled,"saved_routes":enabled,
                             "marker_crud":True,"visit_introduction":enabled,"maps_list":True,
                             "global_cancel":True,"conditional_task_control":enabled,
+                            **{k:enabled and bool(extension.get(k))for k in('relative_forward','relative_rotation','visit_sequence')},
                             "velocity_si":False,"elevator":False,"charging":False,"motor_estop":False},
                 "verification":"P2 navigation derived from V2; SDK adapter contract-tested separately",
                 "units":{"position":"m","theta":"rad","D_input":"manual_equivalent_not_measured_m/s"}}
@@ -100,7 +101,8 @@ class P2Backend:
         return target
 
     def submit(self, request):
-        if not self._extension().get("conditional_task_control"):
+        extension=self._extension()
+        if not extension.get("conditional_task_control"):
             raise NavigationError("UNSUPPORTED_CAPABILITY","Install the additive Console SDK extension to enable concurrent-safe dispatch")
         s=self.raw_status();session=s["session"];mission=s["reception"]["mission"]
         if not session.get("navigation_permitted"):
@@ -108,16 +110,31 @@ class P2Backend:
         current=self.current_task(s)
         if current:
             raise NavigationError("TASK_BUSY","Existing navigation must finish or be explicitly cancelled",details={"current_task":current})
-        if request["kind"] in ("route","visit"):
+        expected={"generation":session["generation"],"run_id":mission["run_id"],"epoch":mission["epoch"],"map_id":s["reception"]["map_id"]}
+        feature={'forward':'relative_forward','rotate':'relative_rotation','tour':'visit_sequence'}.get(request['kind'])
+        if feature and not extension.get(feature):raise NavigationError('UNSUPPORTED_CAPABILITY','Console extension does not yet support '+feature)
+        if request['kind']in('forward','rotate'):
+            key='meters'if request['kind']=='forward'else'radians'
+            path='/api/relative-goal'if request['kind']=='forward'else'/api/rotate'
+            prepared=self._post(path,{key:request[key],'_sdk_expected':expected})
+            self._post('/api/confirm',{'generation':prepared['generation']})
+            return dict(type='navigation',generation=prepared['generation'],map_id=s['reception']['map_id'],intent=request['kind'])
+        if request["kind"] in ("route","visit","tour"):
             d=self._document();body={"command":"start","revision":d["revision"]}
             if request["kind"]=="route":body["route_id"]=request["route_id"]
+            elif request['kind']=='tour':
+                ids=[]
+                for marker in request['markers']:
+                    matches=[p for p in d['points']if marker in(p['name'],p['id'])]
+                    if len(matches)!=1:raise NavigationError('MARKER_NOT_FOUND','Each tour marker must resolve uniquely',status=404)
+                    ids.append(matches[0]['id'])
+                body['point_ids']=ids
             else:
                 points=[p for p in d["points"]if request["marker"]in(p["name"],p["id"])]
                 if len(points)!=1:raise NavigationError("MARKER_NOT_FOUND","Marker must resolve uniquely",status=404)
                 body["point_id"]=points[0]["id"]
             payload={"reception_command":body}
-            if self._extension().get("conditional_task_control"):
-                payload["_sdk_expected"]={"generation":session["generation"],"run_id":mission["run_id"],"epoch":mission["epoch"],"map_id":s["reception"]["map_id"]}
+            payload['_sdk_expected']=expected
             m=self._post("/api/confirm",payload)
             return {"type":"mission","run_id":m["run_id"],"epoch":m["epoch"],"map_id":d["map_id"]}
         d=self._document();p=self._resolve(request["target"],d)

@@ -675,6 +675,13 @@ class Console(Node):
         # Serialize goal-specific planner parameters with their preview request;
         # stop/manual callbacks do not acquire this planning lock.
         with self.goal_request_lock:return self._set_goal(data)
+    def prepare_relative(self,data):
+        from relative_intent import forward_goal
+        if set(data)-{'meters','_sdk_expected'}:raise ValueError('相对前进字段无效')
+        with self.goal_request_lock:
+            goal=forward_goal(self.reception_pose(),data.get('meters'))
+            if '_sdk_expected'in data:goal['_sdk_expected']=data['_sdk_expected']
+            return self.set_goal(goal)
     def prepare_rotation(self,data):
         from rotation_intent import rotation_goal
         if self.mode!='navigation':raise ValueError('请先载入地图进入导航模式')
@@ -685,6 +692,11 @@ class Console(Node):
             # costmap/footprint and odometry; no global path is invented here.
             self.checked_pose(goal,require_free=False)
             with self.lock:
+                if '_sdk_expected'in data:
+                    from sdk_control import verify
+                    verify(self,data['_sdk_expected'])
+                    if self.reception.engine.phase in ('dispatching','navigating','presenting','guest_wait','dwell','rerouting','waiting_route','paused'):
+                        raise ValueError('Existing mission must finish or be explicitly cancelled')
                 generation=self.session.prepare(goal,time.monotonic())
                 self.goal_rotation=radians;self.goal_route=[];self.goal_route_guided=False
                 self.goal_heading_mode='pose';self.path=[];self.goal=[goal['x'],goal['y']];self.feedback={}
@@ -1111,7 +1123,7 @@ def main():
                 if not isinstance(d,dict):raise ValueError('请求必须是JSON对象')
                 routes={'/api/audio':lambda:node.audio.update(d),'/api/start':lambda:node.start(d['mode'],d.get('name','office'),d.get('controller','rpp')),
                     '/api/sim_mapping_route':lambda:node.simulated_mapping_route(d['name']),
-                    '/api/save':lambda:save_resource(node,d),'/api/goal':lambda:node.reception_api_goal(d),'/api/rotate':lambda:node.prepare_rotation(d),
+                    '/api/save':lambda:save_resource(node,d),'/api/goal':lambda:node.reception_api_goal(d),'/api/rotate':lambda:node.prepare_rotation(d),'/api/relative-goal':lambda:node.prepare_relative(d),
                     '/api/confirm':lambda:node.reception_api_confirm(d),'/api/sim_operator':lambda:node.simulation_operator(d),
                     '/api/initialpose':lambda:node.set_pose(d),'/api/speed':lambda:node.speed(d['speed'],d.get('velocity_scale')),
                     '/api/stop':lambda:__import__('sdk_control').stop(node,d)}
