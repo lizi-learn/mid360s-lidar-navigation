@@ -61,3 +61,8 @@ target_link_libraries(dynamic_map ${CMAKE_DL_LIBS})
 add_executable(pivot_observation pivot_observation.cpp)
 target_compile_features(pivot_observation PUBLIC cxx_std_17)
 target_include_directories(pivot_observation PRIVATE ../../navigation/p2_nav_controller/include)
+
+add_executable(boundary_escape boundary_escape.cpp)
+target_compile_features(boundary_escape PUBLIC cxx_std_17)
+target_include_directories(boundary_escape PRIVATE ../../navigation/p2_nav_controller/include)
+ament_target_dependencies(boundary_escape nav2_costmap_2d)

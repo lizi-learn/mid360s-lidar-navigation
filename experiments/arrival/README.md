@@ -128,3 +128,5 @@ including after the stock zero-publication timeout. It emits no command in the
 absence of a request; idle source-health observations stay separate. The source
 component regression checks both behaviors. No laser/odometry stamp is renewed.
 These are isolated component and planar tests, not a physical biped pass.
+
+Boundary-cell escape comparison: `check_boundary_escape.py` loads the actual planner and controller. A stationary 55 cm square begins with a trailing occupied-cell edge sliver. The old mode reproduces the no-progress failure; the candidate must produce a complete plan and reach the short position goal with no additional occupied swept area, through the existing smooth native input response and delayed synthetic plant. Existing overlap samples are reported separately and are never called zero total overlap. Unknown cells, occupied interior centres, increasing overlap, new forward occupancy and measured drift beyond the original overlap are negative cases. This is a bounded straight escape, not permission to shrink the body, remove obstacles, turn through collision, or certify physical gait.

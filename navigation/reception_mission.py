@@ -220,6 +220,7 @@ class MissionService:
         self.live_router=LiveRouter();self.active_command=None;self.resume_command=None
         self.decisions=RouteDecisions(); self.route_report=[]
         self.pending_source_command=None;self.source_recovery_active=False
+        self.tracking_turn_leg=None
         self.future = None; self.closed = threading.Event()
         self.thread = threading.Thread(target=self.run, daemon=True, name='reception-task'); self.thread.start()
     def map_id(self):
@@ -263,6 +264,7 @@ class MissionService:
                 self.node.session.configure_obstruction(doc['policy'])
                 self.engine.start(doc, route_id, time.monotonic())
                 self.active_command=None;self.resume_command=None;self.pending_source_command=None;self.source_recovery_active=False;self.live_router.reset()
+                self.tracking_turn_leg=None
         elif command=='resume':
             with self.node.lock:
                 if data.get('epoch')!=self.engine.epoch:raise ValueError('任务已更新，请刷新后继续')
@@ -361,11 +363,16 @@ class MissionService:
                 data['_route_goals']=poses
             starting_generation=self.node.session.generation if command.get('source_recovery')else None
             try:
-                result = self.node.set_goal(data)
+                if command.get('tracking_recovery'):
+                    from heading_recovery import plan_after_turn
+                    result=plan_after_turn(self.node,self.engine,epoch,data,ValueError(command['reason']),require_turn_progress=True)
+                    if result is None:return
+                else:
+                    result = self.node.set_goal(data)
             except ValueError as plan_error:
                 from heading_recovery import no_route, plan_after_turn
                 if (getattr(self.node, 'gait_profile', None) != 'p2-flat-model' or
-                        command.get('source_recovery') or not no_route(plan_error)):
+                        command.get('source_recovery') or command.get('tracking_recovery') or not no_route(plan_error)):
                     raise
                 result = plan_after_turn(self.node, self.engine, epoch, data, plan_error)
                 if result is None:return
@@ -389,6 +396,8 @@ class MissionService:
                 if command.get('source_recovery'):self.engine.event('source_recovery_resumed',generation=result['generation'])
                 self.active_command=copy.deepcopy(command)
                 self.active_command.pop('source_recovery',None);self.active_command.pop('source_deadline',None)
+                for key in ('tracking_recovery','tracking_generation','reroute','reason'):
+                    self.active_command.pop(key,None)
         except Exception as error:
             if not self.engine.valid(epoch):return
             if (command.get('source_recovery') and self.engine.valid(epoch) and
@@ -398,6 +407,43 @@ class MissionService:
                 self.engine.event('source_recovery_retry',reason=str(error))
             else:
                 self.source_recovery_active=False;self.engine.failed(epoch,error)
+    def tracking_recovery_command(self,state):
+        """One checked turn/replan after a real aborted navigation action.
+
+        A global preview can be valid while local forward tracking has no arc.
+        This preserves the current visit and actions instead of ending the tour
+        before the existing native Spin recovery can inspect the other side.
+        Operator/source stops and cancelled actions are never recovery grants.
+        """
+        receipt=state.get('terminal_receipt') or {}
+        if (getattr(self.node,'gait_profile',None)!='p2-flat-model' or
+                state.get('phase')!='blocked' or not state.get('navigation_permitted') or
+                state.get('manual_activity') or state.get('last_stop') or
+                receipt.get('status')!=6 or receipt.get('task_kind')!='navigation' or
+                receipt.get('succeeded')is not False or receipt.get('generation')!=state.get('generation') or
+                (self.future is not None and not self.future.done())):
+            return None
+        with self.engine.lock:
+            end=self.engine.batch_end if self.engine.batch_end is not None else self.engine.index
+            key=(self.engine.epoch,self.engine.index,end)
+            if (self.engine.phase!='navigating' or state['generation']!=self.engine.goal_generation or
+                    not self.active_command or self.active_command['epoch']!=self.engine.epoch or
+                    getattr(self,'tracking_turn_leg',None)==key):
+                return None
+            command=copy.deepcopy(self.active_command)
+            feedback=getattr(self.node,'feedback',{})
+            remaining=feedback.get('poses_remaining')if feedback.get('generation')==self.engine.goal_generation else None
+            if type(remaining)is int and 0<remaining<=len(command['points']):
+                passed=command['points'][:-remaining]
+                for p in passed:self.engine.event('transit_segment_completed',point=p['id'],receipt='native_poses_remaining_before_heading_recovery')
+                command['points']=command['points'][-remaining:]
+            reason=state.get('notice')or '本段导航动作中止，尝试原地转向后重规划'
+            if not self.engine.begin_reroute(reason):return None
+            self.tracking_turn_leg=key
+            command.update(epoch=self.engine.epoch,end_index=end,reroute=True,tracking_recovery=True,
+                           tracking_generation=state['generation'],reason=reason)
+            self.engine.event('tracking_heading_recovery',generation=state['generation'],point=command['point']['id'])
+            return command
     def update_live_route(self):
         snapshot=self.engine.status()
         if snapshot['route_mode']!='adaptive' or snapshot['phase']not in ('navigating','waiting_route') or not self.active_command:return
@@ -418,6 +464,7 @@ class MissionService:
         while not self.closed.wait(.1):
             try:
                 state = self.session_snapshot()
+                recovery = self.tracking_recovery_command(state)
                 # Speech acknowledgements are local, bounded files; no cloud here.
                 speech = self.node.reception_speech_result()
                 snapshot=self.engine.status()
@@ -432,7 +479,7 @@ class MissionService:
                         if not 0<=time.time()-worker.get('updated_at',0)<=3:
                             speech={'epoch':snapshot['epoch'],'key':snapshot['speech_key'],'result':'failed'}
                 if not state.get('navigation_permitted') and snapshot['phase'] in BUSY:self.capture_resume()
-                command = self.engine.tick(state, time.monotonic(), speech)
+                command = self.engine.tick(state, time.monotonic(), speech) or recovery
                 current = self.engine.status()
                 if snapshot['phase'] in BUSY and current['phase'] in ('manual', 'paused'):
                     # E pause and manual takeover end physical navigation too;

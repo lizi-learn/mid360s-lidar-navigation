@@ -53,7 +53,7 @@ def config(controller='rpp', tree=None, minimum_speed=.03, footprint_vertices=No
             lookahead_time=2.0,rotate_to_heading_angular_vel=1.0,rotate_to_heading_min_angle=1.2,cost_scaling_dist=1.0,
             max_angular_accel=20.,regulated_linear_scaling_min_radius=1.25,
             regulated_linear_scaling_min_speed=max(.6,minimum_speed),corner_preview=True,
-            use_cost_regulated_linear_velocity_scaling=False,minimum_pivot_input=.5,collision_lookahead_floor=.55,settled_pivot_response=True,curved_forward_input=.6)
+            use_cost_regulated_linear_velocity_scaling=False,minimum_pivot_input=.5,collision_lookahead_floor=.55,settled_pivot_response=True,curved_forward_input=.6,terminal_input_response=True,terminal_approach_continuity=True,boundary_forward_escape=True)
     mppi=dict(plugin='nav2_mppi_controller::MPPIController',time_steps=48,model_dt=.05,batch_size=1000,
         iteration_count=1,vx_std=.10,vy_std=0.,wz_std=.20,vx_max=.30,vx_min=0.,vy_max=0.,wz_max=.35,
         ax_max=.15,ax_min=-.30,az_max=.5,prune_distance=1.8,transform_tolerance=.15,
@@ -126,6 +126,7 @@ def config(controller='rpp', tree=None, minimum_speed=.03, footprint_vertices=No
         planner['PositionOnly']['plugin']='p2_nav_controller::PositionOnlyLattice'
         planner['PositionOnly']['smooth_path']=False
         planner['PositionOnly']['cache_obstacle_heuristic']=True
+        planner['PositionOnly']['boundary_forward_escape']=True
         planner['planner_plugins'].append('RouteDirected')
         planner['RouteDirected']=copy.deepcopy(planner['PositionOnly'])
         planner['RouteDirected']['plugin']='p2_nav_controller::RouteDirectedLattice'
@@ -221,6 +222,20 @@ def apply_runtime_geometry(params_file):
     if type(padding) not in (int,float) or not math.isfinite(padding) or not 0<=padding<=.05:
         raise ValueError('Invalid configured footprint padding')
     params=yaml.safe_load(path.read_text())
+    if 'terminal_input_response' in value:
+        if type(value['terminal_input_response'])is not bool:raise ValueError('Invalid terminal input response setting')
+        params['controller_server']['ros__parameters']['FollowPath']['terminal_input_response']=value['terminal_input_response']
+    if 'terminal_approach_continuity' in value:
+        if type(value['terminal_approach_continuity'])is not bool:raise ValueError('Invalid terminal approach continuity setting')
+        params['controller_server']['ros__parameters']['FollowPath']['terminal_approach_continuity']=value['terminal_approach_continuity']
+    if 'boundary_forward_escape' in value:
+        enabled=value['boundary_forward_escape']
+        if type(enabled)is not bool:raise ValueError('Invalid boundary forward escape setting')
+        params['controller_server']['ros__parameters']['FollowPath']['boundary_forward_escape']=enabled
+        planner=params['planner_server']['ros__parameters']
+        for name in planner['planner_plugins']:
+            if planner[name].get('plugin','').startswith('p2_nav_controller::'):
+                planner[name]['boundary_forward_escape']=enabled
     # The same configured body must be used by costmaps AND collision polygons.
     # Preserve existing front/rear/side clearances while replacing the body;
     # otherwise an old wide model silently remains a navigation stop condition.

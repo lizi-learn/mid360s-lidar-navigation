@@ -35,7 +35,7 @@ def preferred_side(node, pose, goal):
     return side
 
 
-def plan_after_turn(node, engine, epoch, data, original_error, *, now=time.monotonic, sleep=time.sleep):
+def plan_after_turn(node, engine, epoch, data, original_error, *, require_turn_progress=False, now=time.monotonic, sleep=time.sleep):
     """Return a new plan, or None after takeover; never replace the target."""
     def permitted():
         s = node.session_state()
@@ -52,17 +52,27 @@ def plan_after_turn(node, engine, epoch, data, original_error, *, now=time.monot
             return True
 
     def available():
-        if not node.health_ready():
-            raise ValueError('原地转向恢复时实时定位或避障观测已失效')
-        if not node.execution_ready():
-            raise ValueError('原地转向恢复时步态执行回执已改变')
+        # Cancellation and the next native readiness reply are asynchronous.
+        # Use the same bounded stopped wait as ordinary mission dispatch;
+        # never relabel an old reply as ready or retry across intervention.
+        deadline = now()+8.
+        while True:
+            if not permitted():
+                return False
+            healthy, ready = node.health_ready(), node.execution_ready()
+            if healthy and ready:
+                return True
+            if now() >= deadline:
+                raise ValueError('原地转向恢复等待真实定位、避障或步态回执超时')
+            sleep(.05)
 
     if not permitted():
+        return None
+    if not available():
         return None
     pose = node.reception_pose()
     if pose is None:
         raise ValueError('原地转向恢复时没有新鲜位置姿态')
-    available()
     direction = preferred_side(node, pose, data)
     # Two small, opposite observation turns, each checked by the existing Spin
     # behavior. A live collision abort is a real result, not a completed turn.
@@ -70,7 +80,8 @@ def plan_after_turn(node, engine, epoch, data, original_error, *, now=time.monot
     for side in (direction, -direction):
         if not permitted():
             return None
-        available()
+        if not available():
+            return None
         if not node.cancel_reception_leg(epoch):
             return None
         before = node.reception_pose()
@@ -103,10 +114,17 @@ def plan_after_turn(node, engine, epoch, data, original_error, *, now=time.monot
             return None
         if not permitted():
             return None
+        if require_turn_progress and s['phase'] in ('blocked', 'failed') and (moved is None or abs(moved)<.03):
+            # A tracking abort can still have a valid global plan. Repeating
+            # that unchanged plan after a stationary rejected Spin recreates
+            # the same local deadlock; try the other checked direction first.
+            engine.event('heading_recovery_no_progress',generation=generation,measured_radians=moved)
+            continue
         # A stopped Spin may have genuinely changed the observed direction.
         # Replan against the current data, including after a collision abort.
         # The original goal, yaw, route, and mission epoch stay identical.
-        available()
+        if not available():
+            return None
         try:
             result = node.set_goal(data)
             engine.event('heading_recovery_planned', generation=result['generation'])

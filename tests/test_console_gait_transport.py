@@ -20,6 +20,31 @@ class Server:
     def wait_for_server(self,timeout_sec):self.calls+=1;return False
 
 class ConsoleGaitTests(unittest.TestCase):
+    def test_confirm_after_slow_plan_consumes_current_original_authority(self):
+        c,g=self.setup_console();c.session.source_time=time.monotonic()-2.1
+        def actual():
+            now=time.monotonic();return dict(mode='navigation_allowed',verified=True,connected=True,activity=False,
+                source=c.session.source,sequence=c.session.sequence+1,stamp=now,reply_stamp=None,source_transport='native_packet_snapshot')
+        c.gait.operator_authority=actual
+        with self.assertRaisesRegex(ValueError,'导航服务未就绪'):c.confirm_goal({'generation':g})
+        self.assertIn(('arm',g),c.gait.events)
+        self.assertLess(time.monotonic()-c.session.source_time,.1)
+    def test_confirm_consumes_real_manual_takeover_before_any_arm(self):
+        c,g=self.setup_console()
+        def actual():
+            now=time.monotonic();return dict(mode='manual',verified=True,connected=True,activity=False,
+                source=c.session.source,sequence=c.session.sequence+1,stamp=now,reply_stamp=None,source_transport='native_packet_snapshot')
+        c.gait.operator_authority=actual
+        with self.assertRaises(ValueError):c.confirm_goal({'generation':g})
+        self.assertNotIn(('arm',g),c.gait.events);self.assertEqual(c.nav.calls,0)
+        self.assertEqual(c.session.phase,'manual')
+    def test_confirm_cannot_renew_a_truly_expired_original_packet(self):
+        c,g=self.setup_console();stamp=time.monotonic()-2.1
+        c.gait.operator_authority=lambda:dict(mode='navigation_allowed',verified=True,connected=True,activity=False,
+            source=c.session.source,sequence=c.session.sequence+1,stamp=stamp,reply_stamp=None,source_transport='native_packet_snapshot')
+        with self.assertRaises(ValueError):c.confirm_goal({'generation':g})
+        self.assertNotIn(('arm',g),c.gait.events);self.assertEqual(c.nav.calls,0)
+        self.assertTrue(c.session.cancel_pending)
     def test_original_packet_is_read_after_waiting_for_session_lock(self):
         c,g=self.setup_console();old_lock=c.session.lock;entered=[]
         class Lock:
@@ -150,12 +175,14 @@ class ConsoleGaitTests(unittest.TestCase):
         c.poll_gait_authority(now+.01);self.assertEqual(c.session.phase,'stopped')
         self.assertTrue(c.session.cancel_pending)
     def test_real_zero_handshake_precedes_nav_action(self):
-        c,g=self.setup_console()
+        c,g=self.setup_console();now=time.monotonic()
+        c.gait.operator_authority=lambda:dict(mode='navigation_allowed',verified=True,connected=True,activity=False,source=c.session.source,sequence=c.session.sequence+1,stamp=now,reply_stamp=now)
         with self.assertRaisesRegex(ValueError,'导航服务未就绪'):c.confirm_goal({'generation':g})
         self.assertEqual(c.gait.events[0],('arm',g));self.assertIn(('stop',),c.gait.events)
         self.assertEqual(c.nav.calls,1);self.assertFalse(c.session.cancel_pending)
     def test_rejected_lease_prevents_nav_action(self):
-        c,g=self.setup_console();c.gait.reject=True
+        c,g=self.setup_console();c.gait.reject=True;now=time.monotonic()
+        c.gait.operator_authority=lambda:dict(mode='navigation_allowed',verified=True,connected=True,activity=False,source=c.session.source,sequence=c.session.sequence+1,stamp=now,reply_stamp=now)
         with self.assertRaisesRegex(ValueError,'lease rejected'):c.confirm_goal({'generation':g})
         self.assertEqual(c.nav.calls,0);self.assertIn(('stop',),c.gait.events)
     def test_cancel_ack_waits_for_actual_terminal_result(self):
@@ -170,5 +197,44 @@ class ConsoleGaitTests(unittest.TestCase):
         self.assertIn(c.session.phase,('cancelled','stopped'));self.assertEqual(h.cancel_count,1)
         self.assertTrue(c.session.cancel_pending);self.assertEqual(c.emitted[-1],{'armed':False,'paused':True})
         self.assertFalse(any(e[0]=='arm' for e in c.gait.events))
+
+class ConfirmAcceptancePhaseTests(unittest.TestCase):
+    setup_console=ConsoleGaitTests.setup_console
+    def accepted_console(self,phase):
+        from pathlib import Path
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        import tempfile
+        c,g=self.setup_console();tmp=tempfile.TemporaryDirectory();self.addCleanup(tmp.cleanup)
+        c.runtime=Path(tmp.name);c.get_clock=lambda:SimpleNamespace(now=lambda:SimpleNamespace(nanoseconds=time.monotonic_ns()))
+        globals_=c.confirm_goal.__func__.__globals__
+        globals_['Path']=Path;globals_['__file__']=str(Path(__file__).resolve().parents[1]/'navigation/console.py')
+        globals_['NavigateToPose']=SimpleNamespace(Goal=SimpleNamespace)
+        c.gait.operator_authority=lambda:dict(mode='navigation_allowed',verified=True,connected=True,activity=False,source=c.session.source,sequence=c.session.sequence+1,stamp=time.monotonic(),reply_stamp=None,source_transport='native_packet_snapshot')
+        c.gait.status=lambda:dict(phase=c.gait.phase,cancel_pending=False,navigation_owned=c.gait.phase=='active')
+        handle=Handle();future=Future();future.set_result(handle)
+        c.nav=SimpleNamespace(wait_for_server=lambda timeout_sec:True,send_goal_async=lambda goal,feedback_callback:future)
+        original=c.track_acceptance
+        def acceptance(*args):
+            result=original(*args)
+            if phase=='replanning':c.session.obstacle(time.monotonic())
+            elif phase=='arrived':c.session.finished(g,True)
+            elif phase=='manual':
+                fresh=time.monotonic();c.session.operator('manual',True,True,False,c.session.source,c.session.sequence+1,fresh,fresh)
+            return result
+        c.track_acceptance=acceptance
+        return c,g,handle
+    def test_accepted_goal_can_enter_checked_obstacle_wait_before_http_returns(self):
+        c,g,h=self.accepted_console('replanning');r=c.confirm_goal({'generation':g})
+        self.assertTrue(r['accepted']);self.assertEqual(c.session.phase,'replanning');self.assertEqual(h.cancel_count,0)
+        self.assertTrue(c.session.status(time.monotonic())['force_navigation_zero'])
+    def test_actual_success_before_http_returns_is_accepted_without_new_motion(self):
+        c,g,h=self.accepted_console('arrived');r=c.confirm_goal({'generation':g})
+        self.assertTrue(r['accepted']);self.assertEqual(c.session.phase,'arrived')
+        self.assertTrue(c.session.status(time.monotonic())['force_navigation_zero'])
+    def test_actual_manual_takeover_before_http_returns_is_not_accepted(self):
+        c,g,h=self.accepted_console('manual')
+        with self.assertRaises(ValueError):c.confirm_goal({'generation':g})
+        self.assertEqual(c.session.phase,'manual');self.assertTrue(c.session.status(time.monotonic())['force_navigation_zero'])
 
 if __name__=='__main__':unittest.main()
