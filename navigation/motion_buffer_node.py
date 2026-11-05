@@ -14,7 +14,10 @@ class MotionBufferNode(Node):
     def __init__(self):
         super().__init__('gait_motion_buffer')
         native_ramp=self.declare_parameter('native_input_ramp',False).value
-        self.buffer=MotionBuffer(accel=.4,decel=.8,angular_accel=.5,ramp_enabled=not native_ramp);self.target=(0.,0.,0.)
+        # Once a native pivot has begun, stepping sway is not a new request to
+        # brake translation. Live collision/source checks retain stop authority.
+        self.buffer=MotionBuffer(accel=.4,decel=.8,angular_accel=.5,ramp_enabled=not native_ramp,
+            recheck_pivot_translation=not native_ramp);self.target=(0.,0.,0.)
         self.motion_mean=MeasuredMotionMean(translation_window=.5 if native_ramp else 0.);self.measured=(0.,0.,0.);self.command_time=0.;self.odom_stamp=0.
         self.diagnostic=self.get_logger().info;self.diagnostic_time=0.;self.was_suppressed=False
         self.armed=False;self.paused=True;self.collision=True;self.reference=False;self.reference_time=0.

@@ -9,7 +9,7 @@ from collections import deque
 from gate import Limits
 
 class MotionBuffer:
-    def __init__(self,accel=.10,decel=.15,angular_accel=.30,settle_time=.15,feedback_timeout=None,ramp_enabled=True):
+    def __init__(self,accel=.10,decel=.15,angular_accel=.30,settle_time=.15,feedback_timeout=None,ramp_enabled=True,recheck_pivot_translation=True):
         if not all(math.isfinite(v) and v>0 for v in (accel,decel,angular_accel,settle_time)):
             raise ValueError('positive_finite_motion_parameters_required')
         self.feedback_timeout=Limits().sensor_timeout if feedback_timeout is None else feedback_timeout
@@ -17,6 +17,7 @@ class MotionBuffer:
             raise ValueError('feedback timeout must not exceed the command gate sensor expiry')
         self.accel=accel;self.decel=decel;self.angular_accel=angular_accel;self.settle_time=settle_time
         self.ramp_enabled=ramp_enabled
+        self.recheck_pivot_translation=recheck_pivot_translation
         self.reset()
     def reset(self):
         self.v=self.w=0.;self.last=None;self.phase='stopped';self.stable_since=None
@@ -40,7 +41,7 @@ class MotionBuffer:
                 self.reset();self.phase='immediate_zero';return (0.,0.,0.)
             self.phase='normal_braking'
         elif v==0:
-            if self.phase=='pivot' and linear>.06:
+            if self.recheck_pivot_translation and self.phase=='pivot' and linear>.06:
                 # Recheck throughout a turn: a zero forward command does not
                 # prove the body stayed still. Withdraw yaw immediately, then
                 # require a fresh translation-settling interval before pivoting.

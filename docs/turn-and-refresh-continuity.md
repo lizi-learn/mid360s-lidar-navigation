@@ -30,3 +30,20 @@ planner failure preserves controller execution, and a persistent failure halts
 it. `check_stride_turn.py` compares the actual pivot/input arithmetic with both
 feedback estimators on a named synthetic planar plant. Neither test constitutes
 physical biped acceptance or an office travel-time prediction.
+
+## Native in-place turns
+
+Field recording found that even the stride mean can exceed the translation
+settling threshold while the biped continues stepping in place. The native
+buffer now checks translation settling when entering a pivot, then retains that
+phase until the requested motion changes. It does not repeatedly withdraw an
+active turn because of translational stepping sway. Generic buffered platforms
+retain the prior ongoing translation recheck. Initial forward-to-turn settling,
+turn reversal, incoming zero, operator/collision stops and source expiry retain
+their behavior. The actual gait continues to own the only actuator input ramp.
+
+The collision monitor marks an unavailable observation source with the explicit
+`source_unavailable` state reason. That remains a zero-output stop, and a
+rotation is cancelled rather than replayed. The UI no longer attributes this
+source interruption to an observed obstacle. An actual obstacle still reports
+blocked. Source and geometry limits are unchanged.

@@ -332,8 +332,12 @@ class Console(Node):
             self.collision_stop=msg.action_type==CollisionMonitorState.STOP
             if self.collision_stop and self.session.phase=='executing':
                 if getattr(self.session,'task_kind','navigation')=='rotation':
-                    self.session.finished(self.session.generation,False)
-                    self.session._notice('原地转向受阻，速度已归零')
+                    if getattr(msg,'polygon_name','')=='source_unavailable':
+                        self.session.cancel()
+                        self.session._notice('避障观测暂时中断，原地转向已停止')
+                    else:
+                        self.session.finished(self.session.generation,False)
+                        self.session._notice('原地转向受阻，速度已归零')
                     self.op(armed=False,paused=True);self.stop_actions();return
                 self.obstacle_path_revision=self.path_revision;self.session.obstacle(time.monotonic())
     def execution_ready(self):
