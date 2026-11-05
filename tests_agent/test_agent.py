@@ -21,10 +21,12 @@ class ScriptedModel(BaseChatModel):
     _index:int=PrivateAttr(default=0)
     _entered:Any=PrivateAttr(default=None)
     _release:Any=PrivateAttr(default=None)
+    _seen:list=PrivateAttr(default_factory=list)
     @property
     def _llm_type(self):return 'scripted-fixture'
     def bind_tools(self,tools,**kwargs):return self
     def _generate(self,messages,stop=None,run_manager=None,**kwargs):
+        self._seen.append(messages[0].content)
         if self._entered:
             self._entered.set();self._release.wait(8)
         entry=self.script[self._index];self._index+=1
@@ -56,7 +58,7 @@ class AgentTest(unittest.TestCase):
         a.submit('request-1','test','去接待起点');job=self.wait(a)
         self.assertEqual(job['state'],'done');self.assertEqual(self.backend.submissions,1)
         self.assertEqual(job['task']['state'],'accepted');self.assertNotIn('已经到达',job['reply'])
-        self.assertEqual([t['name']for t in job['tools']],['list_destinations','visit_point'])
+        self.assertEqual([t['name']for t in job['tools']],['read_live_context','list_destinations','visit_point'])
     def test_duplicate_request_survives_journal_reopen_without_dispatch(self):
         a=self.agent([('visit_point',{'point_id':'welcome'}),'已提交'])
         a.submit('request-1','test','去接待起点');original=self.wait(a)
@@ -76,7 +78,7 @@ class AgentTest(unittest.TestCase):
     def test_unknown_point_id_never_generates_motion(self):
         a=self.agent([('visit_point',{'point_id':'not-real'}),'目录没有这个点位'])
         a.submit('request-1','test','去一个不存在的位置');job=self.wait(a)
-        self.assertEqual(self.backend.submissions,0);self.assertIn('不存在',job['tools'][0]['result']['error'])
+        self.assertEqual(self.backend.submissions,0);self.assertIn('不存在',job['tools'][-1]['result']['error'])
     def test_route_and_cancel_use_existing_sdk_task_lifecycle(self):
         a=self.agent([('run_route',{'route_id':'sample-tour'}),'已提交'])
         a.submit('request-1','test','参观一遍');job=self.wait(a)
@@ -89,7 +91,7 @@ class AgentTest(unittest.TestCase):
         a.journal.save_conversation('test',dict(history=[],task_id=task['id']))
         a.submit('request-1','test','暂停');job=self.wait(a)
         self.assertEqual(self.backend.current['state'],'paused')
-        self.assertEqual(job['tools'][1]['result']['task']['state'],'paused')
+        self.assertEqual(job['tools'][-1]['result']['task']['state'],'paused')
         b=self.agent([('control_navigation',{'operation':'resume'}),'已恢复'])
         b.journal.save_conversation('test',dict(history=[],task_id=task['id']))
         b.submit('request-1','test','继续导航');self.wait(b)
@@ -98,6 +100,15 @@ class AgentTest(unittest.TestCase):
         p=Path(self.tmp.name)/'crash.sqlite3';j=Journal(p)
         job,_=j.reserve('working','test','去接待起点',0);job['state']='working';j.put(job);j.db.close()
         j=Journal(p);self.assertEqual(j.job('working')['state'],'unknown');j.db.close()
+        self.assertEqual(self.backend.submissions,0)
+    def test_each_turn_reads_current_catalog_even_with_old_conversation_history(self):
+        a=self.agent(['当前有两个点位','当前有三个点位'])
+        a.submit('request-1','test','有哪些点位');first=self.wait(a)
+        self.assertEqual(len(first['tools'][0]['result']['points']),2)
+        self.nav.save_marker({'name':'刚增加的点位','x':1.,'y':1.})
+        a.submit('request-2','test','现在呢');second=self.wait(a,'request-2')
+        self.assertEqual(len(second['tools'][0]['result']['points']),3)
+        self.assertIn('刚增加的点位',a.llm._seen[-1])
         self.assertEqual(self.backend.submissions,0)
 
 if __name__=='__main__':unittest.main()

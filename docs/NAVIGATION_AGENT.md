@@ -72,11 +72,17 @@ dispatch the earlier request. Model/observer failure never cancels an accepted t
 UI task status and post-dispatch answers use actual SDK observations. An accepted
 task is not reported as arrived. The request journal and conversation stay private.
 No point cloud or full occupancy map is sent to the model.
+Before each model turn, the companion reads the current point/route catalogue and
+navigation status itself and records this snapshot as `read_live_context`. Fresh
+facts take precedence over conversational memory, including after an operator has
+added a point or changed a route between messages.
 
 ## Verification
 
 `tests_agent` runs the actual upstream RAI graph with a scripted LLM and the SDK HTTP
 synthetic backend: dispatch, true task receipts, no false arrival, idempotency after
 reopen, stop during inference, unknown destinations, pause/resume and cancellation.
+An additional two-turn test changes the catalogue between messages and checks that
+the actual RAI graph receives the new point in its current system context.
 This does not assert physical arrival. Production verification separately records
 real1006 status/tool receipts, software checksums and unchanged gait/driver identities.
