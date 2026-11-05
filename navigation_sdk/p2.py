@@ -91,14 +91,14 @@ class P2Backend:
                 body["point_id"]=points[0]["id"]
             payload={"reception_command":body}
             if self._extension().get("conditional_task_control"):
-                payload["_sdk_expected"]={"generation":session["generation"],"run_id":mission["run_id"],"epoch":mission["epoch"]}
+                payload["_sdk_expected"]={"generation":session["generation"],"run_id":mission["run_id"],"epoch":mission["epoch"],"map_id":s["reception"]["map_id"]}
             m=self._post("/api/confirm",payload)
             return {"type":"mission","run_id":m["run_id"],"epoch":m["epoch"],"map_id":d["map_id"]}
         d=self._document();p=self._resolve(request["target"],d)
         goal={"x":p["x"],"y":p["y"],"yaw":p["theta"]if p.get("theta")is not None else 0.,
               "heading_mode":"pose"if p.get("theta")is not None else"position","_arrival_profile":"presentation",
               "_sdk_expected_generation":session["generation"],
-              "_sdk_expected":{"generation":session["generation"],"run_id":mission["run_id"],"epoch":mission["epoch"]}}
+              "_sdk_expected":{"generation":session["generation"],"run_id":mission["run_id"],"epoch":mission["epoch"],"map_id":s["reception"]["map_id"]}}
         prepared=self._post("/api/goal",goal)
         self._post("/api/confirm",{"generation":prepared["generation"]})
         return {"type":"navigation","generation":prepared["generation"],"map_id":d["map_id"]}
@@ -125,11 +125,11 @@ class P2Backend:
             raise NavigationError("TASK_TERMINAL","Task is terminal or its authority was replaced")
         if not self._extension().get("conditional_task_control"):
             raise NavigationError("UNSUPPORTED_CAPABILITY","Task-scoped control needs the additive Console SDK extension; global stop remains available")
-        expected={"generation":ss["generation"],"run_id":m["run_id"],"epoch":m["epoch"]}
+        expected={"generation":ss["generation"],"run_id":m["run_id"],"epoch":m["epoch"],"map_id":s["reception"]["map_id"]}
         if operation=="cancel":
             self._post("/api/stop",{"_sdk_expected":expected});return ref
         if ref["type"]!="mission":raise NavigationError("UNSUPPORTED_CAPABILITY","Pause/continue is available for saved visits and routes; coordinate moves support cancel")
-        body={"reception_command":{"command":operation,"epoch":m["epoch"]},"_sdk_expected":expected}
+        body={"reception_command":{"command":operation,"epoch":m["epoch"],"map_id":s["reception"]["map_id"]},"_sdk_expected":expected}
         result=self._post("/api/confirm",body)
         return {**ref,"epoch":result["epoch"]}
 

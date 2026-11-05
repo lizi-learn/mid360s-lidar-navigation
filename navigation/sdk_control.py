@@ -3,9 +3,9 @@ def version():
     return {'version':'1.0','conditional_task_control':True}
 
 def verify(node, expected):
-    if not isinstance(expected,dict) or set(expected)!={'generation','run_id','epoch'}:
-        raise ValueError('SDK task reference requires generation, run_id and epoch')
-    current={'generation':node.session.generation,'run_id':node.reception.engine.run_id,'epoch':node.reception.engine.epoch}
+    if not isinstance(expected,dict) or set(expected)!={'generation','run_id','epoch','map_id'}:
+        raise ValueError('SDK task reference requires generation, run_id, epoch and map_id')
+    current={'generation':node.session.generation,'run_id':node.reception.engine.run_id,'epoch':node.reception.engine.epoch,'map_id':node.reception.map_id()}
     if expected!=current:raise ValueError('SDK task reference changed; no newer task was stopped')
 
 def stop(node, data):

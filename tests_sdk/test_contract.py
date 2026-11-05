@@ -215,7 +215,7 @@ class P2Fixture(BaseHTTPRequestHandler):
         if self.headers.get('X-Nav-Token')!='ephemeral-test':return self.send({'error':'token'},403)
         self.server.posts.append((self.path,body))
         expected=body.get('_sdk_expected')
-        if expected and expected!={'generation':ss['generation'],'run_id':m['run_id'],'epoch':m['epoch']}:return self.send({'error':'changed'},409)
+        if expected and expected!={'generation':ss['generation'],'run_id':m['run_id'],'epoch':m['epoch'],'map_id':s['reception']['map_id']}:return self.send({'error':'changed'},409)
         if self.path=='/api/goal':
             if body.get('_sdk_expected_generation')!=ss['generation']:return self.send({'error':'changed'},409)
             ss['generation']+=1;ss['phase']='ready';return self.send({'generation':ss['generation']})
@@ -264,6 +264,15 @@ class P2(unittest.TestCase):
     def test_map_switch_interrupts(self):
         ref=self.backend.submit({'kind':'route','route_id':'r'});self.server.state['reception']['map_id']='other'
         self.assertEqual(self.backend.observe(ref)['state'],'interrupted')
+    def test_map_change_between_snapshot_and_dispatch_never_starts_old_coordinates(self):
+        original=self.backend._post
+        def change_map(path,body):
+            if path=='/api/goal':self.server.state['reception']['map_id']='new-map'
+            return original(path,body)
+        self.backend._post=change_map
+        with self.assertRaises(NavigationError):self.backend.submit({'kind':'move','target':{'marker':'接待'}})
+        self.assertNotIn('/api/confirm',[path for path,body in self.server.posts])
+        self.assertEqual(self.server.state['session']['phase'],'idle')
     def test_catalog_upsert_preserves_routes_introductions(self):
         routes=copy.deepcopy(self.server.document['routes']);self.backend.save_marker({'name':'接待','x':5.})
         self.assertEqual(self.server.document['routes'],routes);self.assertEqual(self.server.document['points'][0]['script'],'你好')
