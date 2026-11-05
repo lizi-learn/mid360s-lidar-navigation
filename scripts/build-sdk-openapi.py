@@ -10,6 +10,10 @@ S={'Error':{'type':'object','required':['error'],'properties':{'error':{'type':'
    'Task':{'type':'object','required':['id','state','backend','request','created_at','updated_at','native_ref'],'properties':{'id':{'type':'string'},'state':{'type':'string','enum':['dispatching','accepted','running','blocked','paused','presenting','waiting','dwelling','succeeded','failed','cancelled','interrupted','unknown']},'backend':{'type':'string'},'request':{'$ref':'#/components/schemas/TaskRequest'},'native_ref':{'type':['object','null']},'created_at':{'type':'number'},'updated_at':{'type':'number'},'observation_stale':{'type':'boolean'},'observation':{'type':'object'}}},
    'Marker':{'type':'object','required':['name'],'properties':{'id':{'type':'string','readOnly':True},'name':{'type':'string','minLength':1,'maxLength':80},'x':{'type':'number'},'y':{'type':'number'},'theta':{'type':['number','null']},'script':{'type':'string'},'dwell':{'type':'number','minimum':0},'guest_wait':{'type':'boolean'},'kind':{'type':'string','enum':['visit','transit','home']}}},
    'Object':{'type':'object'},'Objects':{'type':'array','items':{'type':'object'}},'Empty':{'type':'object','maxProperties':0}}
+for kind,key,spec in [('forward','meters',{'type':'number','exclusiveMinimum':0,'maximum':100000}),
+                      ('rotate','radians',{'type':'number','minimum':-100000,'maximum':100000,'not':{'const':0},'description':'Accumulated angle, left positive; retain full revolutions.'}),
+                      ('tour','markers',{'type':'array','minItems':1,'maxItems':100,'items':{'type':'string','minLength':1,'maxLength':80}})]:
+    S['TaskRequest']['oneOf'].append(dict(type='object',additionalProperties=False,required=['kind',key],properties={'kind':{'const':kind},key:spec}))
 def ref(name):return {'$ref':'#/components/schemas/'+name}
 def operation(name,summary,response='Object',body=None,parameter=None,status='200'):
     obj={'operationId':name,'summary':summary,'responses':{status:{'description':'Result','content':{'application/json':{'schema':ref(response)}}},'default':{'description':'Structured error; unsupported capabilities are explicit','content':{'application/json':{'schema':ref('Error')}}}}}
@@ -19,7 +23,7 @@ def operation(name,summary,response='Object',body=None,parameter=None,status='20
 paths={}
 for path,name,summary,res in [('capabilities','capabilities','Provider capabilities','Object'),('status','status','Measured provider state; absent hardware fields are null','Object'),('maps','maps','Map list when supported','Objects'),('markers','markers','Marker list','Objects'),('routes','routes','Saved routes when supported','Objects')]:
     paths['/v1/'+path]={'get':operation(name,summary,res)}
-paths['/v1/tasks']={'post':operation('submit','Dispatch move, visit or saved route; accepted is not arrival','Task','TaskRequest',status='202')}
+paths['/v1/tasks']={'post':operation('submit','Dispatch move, visit, saved route, relative forward/rotation or temporary ordered tour; accepted is not arrival','Task','TaskRequest',status='202')}
 paths['/v1/tasks']['post']['parameters']=[{'name':'Idempotency-Key','in':'header','required':False,'schema':{'type':'string','minLength':1,'maxLength':128},'description':'Persisted per state directory. Same key + different request returns 409. No automatic replay after uncertain dispatch.'}]
 paths['/v1/tasks/{task_id}']={'get':operation('task','Observe this task only','Task',parameter='task_id')}
 for action in ('cancel','pause','resume','continue'):
