@@ -62,6 +62,13 @@ new explicit visit without a stop/cancel round trip. A real paused task, introdu
 guest wait, or outstanding cancellation still occupies the task slot. Failed SDK
 submissions remain in the journal as failures and are not running tasks or replayed.
 
+The model receives pause/resume/cancel tools only when the current user message
+explicitly requests such controls; a new point or route command cannot inherit a
+stop suggestion from old chat history. A completed visit permits a newly requested
+route directly. The UI shows current execution separately from the latest chat
+task result and updates an accepted task bubble when success is observed. A stopped
+control channel does not rewrite the saved task's successful arrival/introduction.
+
 The first version uses saved points and routes. It does not yet create arbitrary
 new multi-point itineraries, edit product knowledge, or capture microphone audio.
 Typing works immediately; spoken-language capture can be added as a separate input

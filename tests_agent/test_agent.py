@@ -10,7 +10,7 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage
 from langchain_core.outputs import ChatResult,ChatGeneration
 from pydantic import PrivateAttr
-from navigation_agent.app import NavigationAgent,Journal
+from navigation_agent.app import NavigationAgent,Journal,requested_controls
 from navigation_sdk import NavigationClient
 from navigation_sdk.gateway import GatewayServer
 from navigation_sdk.mock import MockBackend
@@ -110,5 +110,31 @@ class AgentTest(unittest.TestCase):
         self.assertEqual(len(second['tools'][0]['result']['points']),3)
         self.assertIn('刚增加的点位',a.llm._seen[-1])
         self.assertEqual(self.backend.submissions,0)
+    def test_new_route_after_completed_visit_cannot_invoke_unrequested_stop(self):
+        previous=self.nav.visit('接待起点');self.backend.advance('succeeded');self.nav.task(previous['id'])
+        stops=[];original=self.backend.stop
+        def stop():stops.append(True);return original()
+        self.backend.stop=stop
+        # Deliberately reproduce the model's mistaken call, then the right action.
+        a=self.agent([('control_navigation',{'operation':'cancel'}),('run_route',{'route_id':'sample-tour'}),'已开始'])
+        a.journal.save_conversation('test',dict(task_id=previous['id'],history=[dict(user='去接待起点',assistant='导航任务已受理，正在执行。')]))
+        a.submit('request-1','test','按保存路线参观');job=self.wait(a)
+        self.assertEqual(job['state'],'done');self.assertEqual(job['available_controls'],[])
+        self.assertEqual(stops,[]);self.assertEqual(self.nav.task(previous['id'])['state'],'succeeded')
+        self.assertEqual(job['task']['request']['kind'],'route');self.assertEqual(self.backend.submissions,2)
+        self.assertEqual(a.epoch,0)
+    def test_compound_explicit_cancel_then_route_keeps_own_new_authorization(self):
+        previous=self.nav.visit('接待起点')
+        a=self.agent([('control_navigation',{'operation':'cancel'}),('run_route',{'route_id':'sample-tour'}),'已开始'])
+        a.journal.save_conversation('test',dict(task_id=previous['id'],history=[]))
+        a.submit('request-1','test','取消当前任务，然后参观一遍');job=self.wait(a)
+        self.assertEqual(job['task']['request']['kind'],'route');self.assertEqual(self.backend.submissions,2)
+        self.assertEqual(a.epoch,1);self.assertEqual(job['epoch'],a.epoch)
+    def test_control_words_in_history_or_negation_are_not_current_control_commands(self):
+        for text in ('按20到1的路线参观','去点位1','不要取消，去点位4','请不要停止导航','为什么任务取消了','取消了吗？'):
+            with self.subTest(text=text):self.assertEqual(requested_controls(text),set())
+        self.assertEqual(requested_controls('请先取消当前任务，然后前往点位2'),{'cancel'})
+        self.assertEqual(requested_controls('暂停一下'),{'pause'})
+        self.assertEqual(requested_controls('介绍完了，继续下一站'),{'resume','continue'})
 
 if __name__=='__main__':unittest.main()
