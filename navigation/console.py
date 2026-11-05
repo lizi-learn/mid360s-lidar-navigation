@@ -770,6 +770,9 @@ class Console(Node):
                 raise ValueError('导览任务已取消或被人工接管')
             gait=getattr(self,'gait',None);ready=self.execution_ready()
             reason=gait.status().get('blockers','') if gait and not ready else ''
+            # Planning can outlast the cached authority view. Consume the
+            # current original receiver packet immediately before starting.
+            if ready:self.poll_gait_authority(time.monotonic())
             self.session.start(generation,time.monotonic(),ready,self.health_ready(),execution_reason=reason)
             self.goal_generation=generation
             pose=self.checked_pose(self.session.goal,require_free=False) if getattr(self,'goal_rotation',None)is not None else self.checked_pose(self.session.goal)
