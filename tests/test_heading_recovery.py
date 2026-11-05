@@ -57,9 +57,22 @@ class HeadingRecoveryTests(unittest.TestCase):
 
     def test_stale_source_does_not_spin(self):
         e,epoch,n,state,_=self.fixture();n.health_ready.return_value=False
-        with self.assertRaises(ValueError):self.run_recovery(n,e,epoch)
+        clock=[0.]
+        with self.assertRaises(ValueError):self.run_recovery(n,e,epoch,now=lambda:clock[0],sleep=lambda _:clock.__setitem__(0,clock[0]+1.))
         n.prepare_rotation.assert_not_called();n.set_goal.assert_not_called()
 
+    def test_transient_cancel_readiness_waits_at_zero_then_uses_real_reply(self):
+        e,epoch,n,state,_=self.fixture();n.execution_ready.side_effect=[False,False,True,True,True]
+        clock=[0.];sleeps=[]
+        def sleep(dt):clock[0]+=dt;sleeps.append(dt)
+        self.assertEqual(self.run_recovery(n,e,epoch,now=lambda:clock[0],sleep=sleep),dict(generation=6))
+        self.assertEqual(sleeps,[.05,.05]);self.assertEqual(n.prepare_rotation.call_count,1)
+        n.set_goal.assert_called_once()
+    def test_manual_during_readiness_wait_never_spins_or_restarts(self):
+        e,epoch,n,state,_=self.fixture();n.execution_ready.return_value=False
+        def sleep(_):state.update(navigation_permitted=False,operator_mode='manual',phase='manual')
+        self.assertIsNone(self.run_recovery(n,e,epoch,sleep=sleep))
+        self.assertEqual(e.phase,'manual');n.prepare_rotation.assert_not_called();n.confirm_goal.assert_not_called();n.set_goal.assert_not_called()
     def test_manual_takeover_during_turn_never_replans_or_rearms(self):
         e,epoch,n,state,_=self.fixture()
         def takeover(_):state.update(navigation_permitted=False,operator_mode='manual',phase='manual');e.cancel('manual')
