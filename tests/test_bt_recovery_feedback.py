@@ -19,3 +19,11 @@ class ActualBTFeedbackTests(unittest.TestCase):
    c=active();now=time.monotonic();c.session.operator(mode,True,True,False,1,2,now,now);c.on_bt_log(message());self.assertEqual(c.session.phase,mode)
  def test_repeated_recovery_events_do_not_restart_maximum_wait_timer(self):
   c=active();c.on_bt_log(message());before=c.session.blocked_since;c.on_bt_log(message());self.assertEqual(c.session.blocked_since,before)
+
+ def test_late_wait_after_actual_success_does_not_reopen_completed_goal(self):
+  c=active();c.session.finished(c.session.generation,True,action_status=4)
+  before=c.session.status(time.monotonic()).get('terminal_receipt')
+  c.on_bt_log(message())
+  self.assertEqual(c.session.phase,'arrived')
+  self.assertEqual(c.session.status(time.monotonic()).get('terminal_receipt'),before)
+  self.assertEqual(c.bt_recovery_report,{})

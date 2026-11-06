@@ -61,6 +61,7 @@ class ObservedCollisionMonitor : public nav2_collision_monitor::CollisionMonitor
   std::vector<std::shared_ptr<ObservationValidity>> checks_;
   rclcpp::TimerBase::SharedPtr observation_timer_;
   bool stop_on_predicted_collision_{false};
+  bool last_sources_valid_{false};
 public:
   explicit ObservedCollisionMonitor(const rclcpp::NodeOptions &options)
   : CollisionMonitor(options) {}
@@ -109,6 +110,7 @@ protected:
         }
         // Humble does not retain the chosen polygon in accessible state.
         // Leave its name empty instead of inventing an attribution.
+        if(!last_sources_valid_)out.polygon_name="source_unavailable";
         state_->publish(out);
       });
     // Source readiness must not depend on a movement request: otherwise an
@@ -133,6 +135,7 @@ protected:
       ++enabled;sources_[i]->getData(now,points);valid=valid && checks_[i]->observed;
     }
     valid=valid && enabled>0;
+    last_sources_valid_=valid;
     std_msgs::msg::Bool health;health.data=valid;source_health_->publish(health);
     return valid;
   }

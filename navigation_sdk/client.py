@@ -27,6 +27,22 @@ class NavigationClient:
         """Navigate, face the configured direction, introduce, dwell/wait."""
         return self._task({"kind":"visit", "marker":marker}, idempotency_key)
 
+    def forward(self, meters, *, idempotency_key=None):
+        """Target displaced in the measured body-forward direction; metres, not seconds."""
+        return self._task(dict(kind='forward',meters=meters),idempotency_key)
+
+    def rotate(self, radians, *, idempotency_key=None):
+        """Signed accumulated angle: positive left; 2*pi is a full revolution."""
+        return self._task(dict(kind='rotate',radians=radians),idempotency_key)
+
+    def tour(self, markers, *, idempotency_key=None):
+        """One temporary ordered visit mission, preserving saved introduction/wait settings."""
+        return self._task(dict(kind='tour',markers=markers),idempotency_key)
+
+    def sequence(self, steps, *, idempotency_key=None):
+        """Submit one ordered relative-motion task; later targets resolve after prior success."""
+        return self._task(dict(kind='sequence',steps=steps),idempotency_key)
+
     def _task(self, body, key):
         return self.http.request("POST", "/v1/tasks", body,
                                  {"Idempotency-Key": key} if key else None)

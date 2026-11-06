@@ -22,7 +22,7 @@ def main():
     cmd=n.create_publisher(Twist,prefix+'/request',10);scan=n.create_publisher(LaserScan,prefix+'/scan',qos_profile_sensor_data)
     trace=[];states=[];health=[];phase={'name':'missing','idle':True}
     n.create_subscription(Twist,prefix+'/result',lambda m:trace.append((time.monotonic(),m.linear.x,m.linear.y,m.angular.z)),10)
-    n.create_subscription(CollisionMonitorState,prefix+'/state',lambda m:states.append((time.monotonic(),int(m.action_type))),10)
+    n.create_subscription(CollisionMonitorState,prefix+'/state',lambda m:states.append((time.monotonic(),int(m.action_type),m.polygon_name)),10)
     n.create_subscription(Bool,prefix+'/source_valid',lambda m:health.append((time.monotonic(),m.data)),10)
     tf=StaticTransformBroadcaster(n);transforms=[]
     for parent,child in ([('fixture_base','fixture_laser')] if a.delayed_tf else [('fixture_odom','fixture_base'),('fixture_base','fixture_laser')]):
@@ -81,12 +81,17 @@ def main():
             values=[x for x in trace if x[0]>=start];decision=[x[1] for x in states if x[0]>=start];valid=[x[1] for x in health if x[0]>=start]
             assert values,'No actual velocity output for '+name
             peak=max(abs(x[k]) for x in values for k in [1,2,3]);is_fault=name in ['missing','unknown','stale','bad_tf','stale_tf','future_tf']
-            result={'case':name,'output_samples':len(values),'max_abs_velocity':peak,'state_values':sorted(set(decision)),'source_health_values':sorted(set(valid))}
+            reasons=sorted(set(x[2]for x in states if x[0]>=start))
+            result={'case':name,'output_samples':len(values),'max_abs_velocity':peak,'state_values':sorted(set(decision)),'source_health_values':sorted(set(valid)),'state_reasons':reasons}
             results.append(result)
             if name in ['clear','clear_recovery']:assert peak>.05,result
-            elif name=='obstacle':assert peak==0 and CollisionMonitorState.STOP in decision,result
+            elif name=='obstacle':
+                assert peak==0 and CollisionMonitorState.STOP in decision,result
+                assert 'source_unavailable'not in reasons,result
             elif a.expect_old_defect:assert peak>.05,result
-            else:assert peak==0 and decision and all(x==CollisionMonitorState.STOP for x in decision) and valid and not any(valid),result
+            else:
+                assert peak==0 and decision and all(x==CollisionMonitorState.STOP for x in decision) and valid and not any(valid),result
+                assert reasons==['source_unavailable'],result
             result['passed_expected_behavior']=True
         if not baseline and not a.expect_old_defect:
             # Current zero requests are real decisions, not missing commands.

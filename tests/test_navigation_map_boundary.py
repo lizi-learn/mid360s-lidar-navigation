@@ -75,10 +75,11 @@ class MapBoundaryTests(unittest.TestCase):
         with self.assertRaises(ValueError):exterior_unknown_mask([],0,0)
         with self.assertRaises(ValueError):exterior_unknown_mask([0],2,2)
 
-    def test_temporal_memory_is_global_p2_only(self):
+    def test_temporal_memory_matches_global_and_local_p2_only(self):
         p=config(gait_profile='p2-flat-model')
         self.assertEqual(p['global_costmap']['global_costmap']['ros__parameters']['obstacle_layer']['plugin'],'p2_nav_controller::TemporalObstacleLayer')
-        self.assertEqual(p['local_costmap']['local_costmap']['ros__parameters']['obstacle_layer']['plugin'],'nav2_costmap_2d::ObstacleLayer')
+        self.assertEqual(p['local_costmap']['local_costmap']['ros__parameters']['obstacle_layer']['plugin'],'p2_nav_controller::TemporalObstacleLayer')
+        self.assertEqual(config()['local_costmap']['local_costmap']['ros__parameters']['obstacle_layer']['plugin'],'nav2_costmap_2d::ObstacleLayer')
         self.assertEqual(config()['global_costmap']['global_costmap']['ros__parameters']['obstacle_layer']['plugin'],'nav2_costmap_2d::ObstacleLayer')
 
 if __name__=='__main__':unittest.main()

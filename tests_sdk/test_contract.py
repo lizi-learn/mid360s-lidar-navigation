@@ -208,7 +208,7 @@ class P2Fixture(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path=='/api/status?summary=1':return self.send(self.server.state)
         if self.path=='/api/reception':return self.send({'document':self.server.document})
-        if self.path=='/api/sdk/version':return self.send({'conditional_task_control':True} if self.server.extension else {'error':'missing'},200 if self.server.extension else 404)
+        if self.path=='/api/sdk/version':return self.send({'conditional_task_control':True,'relative_forward':True,'relative_rotation':True,'visit_sequence':True,'conditional_relative_chaining':True} if self.server.extension else {'error':'missing'},200 if self.server.extension else 404)
         self.send({},404)
     def do_POST(self):
         body=json.loads(self.rfile.read(int(self.headers['Content-Length'])));s=self.server.state;m=s['reception']['mission'];ss=s['session']
@@ -216,8 +216,13 @@ class P2Fixture(BaseHTTPRequestHandler):
         self.server.posts.append((self.path,body))
         expected=body.get('_sdk_expected')
         if expected and expected!={'generation':ss['generation'],'run_id':m['run_id'],'epoch':m['epoch'],'map_id':s['reception']['map_id']}:return self.send({'error':'changed'},409)
-        if self.path=='/api/goal':
-            if body.get('_sdk_expected_generation')!=ss['generation']:return self.send({'error':'changed'},409)
+        if self.path in('/api/goal','/api/relative-goal','/api/rotate'):
+            if '_sdk_expected_phase'in body and body['_sdk_expected_phase']!=ss['phase']:return self.send({'error':'phase changed'},409)
+            if self.path=='/api/goal'and body.get('_sdk_expected_generation')!=ss['generation']:return self.send({'error':'changed'},409)
+            if self.path=='/api/relative-goal':
+                x,y,yaw=s['pose'];ss['goal']={'x':x+body['meters']*math.cos(yaw),'y':y+body['meters']*math.sin(yaw),'yaw':yaw}
+            elif self.path=='/api/rotate':ss['goal']={'x':s['pose'][0],'y':s['pose'][1],'yaw':math.remainder(s['pose'][2]+body['radians'],math.tau)}
+            else:ss['goal']={k:body[k]for k in('x','y','yaw')}
             ss['generation']+=1;ss['phase']='ready';return self.send({'generation':ss['generation']})
         if self.path=='/api/confirm':
             if 'reception_command'in body:
@@ -245,6 +250,50 @@ class P2(unittest.TestCase):
                               'routes':[{'id':'r','steps':[{'point_id':'p','speak':True}]}],'edges':[],'policy':{},'doors':[],'annotations':[]}
         running=Running(self.server);running.__enter__();self.addCleanup(running.__exit__)
         self.backend=P2Backend('http://127.0.0.1:'+str(self.server.server_port))
+    def test_manual_priority_does_not_prepare_or_dispatch_a_goal(self):
+        self.server.state['session'].update(navigation_permitted=False,operator_mode='manual',notice='E右档手动优先')
+        with self.assertRaises(NavigationError)as exc:self.backend.submit({'kind':'visit','marker':'接待'})
+        self.assertEqual(exc.exception.code,'MANUAL_PRIORITY')
+        self.assertEqual(self.server.posts,[])
+    def test_empty_paused_switch_state_is_idle_and_accepts_visit_without_stop(self):
+        self.server.state['session'].update(phase='paused',goal=None,cancel_pending=False)
+        status=self.backend.status()
+        self.assertEqual(status['navigation_state'],'idle')
+        self.assertFalse(status['task_active']);self.assertIsNone(status['current_task'])
+        ref=self.backend.submit({'kind':'visit','marker':'接待'})
+        self.assertEqual(ref['type'],'mission')
+        self.assertEqual([path for path,body in self.server.posts],['/api/confirm'])
+        self.assertEqual(self.backend.status()['current_task']['run_id'],ref['run_id'])
+        self.assertEqual(self.backend.status()['navigation_state'],'running')
+    def test_real_paused_goal_and_cancel_ack_pending_are_still_busy(self):
+        for changes in (
+            dict(phase='paused',goal={'x':1,'y':2,'yaw':0},last_stop={'phase':'paused'},terminal_receipt=None),
+            dict(phase='paused',goal=None,cancel_pending=True),
+            dict(phase='executing',goal={'x':1,'y':2,'yaw':0},cancel_pending=False),
+        ):
+            with self.subTest(changes=changes):
+                self.server.state['session'].update(changes)
+                with self.assertRaises(NavigationError)as exc:self.backend.submit({'kind':'visit','marker':'接待'})
+                self.assertEqual(exc.exception.code,'TASK_BUSY')
+                self.assertTrue(exc.exception.details['current_task'])
+                self.assertEqual(self.server.posts,[])
+    def test_retained_terminal_goal_does_not_become_busy_on_switch_pause(self):
+        for changes in (
+            dict(terminal_receipt={'succeeded':True},last_stop=None),
+            dict(terminal_receipt=None,last_stop={'phase':'manual'}),
+            dict(terminal_receipt=None,last_stop={'phase':'cancelled'}),
+        ):
+            with self.subTest(changes=changes):
+                self.server.state['session'].update(phase='paused',goal={'x':1,'y':2,'yaw':0},**changes)
+                self.assertFalse(self.backend.status()['task_active'])
+                self.assertEqual(self.backend.status()['navigation_state'],'idle')
+    def test_paused_mission_still_owns_task_even_when_session_has_no_goal(self):
+        self.server.state['session'].update(phase='paused',goal=None)
+        self.server.state['reception']['mission'].update(phase='paused',run_id='existing-tour')
+        self.assertTrue(self.backend.status()['task_active'])
+        with self.assertRaises(NavigationError)as exc:self.backend.submit({'kind':'visit','marker':'接待'})
+        self.assertEqual(exc.exception.details['current_task']['run_id'],'existing-tour')
+        self.assertEqual(self.server.posts,[])
     def test_navigation_move_not_double_speech(self):
         ref=self.backend.submit(task_request({'kind':'move','target':{'marker':'接待'}}))
         self.assertEqual(ref['type'],'navigation');self.assertEqual([p for p,b in self.server.posts],['/api/goal','/api/confirm'])

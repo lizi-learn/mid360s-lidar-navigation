@@ -51,6 +51,7 @@ class Mission:
         self.route_id = ''; self.route_mode='showcase';self.actual_transit=[];self.waiting_since=None;self.route_reason=''
         self.route_name = ''; self.error = ''; self.goal_generation = None; self.batch_end = None
         self.presentation_started = None; self.deadline = None; self.speech_key = ''; self.events = []; self.event_seq = 0
+        self.pending_arrival_heading=False
     def event(self, kind, **data):
         self.event_seq += 1
         self.events.append({'sequence': self.event_seq, 'kind': kind, **data})
@@ -167,6 +168,7 @@ class Mission:
                 if phase in ('blocked', 'cancelled', 'stopped', 'manual', 'paused'):
                     self.failed(self.epoch, session.get('notice', phase)); return None
                 if phase == 'arrived':
+                    if self.pending_arrival_heading:return None
                     if self.batch_end is not None:
                         for point_id in self.actual_transit:
                             self.event('transit_segment_completed',point=point_id,receipt='navigate_through_poses_succeeded')
@@ -199,7 +201,8 @@ class Mission:
                     'index': self.index, 'total': len(self.steps), 'point': copy.deepcopy(point),
                     'revision': self.document['revision'] if self.document else None,
                     'error': self.error, 'speech_key': self.speech_key,
-                    'event_sequence': self.event_seq, 'events': copy.deepcopy(self.events[-12:])}
+                    'event_sequence': self.event_seq, 'events': copy.deepcopy(self.events[-12:]),
+                    'heading_pending':self.pending_arrival_heading}
 
 class MissionService:
     def session_snapshot(self):
@@ -242,6 +245,10 @@ class MissionService:
                 if self.node.session.phase in ('starting', 'executing', 'replanning'): raise ValueError('已有导航正在执行')
                 if self.future is not None and not self.future.done(): raise ValueError('上一任务正在退出，请稍候')
                 route_id=data.get('route_id')
+                if 'point_ids'in data:
+                    if any(k in data for k in ('route_id','point_id','target','dock_pose')):raise ValueError('参观序列不能混用其他目标')
+                    from relative_intent import visit_sequence
+                    route_id=visit_sequence(doc,data['point_ids'])
                 if data.get('target') is not None:
                     target=data['target']
                     if not isinstance(target,dict) or any(type(target.get(k)) not in (int,float) or not math.isfinite(target[k]) or abs(target[k])>1e5 for k in ('x','y')):
@@ -342,6 +349,9 @@ class MissionService:
         p = command['point'];starting_generation=None
         try:
             if not self.engine.valid(epoch): return
+            if command.get('arrival_heading'):
+                starting_generation=self.node.session.generation if command.get('source_recovery')else None
+                return self.dispatch_arrival_heading(command)
             if command.get('reroute'):
                 if not self.node.cancel_reception_leg(epoch):return
                 if command.get('wait'):
@@ -359,6 +369,11 @@ class MissionService:
             poses=route_poses(points,read_pose() if callable(read_pose) else None)
             data=dict(poses[-1],_mission_epoch=epoch,heading_mode='position' if p['yaw'] is None else 'pose')
             if getattr(self.node,'gait_profile',None)=='p2-flat-model'and (p.get('script')or p.get('product_id')or p.get('dwell')or p.get('guest_wait')or p.get('yaw')is not None):data['_arrival_profile']='presentation'
+            from reception_spins import enabled,initial_error,turn_initial
+            native_spins=enabled(self.node)
+            if native_spins and p.get('yaw')is not None:
+                data['_native_arrival_spin']=True
+                command=dict(command,native_arrival_spin=True)
             if len(points)>1:
                 data['_route_goals']=poses
             starting_generation=self.node.session.generation if command.get('source_recovery')else None
@@ -376,6 +391,11 @@ class MissionService:
                     raise
                 result = plan_after_turn(self.node, self.engine, epoch, data, plan_error)
                 if result is None:return
+            if native_spins:
+                angle=initial_error(self.node)
+                if angle:
+                    if not turn_initial(self.node,self.engine,epoch,angle):return
+                    result=self.node.set_goal(data)
             # Allow the existing observations/lifecycle to finish initializing.
             # Do not change freshness requirements or resume after takeover.
             deadline=time.monotonic()+8.
@@ -391,7 +411,10 @@ class MissionService:
                 time.sleep(.05)
             if not self.engine.valid(epoch): return
             self.node.confirm_goal({'generation': result['generation'], '_mission_epoch': epoch})
-            if self.engine.dispatched(epoch, result['generation'],command.get('end_index'),[q['id']for q in points[:-1]]):
+            with self.engine.lock:
+                self.engine.pending_arrival_heading=bool(command.get('native_arrival_spin'))
+                dispatched=self.engine.dispatched(epoch, result['generation'],command.get('end_index'),[q['id']for q in points[:-1]])
+            if dispatched:
                 self.source_recovery_active=False
                 if command.get('source_recovery'):self.engine.event('source_recovery_resumed',generation=result['generation'])
                 self.active_command=copy.deepcopy(command)
@@ -407,6 +430,86 @@ class MissionService:
                 self.engine.event('source_recovery_retry',reason=str(error))
             else:
                 self.source_recovery_active=False;self.engine.failed(epoch,error)
+    def arrival_heading_command(self,state):
+        from reception_spins import enabled,heading_error
+        if not enabled(self.node) or (self.future is not None and not self.future.done()):return None
+        with self.engine.lock:
+            if (self.engine.phase!='navigating' or state.get('phase')!='arrived' or
+                    state.get('generation')!=self.engine.goal_generation or not self.active_command or
+                    not self.active_command.get('native_arrival_spin')):return None
+            p=self.active_command['point']
+            if p.get('yaw')is None:return None
+            error=heading_error(self.node,p)
+            tolerance=self.node.presentation_yaw_tolerance
+            if abs(error)<=tolerance:
+                self.engine.pending_arrival_heading=False
+                return None
+            self.engine.pending_arrival_heading=True
+            command=copy.deepcopy(self.active_command)
+            key=(self.engine.epoch,self.engine.index,self.engine.batch_end)
+            attempts=getattr(self,'arrival_spin_attempts',{})
+            if attempts.get(key,0)>=2:
+                self.engine.failed(self.engine.epoch,'原地转向后实测朝向仍超出10度，任务未标记到达')
+                return None
+            self.arrival_spin_attempts={key:attempts.get(key,0)+1}
+            self.engine.phase='rerouting'
+            self.engine.event('arrival_heading_preparing',radians=error,tolerance=tolerance)
+            command.update(arrival_heading=True,epoch=self.engine.epoch,
+                           arrival_transit_ids=list(self.engine.actual_transit))
+            return command
+    def interrupted_arrival_spin_command(self,state):
+        """Keep a temporarily interrupted turn inside its authorized visit.
+
+        An abort is retained as an abort, never arrival. The retry recomputes
+        the remaining heading from current measured pose and receives a new
+        native action result. Operator stops are never retried.
+        """
+        from reception_spins import enabled,interrupted_rotation
+        if(not enabled(self.node)or not interrupted_rotation(self.node,state)or
+                not state.get('navigation_permitted')or state.get('manual_activity')or state.get('last_stop')or
+                (self.future is not None and not self.future.done())):return None
+        with self.engine.lock:
+            if(self.engine.phase!='navigating'or state['generation']!=self.engine.goal_generation or
+                    not self.active_command or not self.active_command.get('arrival_heading')):return None
+            command=copy.deepcopy(self.active_command)
+            deadline=command.get('turn_wait_deadline')
+            if deadline is None:deadline=time.monotonic()+self.engine.document['policy']['max_wait']
+            if time.monotonic()>=deadline:
+                self.engine.failed(self.engine.epoch,'原地转向持续受阻，已结束本次等候');return None
+            self.engine.pending_arrival_heading=True
+            self.engine.begin_reroute('转向暂时受阻，停车等待并保留当前点位')
+            self.engine.event('arrival_spin_wait',generation=state['generation'],reason=state.get('notice',''))
+            command.update(epoch=self.engine.epoch,turn_wait_deadline=deadline,turn_wait=True)
+            return command
+    def dispatch_arrival_heading(self,command):
+        from reception_spins import available,heading_error,prepare,wait_after_interruption
+        epoch=command['epoch']
+        if command.get('turn_wait'):
+            if not self.node.cancel_reception_leg(epoch):return
+            if not wait_after_interruption(self.node,self.engine,epoch,command['turn_wait_deadline']):return
+            command=dict(command);command.pop('turn_wait',None)
+        if not available(self.node,self.engine,epoch):return
+        angle=heading_error(self.node,command['point'])
+        if abs(angle)<=self.node.presentation_yaw_tolerance:
+            state=self.session_snapshot()
+            if state['phase']!='arrived':
+                # A source stop needs a new native success receipt, even if the
+                # measured heading already fits. Replan the original point.
+                replacement=dict(command);replacement.pop('arrival_heading',None)
+                return self.dispatch(replacement)
+            self.engine.pending_arrival_heading=False
+            self.engine.dispatched(epoch,state['generation'],command.get('end_index'),command.get('arrival_transit_ids'))
+            return
+        result=prepare(self.node,self.engine,epoch,angle)
+        if result is None:return
+        generation=result['generation']
+        if self.engine.dispatched(epoch,generation,command.get('end_index'),command.get('arrival_transit_ids')):
+            self.active_command=copy.deepcopy(command)
+            self.active_command.pop('turn_wait',None)
+            for key in ('source_recovery','source_deadline','reroute','reason'):
+                self.active_command.pop(key,None)
+            self.source_recovery_active=False
+            self.engine.event('arrival_spin_started',generation=generation,radians=angle)
     def tracking_recovery_command(self,state):
         """One checked turn/replan after a real aborted navigation action.
 
@@ -464,6 +567,7 @@ class MissionService:
         while not self.closed.wait(.1):
             try:
                 state = self.session_snapshot()
+                heading=self.interrupted_arrival_spin_command(state)or self.arrival_heading_command(state)
                 recovery = self.tracking_recovery_command(state)
                 # Speech acknowledgements are local, bounded files; no cloud here.
                 speech = self.node.reception_speech_result()
@@ -479,7 +583,7 @@ class MissionService:
                         if not 0<=time.time()-worker.get('updated_at',0)<=3:
                             speech={'epoch':snapshot['epoch'],'key':snapshot['speech_key'],'result':'failed'}
                 if not state.get('navigation_permitted') and snapshot['phase'] in BUSY:self.capture_resume()
-                command = self.engine.tick(state, time.monotonic(), speech) or recovery
+                command = heading or self.engine.tick(state, time.monotonic(), speech) or recovery
                 current = self.engine.status()
                 if snapshot['phase'] in BUSY and current['phase'] in ('manual', 'paused'):
                     # E pause and manual takeover end physical navigation too;

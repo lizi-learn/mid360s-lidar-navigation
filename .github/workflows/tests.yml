@@ -58,6 +58,8 @@ jobs:
           cmake --build /tmp/waypoint-progress-build -j2
           ROS_DOMAIN_ID=223 ROS_LOCALHOST_ONLY=1 /tmp/waypoint-progress-build/waypoint_progress navigation/forward_position_through_poses.xml
           ROS_DOMAIN_ID=223 ROS_LOCALHOST_ONLY=1 /tmp/waypoint-progress-build/reference_action "$GITHUB_WORKSPACE/nav_controller_ws/install/p2_nav_controller/lib/libp2_nav_reference_bt_node.so" navigation/forward_position_through_poses.xml
+          python3 -c "import sys;sys.path.insert(0,'navigation');from recovery_tree import recovery_tree;print(recovery_tree('navigation/forward_navigation.xml','/tmp/path-refresh',25.,keep_tracking_on_plan_retry=True))" > /tmp/path-refresh-tree.txt
+          ROS_DOMAIN_ID=223 ROS_LOCALHOST_ONLY=1 /tmp/waypoint-progress-build/refresh_retry navigation/forward_navigation.xml "$(cat /tmp/path-refresh-tree.txt)"
       - name: Reject swept-body collisions while allowing a clear forward left arc
         shell: bash
         env:
@@ -125,6 +127,8 @@ jobs:
           /tmp/arrival-build/presentation_arrival --ros-args --params-file /tmp/presentation-arrival.yaml --log-level error
           mkdir -p /tmp/arrival
           /tmp/arrival-build/dynamic_map > /tmp/arrival/dynamic-map.log
+          /tmp/arrival-build/rolling_memory --ros-args --params-file /tmp/presentation-arrival.yaml > /tmp/arrival/rolling-memory.log
+          python3 experiments/arrival/check_stride_turn.py --library /tmp/arrival-build/libhandoff_response.so --output /tmp/arrival/stride-turn
           /tmp/arrival-build/pivot_observation > /tmp/arrival/pivot-observation.json
           python3 experiments/arrival/check_route_reply.py --output /tmp/arrival/route-reply.json
           /tmp/arrival-build/rotation_progress > /tmp/arrival/rotation-progress.json
@@ -295,6 +299,23 @@ jobs:
         with:
           name: reception-followthrough-evidence
           path: /tmp/reception-followthrough
+          if-no-files-found: ignore
+      - name: Wait through a temporary person during arrival Spin and resume the same visit
+        shell: bash
+        env:
+          ROS_LOCALHOST_ONLY: '1'
+          ROS_DOMAIN_ID: '225'
+          RMW_IMPLEMENTATION: rmw_cyclonedds_cpp
+        run: |
+          source /opt/ros/humble/setup.bash
+          source nav_controller_ws/install/setup.bash
+          export CYCLONEDDS_URI="file://$PWD/config/cyclonedds-local.xml"
+          timeout 180s python3 experiments/reception/check_native.py --setup "$GITHUB_WORKSPACE/nav_controller_ws/install/setup.bash" --output /tmp/reception-spin-wait/report.json --scenario followthrough --turn-obstacle --port 8956 --domain 225
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: reception-spin-wait-evidence
+          path: /tmp/reception-spin-wait
           if-no-files-found: ignore
       - name: Check production UDP transport with the reception workflow
         shell: bash

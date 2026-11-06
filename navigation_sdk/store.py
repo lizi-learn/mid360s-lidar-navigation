@@ -21,7 +21,9 @@ class TaskStore:
                 task.update(state='unknown',reason='gateway_restarted_reconcile_native_state_before_new_dispatch',updated_at=time.time())
                 self._write(task)
         self.db.commit()
-    def close(self): self.db.close()
+        from .sequence import Sequences
+        self.sequences=Sequences(self)
+    def close(self):self.sequences.close();self.db.close()
     def _write(self, task):
         self.db.execute('UPDATE tasks SET payload=? WHERE id=?',(json.dumps(task,ensure_ascii=False,allow_nan=False),task['id']))
         self.db.commit()
@@ -39,11 +41,21 @@ class TaskStore:
                 if row:
                     if row[0]!=fingerprint:raise NavigationError('IDEMPOTENCY_CONFLICT','Same key used for a different request')
                     return json.loads(row[1])
+            # Providers expose one current native run. Capture its terminal
+            # receipt before the next dispatch replaces that run's snapshot.
+            # This observes old tasks only; it never replays any request.
+            for ident,raw in self.db.execute('SELECT id,payload FROM tasks').fetchall():
+                previous=json.loads(raw)
+                if previous['state']not in TERMINAL and previous.get('native_ref'):self.get(ident)
+            active=self.sequences.active()
+            if active:raise NavigationError('TASK_BUSY','An ordered motion task is active',details={'task_id':active['id']})
+            if body['kind']=='sequence'and not self.backend.capabilities()['features'].get('motion_sequence'):
+                raise NavigationError('UNSUPPORTED_CAPABILITY','Backend has no conditional ordered-motion execution')
             now=time.time();task={'id':uuid.uuid4().hex,'state':'dispatching','request':body,
                                   'created_at':now,'updated_at':now,'backend':self.backend.name,'native_ref':None}
             self.db.execute('INSERT INTO tasks VALUES(?,?,?,?)',(task['id'],key,fingerprint,json.dumps(task)));self.db.commit()
             try:
-                task['native_ref']=self.backend.submit(body)
+                task['native_ref']=self.backend.submit(body['steps'][0]if body['kind']=='sequence'else body)
                 task['state']='accepted'
             except NavigationError as exc:
                 task.update(state='unknown' if exc.code in ('UPSTREAM_UNCERTAIN','INVALID_RESPONSE','BACKEND_PROTOCOL') else 'failed',error=exc.to_dict()['error'])
@@ -52,10 +64,14 @@ class TaskStore:
             except Exception:
                 task.update(state='unknown',reason='dispatch_outcome_unknown');self._write(task)
                 raise NavigationError('UPSTREAM_UNCERTAIN','Dispatch outcome unknown; request was not replayed',status=503,details={'task_id':task['id']}) from None
-            task['updated_at']=time.time();self._write(task);return task
+            if body['kind']=='sequence':task['sequence']=dict(index=0,total=len(body['steps']),completed=0,receipts=[],revision=0)
+            task['updated_at']=time.time();self._write(task)
+            if body['kind']=='sequence':self.sequences.start(task)
+            return task
     def get(self, ident):
         with self.lock:
             task=self._load(ident)
+            if task['request']['kind']=='sequence':return task
             if task['state'] not in TERMINAL and task['native_ref']:
                 try:
                     observation=self.backend.observe(task['native_ref'])
@@ -68,6 +84,8 @@ class TaskStore:
                 task['updated_at']=time.time();self._write(task)
             return task
     def control(self, ident, operation):
+        with self.lock:sequence=self._load(ident)['request']['kind']=='sequence'
+        if sequence:return self.sequences.control(ident,operation)
         with self.lock:
             task=self.get(ident)
             if task['state'] in TERMINAL:
@@ -77,4 +95,13 @@ class TaskStore:
             task['last_control']=operation;task['updated_at']=time.time();self._write(task)
             return self.get(ident)
     def stop(self):
-        with self.lock:return self.backend.stop()
+        task=self.sequences.stop_intents()
+        try:receipt=self.backend.stop()
+        except Exception:
+            self.sequences.finish_stop(task,'unknown');raise
+        self.sequences.finish_stop(task);return receipt
+    def status(self):
+        status=self.backend.status()
+        with self.lock:task=self.sequences.active()
+        if task:status.update(task_active=True,navigation_state=task['state'],current_task=dict(type='sequence',task_id=task['id'],**task['sequence']))
+        return status

@@ -2,7 +2,7 @@
 from pathlib import Path
 import hashlib,math,os,xml.etree.ElementTree as ET
 
-def recovery_tree(base,directory,max_wait,goal_checker_id=None):
+def recovery_tree(base,directory,max_wait,goal_checker_id=None,keep_tracking_on_plan_retry=False):
     if type(max_wait)not in(int,float)or not math.isfinite(max_wait)or not .1<=max_wait<=600:raise ValueError('Invalid recovery wait duration')
     base=Path(base);tree=ET.parse(base);root=tree.getroot()
     if goal_checker_id is not None:
@@ -21,6 +21,18 @@ def recovery_tree(base,directory,max_wait,goal_checker_id=None):
     # must remain available long enough to carry that policy rather than abort
     # after the old two waits. A bounded fallback remains if used standalone.
     recoveries[0].set('number_of_retries',str(math.ceil(max_wait/duration)+2))
+    if keep_tracking_on_plan_retry:
+        # A transient refresh failure should remain RUNNING inside the pipeline,
+        # rather than cancel a controller already following its current path.
+        # The controller/monitor still check current obstacles every tick. One
+        # bounded retry then returns failure to the original observed-route wait.
+        for parent in list(root.iter()):
+            for index,child in enumerate(list(parent)):
+                if child.tag not in ('ComputePathToPose','ComputePathThroughPoses','ComputeReferencePath'):continue
+                wrapper=ET.Element('RecoveryNode',number_of_retries='1',name='RetryPathRefresh')
+                parent.remove(child);parent.insert(index,wrapper);wrapper.append(child)
+                delay=ET.SubElement(wrapper,'Delay',delay_msec='100',name='YieldPathRefresh')
+                ET.SubElement(delay,'AlwaysSuccess')
     data=ET.tostring(root,encoding='utf-8',xml_declaration=True)
     directory=Path(directory);directory.mkdir(parents=True,exist_ok=True)
     target=directory/(base.stem+'-'+hashlib.sha256(data).hexdigest()[:16]+'.xml')

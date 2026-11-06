@@ -48,6 +48,10 @@ export class NavigationClient {
   move(target, {idempotencyKey} = {}) { return this.request('POST','/v1/tasks',{kind:'move',target},idempotencyKey); }
   visit(marker, {idempotencyKey} = {}) { return this.request('POST','/v1/tasks',{kind:'visit',marker},idempotencyKey); }
   route(routeId, {idempotencyKey} = {}) { return this.request('POST','/v1/tasks',{kind:'route',route_id:routeId},idempotencyKey); }
+  forward(meters, {idempotencyKey} = {}) { return this.request('POST','/v1/tasks',{kind:'forward',meters},idempotencyKey); }
+  rotate(radians, {idempotencyKey} = {}) { return this.request('POST','/v1/tasks',{kind:'rotate',radians},idempotencyKey); }
+  tour(markers, {idempotencyKey} = {}) { return this.request('POST','/v1/tasks',{kind:'tour',markers},idempotencyKey); }
+  sequence(steps, {idempotencyKey} = {}) { return this.request('POST','/v1/tasks',{kind:'sequence',steps},idempotencyKey); }
   task(id) { return this.request('GET',`/v1/tasks/${encodeURIComponent(id)}`); }
   control(id, operation) { return this.request('POST',`/v1/tasks/${encodeURIComponent(id)}/${operation}`,{}); }
   cancel(id) { return this.control(id,'cancel'); }

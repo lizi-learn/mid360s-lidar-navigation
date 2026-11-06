@@ -1,5 +1,6 @@
 """Adapt the existing Console API; do not publish cmd_vel or drive joints."""
 import copy
+import math
 import unicodedata
 import uuid
 from .http import JsonHTTP
@@ -23,6 +24,25 @@ class P2Backend:
         self.http = JsonHTTP(base_url, timeout=timeout)
 
     def raw_status(self): return self.http.request("GET", "/api/status?summary=1")
+    @staticmethod
+    def current_task(status):
+        session=status.get("session") or {};mission=(status.get("reception")or{}).get("mission")or{}
+        if mission.get("phase")in BUSY:
+            return {"type":"mission","phase":mission["phase"],"run_id":mission.get("run_id"),
+                    "route_name":mission.get("route_name"),"point":mission.get("point"),
+                    "station_index":mission.get("index"),"station_total":mission.get("total")}
+        if session.get("cancel_pending"):
+            return {"type":"cancellation","phase":"cancelling","generation":session.get("generation")}
+        phase=session.get("phase")
+        # E-middle sets the session to paused even before any goal exists, and
+        # E-left deliberately does not resume it. This is idle switch state,
+        # not an occupied task. A completed/cancelled goal can also be retained.
+        paused_goal=(phase=="paused" and session.get("goal")is not None
+                     and not session.get("terminal_receipt")
+                     and (not session.get("last_stop")or session["last_stop"].get("phase")=="paused"))
+        if phase in("starting","executing","replanning")or paused_goal:
+            return {"type":"navigation","phase":phase,"generation":session.get("generation")}
+        return None
     def _post(self, path, body):
         token = self.raw_status().get("request_token")
         if not token: raise NavigationError("BACKEND_PROTOCOL", "Console request token missing", status=502)
@@ -36,22 +56,28 @@ class P2Backend:
             raise
 
     def capabilities(self):
-        enabled=bool(self._extension().get("conditional_task_control"))
+        extension=self._extension();enabled=bool(extension.get("conditional_task_control"))
         return {"backend":self.name, "api_version":"1.0", "hardware":True,
                 "features":{"move_pose":enabled,"move_marker":enabled,"saved_routes":enabled,
                             "marker_crud":True,"visit_introduction":enabled,"maps_list":True,
                             "global_cancel":True,"conditional_task_control":enabled,
+                            **{k:enabled and bool(extension.get(k))for k in('relative_forward','relative_rotation','visit_sequence')},
+                            'motion_sequence':enabled and bool(extension.get('conditional_relative_chaining')),
                             "velocity_si":False,"elevator":False,"charging":False,"motor_estop":False},
                 "verification":"P2 navigation derived from V2; SDK adapter contract-tested separately",
                 "units":{"position":"m","theta":"rad","D_input":"manual_equivalent_not_measured_m/s"}}
 
     def status(self):
         s=self.raw_status();pose=s.get("pose");gate=s.get("gate") or {};session=s.get("session") or {}
+        current=self.current_task(s)
+        state=SESSION_STATE.get(session.get("phase"),"unknown")
+        if current and current["type"]=="mission":state=MISSION_STATE[current["phase"]]
+        elif not current and session.get("phase")=="paused":state="idle"
         return {"backend":self.name,"robot_id":s.get("robot_name"),"map_id":(s.get("reception")or{}).get("map_id"),
                 "pose":None if not pose else {"x":pose[0],"y":pose[1],"theta":pose[2],"frame":"map"},
                 "data_fresh":gate.get("data_fresh"),"localized":gate.get("localized"),
                 "operator_mode":session.get("operator_mode"),"navigation_permitted":session.get("navigation_permitted"),
-                "navigation_state":SESSION_STATE.get(session.get("phase"),"unknown"),
+                "navigation_state":state,"task_active":current is not None,"current_task":current,
                 "notice":session.get("notice"),"battery_percent":None,"charging":None,
                 "hardware_estop":None,"software_estop":None,
                 "unknown_fields":["battery_percent","charging","hardware_estop","software_estop"]}
@@ -76,22 +102,55 @@ class P2Backend:
             p=points[0];return {"x":p["x"],"y":p["y"],"theta":p.get("yaw")}
         return target
 
-    def submit(self, request):
-        if not self._extension().get("conditional_task_control"):
+    def submit(self, request, *, after=None, cancelled=lambda:False):
+        extension=self._extension()
+        if not extension.get("conditional_task_control"):
             raise NavigationError("UNSUPPORTED_CAPABILITY","Install the additive Console SDK extension to enable concurrent-safe dispatch")
         s=self.raw_status();session=s["session"];mission=s["reception"]["mission"]
-        if mission["phase"]in BUSY or session["phase"]in("starting","executing","replanning","paused"):
-            raise NavigationError("TASK_BUSY","Existing navigation must finish or be explicitly cancelled")
-        if request["kind"] in ("route","visit"):
+        if not session.get("navigation_permitted"):
+            raise NavigationError('OPERATOR_PAUSED'if session.get('operator_mode')=='paused'else"MANUAL_PRIORITY",session.get("notice") or "E左档才允许导航",status=409)
+        current=self.current_task(s)
+        if current:
+            raise NavigationError("TASK_BUSY","Existing navigation must finish or be explicitly cancelled",details={"current_task":current})
+        if after is not None:
+            phase=after.get('resume_completed_phase','arrived')
+            if session['phase']=='paused'and phase!='paused':raise NavigationError('OPERATOR_PAUSED','Previous step paused; explicit continuation required')
+            if(after.get('type')!='navigation'or after.get('generation')!=session['generation']or after.get('map_id')!=s['reception']['map_id']or session['phase']!=phase
+               or phase!='arrived'and not(session.get('terminal_receipt')or{}).get('succeeded')):
+                raise NavigationError('TASK_REPLACED','Previous sequence step no longer has an unchanged success receipt')
+        expected={"generation":session["generation"],"run_id":mission["run_id"],"epoch":mission["epoch"],"map_id":s["reception"]["map_id"]}
+        feature={'forward':'relative_forward','rotate':'relative_rotation','tour':'visit_sequence'}.get(request['kind'])
+        if feature and not extension.get(feature):raise NavigationError('UNSUPPORTED_CAPABILITY','Console extension does not yet support '+feature)
+        if request['kind']in('forward','rotate'):
+            key='meters'if request['kind']=='forward'else'radians'
+            path='/api/relative-goal'if request['kind']=='forward'else'/api/rotate'
+            if cancelled():raise NavigationError('SEQUENCE_CANCELLED','Sequence intent cancelled before dispatch')
+            payload={key:request[key],'_sdk_expected':expected}
+            if after is not None:payload['_sdk_expected_phase']=after.get('resume_completed_phase','arrived')
+            prepared=self._post(path,payload)
+            if cancelled():
+                self._post('/api/stop',{'_sdk_expected':dict(expected,generation=prepared['generation'])})
+                raise NavigationError('SEQUENCE_CANCELLED','Sequence cancelled before confirmation')
+            ref=dict(type='navigation',generation=prepared['generation'],map_id=s['reception']['map_id'],intent=request['kind'])
+            try:self._post('/api/confirm',{'generation':prepared['generation']})
+            except NavigationError as exc:exc.details={**exc.details,'native_ref':ref};raise
+            return ref
+        if request["kind"] in ("route","visit","tour"):
             d=self._document();body={"command":"start","revision":d["revision"]}
             if request["kind"]=="route":body["route_id"]=request["route_id"]
+            elif request['kind']=='tour':
+                ids=[]
+                for marker in request['markers']:
+                    matches=[p for p in d['points']if marker in(p['name'],p['id'])]
+                    if len(matches)!=1:raise NavigationError('MARKER_NOT_FOUND','Each tour marker must resolve uniquely',status=404)
+                    ids.append(matches[0]['id'])
+                body['point_ids']=ids
             else:
                 points=[p for p in d["points"]if request["marker"]in(p["name"],p["id"])]
                 if len(points)!=1:raise NavigationError("MARKER_NOT_FOUND","Marker must resolve uniquely",status=404)
                 body["point_id"]=points[0]["id"]
             payload={"reception_command":body}
-            if self._extension().get("conditional_task_control"):
-                payload["_sdk_expected"]={"generation":session["generation"],"run_id":mission["run_id"],"epoch":mission["epoch"],"map_id":s["reception"]["map_id"]}
+            payload['_sdk_expected']=expected
             m=self._post("/api/confirm",payload)
             return {"type":"mission","run_id":m["run_id"],"epoch":m["epoch"],"map_id":d["map_id"]}
         d=self._document();p=self._resolve(request["target"],d)
@@ -116,6 +175,7 @@ class P2Backend:
         if ss["generation"]!=ref["generation"]:return {"state":"interrupted","reason":"task_replaced_or_manual_takeover"}
         return {"state":SESSION_STATE.get(ss["phase"],"unknown"),"native_phase":ss["phase"],
                 "reason":ss.get("notice"),"arrival_reached":ss["phase"]=="arrived",
+                'native_terminal_succeeded':bool((ss.get('terminal_receipt')or{}).get('succeeded')and(ss.get('terminal_receipt')or{}).get('generation')==ref['generation']),
                 "navigation_state":SESSION_STATE.get(ss["phase"],"unknown")}
 
     def control(self, ref, operation):
@@ -134,6 +194,29 @@ class P2Backend:
         return {**ref,"epoch":result["epoch"]}
 
     def stop(self): self._post("/api/stop",{});return {"stop_requested":True,"scope":"navigation_only"}
+
+    def resume_relative(self, ref, request, *, cancelled=lambda:False):
+        s=self.raw_status();ss=s['session'];mission=s['reception']['mission'];pose=s.get('pose');goal=ss.get('goal')
+        if(ref.get('type')!='navigation'or ref.get('generation')!=ss['generation']or ref.get('map_id')!=s['reception']['map_id']
+           or ss['phase']not in('paused','cancelled')or not ss.get('navigation_permitted')or not goal):
+            raise NavigationError('MANUAL_PRIORITY','Sequence pause reference changed or E does not permit explicit resume')
+        expected=dict(generation=ss['generation'],run_id=mission['run_id'],epoch=mission['epoch'],map_id=s['reception']['map_id'])
+        if request['kind']=='forward':
+            path='/api/goal';payload=dict(goal,heading_mode='position',_sdk_expected_generation=ss['generation'])
+        else:
+            if abs(request['radians'])>math.pi or not pose:
+                raise NavigationError('UNSUPPORTED_CAPABILITY','Paused multi-turn rotation has no native accumulated-angle feedback; no full-turn replay')
+            remaining=math.remainder(goal['yaw']-pose[2],math.tau)
+            if remaining==0:raise NavigationError('POSE_UNAVAILABLE','Exact-zero residual has no new action receipt; query or cancel the sequence')
+            path='/api/rotate';payload=dict(radians=remaining)
+        payload.update(_sdk_expected=expected,_sdk_expected_phase=ss['phase'])
+        if cancelled():raise NavigationError('SEQUENCE_CANCELLED','Sequence cancelled before explicit resume')
+        prepared=self._post(path,payload)
+        if cancelled():
+            self._post('/api/stop',{'_sdk_expected':dict(expected,generation=prepared['generation'])})
+            raise NavigationError('SEQUENCE_CANCELLED','Sequence cancelled before resume confirmation')
+        self._post('/api/confirm',{'generation':prepared['generation']})
+        return dict(ref,generation=prepared['generation'])
 
     def save_marker(self, data):
         if not isinstance(data,dict)or set(data)-{"name","x","y","theta","script","dwell","guest_wait","kind"}:

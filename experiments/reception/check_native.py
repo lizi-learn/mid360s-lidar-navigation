@@ -8,7 +8,7 @@ from pathlib import Path
 ROOT=Path(__file__).resolve().parents[2];NAV=ROOT/'navigation';sys.path.insert(0,str(NAV))
 
 def main():
-    ap=argparse.ArgumentParser();ap.add_argument('--output',required=True);ap.add_argument('--setup',required=True);ap.add_argument('--port',type=int,default=8947);ap.add_argument('--domain',type=int,default=208);ap.add_argument('--stop-profile',choices=['baseline-directional','legacy-rectangle'],default='baseline-directional');ap.add_argument('--scenario',choices=['transit','all','obstacle','tools','maps','blockage','followthrough','rotation','map-observations'],default='all');ap.add_argument('--block-case',choices=['persistent','transient','takeover'],default='persistent');ap.add_argument('--obstacle-offset',type=float,default=0.);ap.add_argument('--source-gap-ms',type=float,default=0.);args=ap.parse_args()
+    ap=argparse.ArgumentParser();ap.add_argument('--output',required=True);ap.add_argument('--setup',required=True);ap.add_argument('--port',type=int,default=8947);ap.add_argument('--domain',type=int,default=208);ap.add_argument('--stop-profile',choices=['baseline-directional','legacy-rectangle'],default='baseline-directional');ap.add_argument('--scenario',choices=['transit','all','obstacle','tools','maps','blockage','followthrough','rotation','map-observations'],default='all');ap.add_argument('--block-case',choices=['persistent','transient','takeover'],default='persistent');ap.add_argument('--obstacle-offset',type=float,default=0.);ap.add_argument('--source-gap-ms',type=float,default=0.);ap.add_argument('--turn-obstacle',action='store_true');args=ap.parse_args()
     if not 0<=args.source_gap_ms<=1500:raise ValueError('Invalid bounded source gap')
     if not math.isfinite(args.obstacle_offset):raise ValueError('Invalid synthetic obstacle offset')
     out=Path(args.output).resolve().parent
@@ -42,7 +42,7 @@ def main():
     if doors:env['P2_NAV_SIM_DOORS']=json.dumps(doors)
     shell='source /opt/ros/humble/setup.bash\nsource '+shlex.quote(str(setup))+'\nexport PYTHONPATH=/usr/lib/python3/dist-packages:'+shlex.quote(str(NAV))+':${PYTHONPATH:-}\nexec /usr/bin/python3 -S '+shlex.quote(str(NAV/'console.py'))+' --simulation --gait-profile p2-flat-model --footprint-profile '+shlex.quote(str(foot))+' --runtime '+shlex.quote(str(runtime))+' --port '+str(args.port)
     log=(out/'console.log').open('w');process=subprocess.Popen(['bash','-c',shell],env=env,stdout=log,stderr=subprocess.STDOUT,start_new_session=True)
-    url=f'http://127.0.0.1:{args.port}';token='';latest={};trace=[];events=[];report={};started=time.monotonic();ros=None;presentation=None;presentation_trace=None
+    url=f'http://127.0.0.1:{args.port}';token='';latest={};trace=[];events=[];mission_events={};report={};started=time.monotonic();ros=None;presentation=None;presentation_trace=None
     def call(path,data=None):
         raw=None if data is None else json.dumps(data).encode();request=urllib.request.Request(url+path,data=raw,headers={'Content-Type':'application/json','X-Nav-Token':token})
         try:
@@ -51,6 +51,8 @@ def main():
     def status():
         nonlocal latest
         latest=call('/api/status?summary=1')
+        for event in latest.get('reception',{}).get('mission',{}).get('events',[]):
+            mission_events[(event.get('epoch'),event.get('sequence',event.get('seq')),json.dumps(event,sort_keys=True))]=event
         if presentation:
             from audio_feedback import atomic_json
             atomic_json(runtime/'audio-feedback-state.json',dict(updated_at=time.time()))
@@ -284,9 +286,28 @@ def main():
                 assert resumed['gate']['arm_generation']>max(s['gate'].get('collision_fault_generation',-1)for s in witness)
                 events.append(dict(case='actual_scan_gap_cancel_receipt_replan_reauthorize_same_task',passed=True,original_generation=original_generation,new_generation=resumed['session']['generation'],gap_ms=args.source_gap_ms,
                     observed_fault_samples=sum(s['gate'].get('collision_source_valid')is False for s in witness),stopped_samples=sum(max(map(abs,s['command']))<1e-6 for s in witness),user_start_requests=1))
+            if args.turn_obstacle:
+                if ros is None:ros=ScenarioROS()
+                turning=wait(lambda d:d['session']['task_kind']=='rotation'and d['session']['phase']=='executing'and abs(d['truth']['command'][1])>.05,20)
+                original_run=turning['reception']['mission']['run_id'];original_generation=turning['session']['generation']
+                x,y,yaw=turning['truth']['pose'];circle=[x+.36*math.cos(yaw)+.09*math.sin(yaw),y+.36*math.sin(yaw)-.09*math.cos(yaw),.025]
+                for _ in range(8):ros.control(dict(obstacle=circle,control_id='arrival-spin-person'));status();time.sleep(.05)
+                blocked=wait(lambda d:any(e['kind']=='arrival_spin_wait'for e in d['reception']['mission']['events']),8)
+                rays=ros.obstacle_rays(blocked,circle);assert rays>=2,('turn obstacle not observed',rays)
+                assert blocked['reception']['mission']['phase']=='rerouting'
+                assert blocked['reception']['mission']['run_id']==original_run
+                held=[];until=time.monotonic()+2.
+                while time.monotonic()<until:
+                    ros.control(dict(obstacle=circle,control_id='arrival-spin-person'));w=status();held.append(w['truth']['command']);time.sleep(.05)
+                assert all(max(map(abs,c))<1e-6 for c in held),'Movement continued while turn obstruction was held'
+                for _ in range(6):ros.control(dict(obstacle=None,control_id='arrival-spin-person-left'));status();time.sleep(.05)
+                resumed=wait(lambda d:d['session']['generation']>original_generation and d['session']['task_kind']=='rotation'and d['session']['phase']=='executing',15)
+                assert resumed['reception']['mission']['run_id']==original_run
+                assert resumed['truth']['collision_attempts']==0
+                events.append(dict(case='actual_arrival_spin_obstacle_wait_clear_resume_same_visit',passed=True,ray_returns=rays,zero_held_samples=len(held),original_generation=original_generation,resumed_generation=resumed['session']['generation'],same_run=True,user_start_requests=1))
             parked=wait(lambda d:d['reception']['mission']['phase']=='guest_wait',45)
             assert parked['reception']['mission']['index']==1
-            error=abs(math.remainder(parked['pose'][2]-a['yaw'],2*math.pi));assert error<=math.radians(20),error
+            error=abs(math.remainder(parked['pose'][2]-a['yaw'],2*math.pi));assert error<=math.radians(10),error
             epoch=parked['reception']['mission']['epoch'];pose=parked['truth']['pose']
             time.sleep(.6);parked=status()
             assert parked['reception']['mission']['phase']=='guest_wait'
@@ -295,14 +316,17 @@ def main():
             call('/api/confirm',{'reception_command':dict(command='continue',epoch=epoch)})
             dwelling=wait(lambda d:d['reception']['mission']['phase']=='dwell',45)
             assert dwelling['reception']['mission']['index']==2
-            assert abs(math.remainder(dwelling['pose'][2]-b['yaw'],2*math.pi))<=math.radians(20)
+            second_error=abs(math.remainder(dwelling['pose'][2]-b['yaw'],2*math.pi));assert second_error<=math.radians(10),second_error
             assert dwelling['reception']['mission']['epoch']!=epoch
             assert max(map(abs,dwelling['truth']['command']))<1e-6
             d=complete()
+            spins=[e for e in mission_events.values()if e.get('kind')in ('initial_spin_started','initial_spin_finished','arrival_spin_started')]
+            assert any(e['kind']=='arrival_spin_started'for e in spins),'Final heading did not use a native Spin action'
+            assert any(e['kind']=='initial_spin_finished'and e.get('phase')=='arrived'for e in spins),'Return pivot did not complete a native Spin action'
             assert len(presentation_trace.read_text().splitlines())==2
             assert d['truth']['collision_attempts']==0
             events.append(dict(case='native_heading_then_same_product_twice_guest_continue_dwell_return',passed=True,
-                first_yaw_error=error,actual_playback_processes=2,guest_wait_held=True,dwell_observed=True,
+                first_yaw_error=error,second_yaw_error=second_error,yaw_tolerance_rad=math.radians(10),native_spin_receipts=spins,actual_playback_processes=2,guest_wait_held=True,dwell_observed=True,
                 audio_scope='Synthetic silent WAV and fake paplay; not a physical speaker test'))
         if args.scenario=='blockage':
             ros=ScenarioROS()
@@ -420,7 +444,7 @@ def main():
             orient=point('oriented',before[0],before[1],'visit');orient['yaw']=math.remainder(pose+1.,2*math.pi)
             doc['points']=[orient];doc['routes']=[dict(id='tour',name='directed arrival',mode='showcase',loops=1,description='',steps=[dict(point_id='oriented',speak=False)])];doc=save(doc);start(doc);d=complete()
             actual_yaw=d['pose'][2];yaw_error=abs(math.remainder(actual_yaw-orient['yaw'],2*math.pi))
-            assert yaw_error<=math.radians(20),(actual_yaw,orient['yaw'])
+            assert yaw_error<=math.radians(10),(actual_yaw,orient['yaw'])
             events.append({'case':'actual_directed_goal_settled_action_completion','passed':True,'requested_yaw':orient['yaw'],'actual_yaw':actual_yaw,'error_rad':yaw_error})
             doc['points']=[point('finish',10.5,4.25,'visit')];doc['routes'][0]['steps']=[dict(point_id='finish',speak=False)];doc=save(doc)
             start(doc);wait(lambda d:d['reception']['mission']['phase']=='navigating',10)
@@ -432,7 +456,10 @@ def main():
             call('/api/confirm',{'reception_command':{'command':'resume','epoch':d['reception']['mission']['epoch']}})
             d=complete();events.append({'case':'middle_pause_then_explicit_resume_native','passed':True})
             doc['points']=[point('finish',10.5,2.5,'visit')];doc=save(doc);start(doc)
-            wait(lambda d:d['reception']['mission']['phase']=='navigating',8)
+            # Take over the actual accepted action, including an initial Spin.
+            # Mission stays dispatching until that pivot completes; waiting for
+            # the subsequent translation would skip the turn takeover check.
+            wait(lambda d:d['session']['phase']=='executing'and d['reception']['mission']['phase']in ('dispatching','navigating'),8)
             call('/api/sim_operator',{'mode':'manual'})
             d=wait(lambda d:d['reception']['mission']['phase']=='manual'and not d['session']['cancel_pending']and max(map(abs,d['truth']['command']))<1e-6,8)
             call('/api/sim_operator',{'mode':'navigation_allowed'});d=wait(lambda d:d['session']['navigation_permitted'],3)

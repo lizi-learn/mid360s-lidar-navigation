@@ -105,7 +105,12 @@ def config(controller='rpp', tree=None, minimum_speed=.03, footprint_vertices=No
                 # bins retain the static value; current hit endpoints remain
                 # lethal. Authored keepouts/boundaries are separate filters.
                 common['obstacle_layer']['combination_method']=0
-        elif gait_profile=='p2-flat-model':
+        if gait_profile=='p2-flat-model':
+            # Both planners and the rolling controller must forget expired
+            # dynamic hits using their ORIGINAL source times. Keeping infinite
+            # local history while the global layer expires it creates a clear
+            # global path that the controller can never follow. Static context,
+            # current hits and unknown-space/keepout semantics remain intact.
             common['obstacle_layer'].update(plugin='p2_nav_controller::TemporalObstacleLayer',
                 observation_keep_time=3.,expiration_source_max_age=.3)
         result[name]={name:{'ros__parameters':common}}
@@ -140,7 +145,7 @@ def config(controller='rpp', tree=None, minimum_speed=.03, footprint_vertices=No
         # Authored presentation stops use approximate positioning and direction.
         # Keep ordinary route tracking/position-only navigation unchanged.
         control['goal_checker_plugins']+=['presentation_goal_checker','presentation_position_goal_checker']
-        control['presentation_goal_checker']=dict(plugin='nav2_controller::SimpleGoalChecker',xy_goal_tolerance=.30,yaw_goal_tolerance=math.radians(20),stateful=True)
+        control['presentation_goal_checker']=dict(plugin='nav2_controller::SimpleGoalChecker',xy_goal_tolerance=.30,yaw_goal_tolerance=math.radians(10),stateful=True)
         control['presentation_position_goal_checker']=dict(plugin='nav2_controller::SimpleGoalChecker',xy_goal_tolerance=.30,yaw_goal_tolerance=math.pi,stateful=True)
     add('behavior_server',dict(use_sim_time=False,costmap_topic='local_costmap/costmap_raw',
         footprint_topic='local_costmap/published_footprint',cycle_frequency=10.,behavior_plugins=['wait','spin'],
@@ -150,7 +155,7 @@ def config(controller='rpp', tree=None, minimum_speed=.03, footprint_vertices=No
         rotational_acc_lim=.5,simulate_ahead_time=2.,
         global_frame='odom',robot_base_frame='base_link',transform_tolerance=.2))
     add('bt_navigator',dict(use_sim_time=False,global_frame='map',robot_base_frame='base_link',odom_topic='/odom',
-        bt_loop_duration=10,default_server_timeout=20,wait_for_service_timeout=1000,
+        bt_loop_duration=10,default_server_timeout=200 if gait_profile=='p2-flat-model' else 20,wait_for_service_timeout=1000,
         default_nav_to_pose_bt_xml=str(tree or Path(__file__).with_name('forward_navigation.xml')),
         default_nav_through_poses_bt_xml=str(Path(tree).with_name('forward_through_poses.xml') if tree else Path(__file__).with_name('forward_through_poses.xml')),
         plugin_lib_names=['nav2_compute_path_to_pose_action_bt_node','nav2_follow_path_action_bt_node',

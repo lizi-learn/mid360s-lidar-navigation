@@ -63,7 +63,8 @@ class WaterBackend:
     def capabilities(self):
         return {'backend':'water','hardware':True,'api_version':'1.0',
                 'features':{'move_pose':True,'move_marker':True,'marker_crud':True,'global_cancel':True,
-                            'saved_routes':False,'visit_introduction':False,'conditional_task_control':False},
+                            'saved_routes':False,'visit_introduction':False,'conditional_task_control':False,
+                            'relative_forward':False,'relative_rotation':False,'visit_sequence':False,'motion_sequence':False},
                 'task_correlation':'requires task_id in status; legacy v1.8.7 lacks this guarantee',
                 'verification':'loopback protocol fixtures, not colleague firmware','units':{'position':'m','theta':'rad'}}
     def status(self):

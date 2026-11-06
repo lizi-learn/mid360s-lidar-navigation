@@ -212,7 +212,8 @@ class CuePolicy:
         if phase=='failed' and previous!='failed' and (data.get('session')or{}).get('phase')not in ('manual','paused'):
             kind='failed'
         # Internal leg cancellation is part of the same task, not a user stop.
-        if phase in ('dispatching','rerouting','waiting_route')and kind in ('started','stopped'):kind=None
+        if phase in ('dispatching','rerouting','waiting_route')and kind in ('started','stopped','arrived'):kind=None
+        if mission.get('heading_pending') and kind=='arrived':kind=None
         if kind=='started':
             if self.reception_announced:kind=None
             else:self.reception_announced=True

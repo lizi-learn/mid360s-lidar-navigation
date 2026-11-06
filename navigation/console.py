@@ -62,6 +62,9 @@ class Console(Node):
         from audio_feedback import AudioSettings
         self.audio=AudioSettings(runtime/'audio-settings.json')
         self.minimum_speed=minimum_speed;self.footprint=footprint;self.odometry_model=odometry_model;self.gait_profile=gait_profile
+        self.native_reception_spins=gait_profile=='p2-flat-model'
+        self.rotation_collision_generation=None
+        self.presentation_yaw_tolerance=math.radians(10)
         self.maximum_speed=.8 if gait_profile=='p2-flat-model' else .30
         self.route_process=None;self.route_directory=None
         self.lock=threading.RLock();self.grid=None;self.path=[];self.gate={};self.truth={};self.goal=None
@@ -320,7 +323,7 @@ class Console(Node):
         source_ns=msg.timestamp.sec*10**9+msg.timestamp.nanosec
         now_ns=self.get_clock().now().nanoseconds
         with self.lock:
-            if self.session.phase not in ('executing','replanning','arrived') or source_ns<self.bt_goal_source_ns or not -.05<=(now_ns-source_ns)/1e9<=.5:return
+            if self.session.phase not in ('executing','replanning') or source_ns<self.bt_goal_source_ns or not -.05<=(now_ns-source_ns)/1e9<=.5:return
             for event in msg.event_log:
                 if event.node_name=='ObservedRouteWait' and event.current_status=='RUNNING':
                     self.bt_recovery_report={'source_ros_ns':str(source_ns),'generation':self.goal_generation,'node':event.node_name,'age_at_receipt_s':(now_ns-source_ns)/1e9}
@@ -332,8 +335,13 @@ class Console(Node):
             self.collision_stop=msg.action_type==CollisionMonitorState.STOP
             if self.collision_stop and self.session.phase=='executing':
                 if getattr(self.session,'task_kind','navigation')=='rotation':
-                    self.session.finished(self.session.generation,False)
-                    self.session._notice('原地转向受阻，速度已归零')
+                    if getattr(msg,'polygon_name','')=='source_unavailable':
+                        self.session.cancel()
+                        self.session._notice('避障观测暂时中断，原地转向已停止')
+                    else:
+                        self.rotation_collision_generation=self.session.generation
+                        self.session.finished(self.session.generation,False)
+                        self.session._notice('原地转向受阻，速度已归零')
                     self.op(armed=False,paused=True);self.stop_actions();return
                 self.obstacle_path_revision=self.path_revision;self.session.obstacle(time.monotonic())
     def execution_ready(self):
@@ -675,17 +683,32 @@ class Console(Node):
         # Serialize goal-specific planner parameters with their preview request;
         # stop/manual callbacks do not acquire this planning lock.
         with self.goal_request_lock:return self._set_goal(data)
+    def prepare_relative(self,data):
+        from relative_intent import forward_goal
+        if set(data)-{'meters','_sdk_expected','_sdk_expected_phase'}:raise ValueError('相对前进字段无效')
+        with self.goal_request_lock:
+            goal=forward_goal(self.reception_pose(),data.get('meters'))
+            if '_sdk_expected'in data:goal['_sdk_expected']=data['_sdk_expected']
+            if '_sdk_expected_phase'in data:goal['_sdk_expected_phase']=data['_sdk_expected_phase']
+            return self.set_goal(goal)
     def prepare_rotation(self,data):
         from rotation_intent import rotation_goal
         if self.mode!='navigation':raise ValueError('请先载入地图进入导航模式')
         radians=data.get('radians')
         with self.goal_request_lock:
             goal=rotation_goal(self.reception_pose(),radians)
+            if '_sdk_expected_phase'in data:goal['_sdk_expected_phase']=data['_sdk_expected_phase']
             # The current measured centre stays fixed. Spin uses the live local
             # costmap/footprint and odometry; no global path is invented here.
             self.checked_pose(goal,require_free=False)
             with self.lock:
+                if '_sdk_expected'in data:
+                    from sdk_control import verify
+                    verify(self,data['_sdk_expected'])
+                    if self.reception.engine.phase in ('dispatching','navigating','presenting','guest_wait','dwell','rerouting','waiting_route','paused'):
+                        raise ValueError('Existing mission must finish or be explicitly cancelled')
                 generation=self.session.prepare(goal,time.monotonic())
+                self.rotation_collision_generation=None
                 self.goal_rotation=radians;self.goal_route=[];self.goal_route_guided=False
                 self.goal_heading_mode='pose';self.path=[];self.goal=[goal['x'],goal['y']];self.feedback={}
                 self.pending_plan_accept=False;self.op(armed=False,paused=True)
@@ -707,6 +730,9 @@ class Console(Node):
         arrival_profile=data.get('_arrival_profile','standard')
         if arrival_profile not in ('standard','presentation'):raise ValueError('未知到点停靠方式')
         if arrival_profile=='presentation'and self.gait_profile!='p2-flat-model':raise ValueError('当前配置不支持讲解停靠方式')
+        native_arrival_spin=data.get('_native_arrival_spin',False)
+        if type(native_arrival_spin)is not bool or native_arrival_spin and (self.gait_profile!='p2-flat-model' or arrival_profile!='presentation'):
+            raise ValueError('原地转向停靠方式无效')
         if heading_mode=='position' and self.gait_profile!='p2-flat-model':raise ValueError('当前配置不支持位置目标规划')
         if not self.gate.get('localized'):raise ValueError('定位尚未就绪，请先设置初始位置')
         with self.lock:
@@ -721,6 +747,7 @@ class Console(Node):
                     raise ValueError('Existing mission must finish or be explicitly cancelled')
             generation=self.session.prepare(data,time.monotonic());self.path=[];self.goal=None;self.feedback={}
             self.goal_heading_mode=heading_mode;self.goal_arrival_profile=arrival_profile;self.goal_route=route_poses;self.goal_route_guided=guided;self.goal_rotation=None
+            self.goal_native_arrival_spin=native_arrival_spin
             self.pending_plan_accept=True
             self.op(armed=False,paused=True)
         try:self.wait_planner_active()
@@ -807,8 +834,9 @@ class Console(Node):
             from recovery_tree import recovery_tree
             base_tree=getattr(goal,'behavior_tree','') or str(Path(__file__).with_name('forward_navigation.xml'))
             checker=None
-            if getattr(self,'goal_arrival_profile','standard')=='presentation':checker='presentation_position_goal_checker'if getattr(self,'goal_heading_mode','pose')=='position'else'presentation_goal_checker'
-            goal.behavior_tree=recovery_tree(base_tree,self.runtime/'recovery-trees',self.session.replan_timeout,checker)
+            if getattr(self,'goal_arrival_profile','standard')=='presentation':checker='presentation_position_goal_checker'if getattr(self,'goal_heading_mode','pose')=='position' or getattr(self,'goal_native_arrival_spin',False) else'presentation_goal_checker'
+            goal.behavior_tree=recovery_tree(base_tree,self.runtime/'recovery-trees',self.session.replan_timeout,checker,
+                keep_tracking_on_plan_retry=getattr(self,'gait_profile',None)=='p2-flat-model')
         with self.lock:
             self.bt_goal_source_ns=self.get_clock().now().nanoseconds;self.bt_recovery_report={}
             if self.session.generation!=generation or self.session.phase!='starting':
@@ -1083,6 +1111,9 @@ def main():
                 raw=gzip.compress(raw);self.send_header('Content-Encoding','gzip')
             self.send_header('Content-Length',str(len(raw)));self.end_headers();self.wfile.write(raw)
         def do_GET(self):
+            if urlsplit(self.path).path=='/agent' or urlsplit(self.path).path.startswith('/api/agent/'):
+                from agent_proxy import serve
+                return serve(self)
             if urlsplit(self.path).path in ('/','/reception'):
                 guided=urlsplit(self.path).path=='/reception' or parse_qs(urlsplit(self.path).query).get('view') in (['reception'],['operator'])
                 from reception_ui import reception_html,console_html
@@ -1096,6 +1127,9 @@ def main():
             elif self.path=='/api/map':self.send({'revision':node.display_revision(),'map':node.status()['map']})
             else:self.send({'error':'Not found'},404)
         def do_POST(self):
+            if urlsplit(self.path).path.startswith('/api/agent/'):
+                from agent_proxy import serve
+                return serve(self)
             try:
                 if not secrets.compare_digest(self.headers.get('X-Nav-Token',''),node.request_token):
                     self.send({'error':'请刷新工作台后重试'},403);return
@@ -1105,7 +1139,7 @@ def main():
                 if not isinstance(d,dict):raise ValueError('请求必须是JSON对象')
                 routes={'/api/audio':lambda:node.audio.update(d),'/api/start':lambda:node.start(d['mode'],d.get('name','office'),d.get('controller','rpp')),
                     '/api/sim_mapping_route':lambda:node.simulated_mapping_route(d['name']),
-                    '/api/save':lambda:save_resource(node,d),'/api/goal':lambda:node.reception_api_goal(d),'/api/rotate':lambda:node.prepare_rotation(d),
+                    '/api/save':lambda:save_resource(node,d),'/api/goal':lambda:node.reception_api_goal(d),'/api/rotate':lambda:node.prepare_rotation(d),'/api/relative-goal':lambda:node.prepare_relative(d),
                     '/api/confirm':lambda:node.reception_api_confirm(d),'/api/sim_operator':lambda:node.simulation_operator(d),
                     '/api/initialpose':lambda:node.set_pose(d),'/api/speed':lambda:node.speed(d['speed'],d.get('velocity_scale')),
                     '/api/stop':lambda:__import__('sdk_control').stop(node,d)}

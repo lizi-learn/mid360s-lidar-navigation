@@ -24,12 +24,14 @@ class GaitFaultDiagnosticsTests(unittest.TestCase):
     def test_emergency_cannot_appear_ready_even_with_old_ready_bits(self):
         t=GaitTransport.__new__(GaitTransport)
         t.lock=threading.RLock();t.feedback=reply(reason='estop');t.phase='idle'
+        t.stop_serial=t.sent_stop=0;t.ack_requested=None
         self.assertFalse(t.ready())
         self.assertTrue(readiness_error(t.feedback))
 
     def test_healthy_disarmed_reply_keeps_existing_readiness(self):
         t=GaitTransport.__new__(GaitTransport)
         t.lock=threading.RLock();t.feedback=reply();t.phase='idle'
+        t.stop_serial=t.sent_stop=0;t.ack_requested=None
         self.assertTrue(t.ready())
         self.assertEqual(readiness_error(t.feedback),'')
 
@@ -42,6 +44,7 @@ class AcceptanceFileRemovalTests(unittest.TestCase):
     def test_archive_bit_is_not_required_but_new_live_bit_is(self):
         from threading import RLock
         t=GaitTransport.__new__(GaitTransport);t.lock=RLock();t.phase='idle'
+        t.stop_serial=t.sent_stop=0;t.ack_requested=None
         t.feedback=reply(readiness=LOCAL_READY)
         self.assertTrue(t.ready());self.assertFalse(LOCAL_READY&16)
         t.feedback.readiness|=16

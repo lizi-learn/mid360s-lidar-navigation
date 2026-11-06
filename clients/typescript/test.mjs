@@ -31,6 +31,26 @@ test('Marker CRUD preserves Unicode',async()=>{
   assert.ok((await client.markers()).some(m=>m.name==='节点 &? 中文'));
   await client.deleteMarker('节点 &? 中文');
 });
+test('Relative units, full revolutions and ordered tours retain exact request identity',async()=>{
+  for(const [method,value,expected] of [['forward',.5,{kind:'forward',meters:.5}],['rotate',-4*Math.PI,{kind:'rotate',radians:-4*Math.PI}],['tour',['产品展示','接待起点'],{kind:'tour',markers:['产品展示','接待起点']}]]){
+    const task=await client[method](value,{idempotencyKey:'ts-relative-'+method});
+    assert.deepEqual(task.request,expected);
+    assert.equal((await client[method](value,{idempotencyKey:'ts-relative-'+method})).id,task.id);
+    await client.cancel(task.id);
+  }
+});
+
+test('Ordered motion is one task and continues independently after first-step success',async()=>{
+  const steps=[{kind:'rotate',radians:-Math.PI/2},{kind:'forward',meters:5}];
+  const t=await client.sequence(steps,{idempotencyKey:'ts-sequence'});
+  assert.deepEqual(t.request,{kind:'sequence',steps});
+  await client.request('POST','/mock/advance',{state:'succeeded'});
+  const deadline=Date.now()+3000;
+  while((await client.task(t.id)).sequence.index<1&&Date.now()<deadline)await new Promise(resolve=>setTimeout(resolve,20));
+  assert.equal((await client.task(t.id)).sequence.index,1);
+  await client.request('POST','/mock/advance',{state:'succeeded'});
+  assert.equal((await client.wait(t.id,{timeout:3000,interval:20})).state,'succeeded');
+});
 
 test('HTTP mutation 500 is uncertain and redirects are not followed',async()=>{
   const calls=[];const upstream=createServer((request,response)=>{
