@@ -36,7 +36,8 @@ class GaitTransport:
             r=self.feedback
             return bool(r and getattr(r,'reason','')!='estop' and 0<=time.monotonic_ns()-r.monotonic_ns<=100_000_000 and
                 r.readiness&LOCAL_READY==LOCAL_READY and r.operator_verified and r.operator_mode==1
-                and not r.manual_activity and not r.cancel_pending and self.phase not in ('failed','disconnected'))
+                and not r.manual_activity and not r.cancel_pending and self.phase not in ('failed','disconnected')
+                and self.stop_serial==self.sent_stop and self.ack_requested is None)
     def update(self,gate,command_enabled):
         with self.lock:
             self.health_stamp=int(gate.get('evaluated_monotonic_ns',0))
@@ -188,6 +189,7 @@ class GaitTransport:
             r=self.feedback
             return {'phase':self.phase,'execution_ready':self.ready(),'error':self.error,
                 'cancel_pending':bool(r and r.cancel_pending),'cancel_generation':r.cancel_generation if r else 0,
+                'local_stop_pending':self.stop_serial!=self.sent_stop,'cancel_ack_pending':self.ack_requested is not None,
                 'last_authority_sample':self.last_authority_sample,
                 'controller_instance':r.controller if r else None,'policy_generation':r.generation if r else None,
                 'navigation_owned':bool(r and r.navigation_owned),'manual_owned':bool(r and r.manual_owned),

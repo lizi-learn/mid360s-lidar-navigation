@@ -71,6 +71,10 @@ def prepare(node, engine, epoch, radians):
     if not available(node, engine, epoch):
         return None
     result = node.prepare_rotation({'radians': radians})
+    # Preparing the next action can overlap the preceding queued zero/STOP
+    # exchange. Wait for actual worker readiness again after preparation.
+    if not available(node, engine, epoch):
+        return None
     if not permitted(node, engine, epoch):
         return None
     node.confirm_goal({'generation': result['generation'], '_mission_epoch': epoch})
