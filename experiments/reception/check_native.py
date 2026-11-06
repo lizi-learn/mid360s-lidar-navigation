@@ -8,7 +8,7 @@ from pathlib import Path
 ROOT=Path(__file__).resolve().parents[2];NAV=ROOT/'navigation';sys.path.insert(0,str(NAV))
 
 def main():
-    ap=argparse.ArgumentParser();ap.add_argument('--output',required=True);ap.add_argument('--setup',required=True);ap.add_argument('--port',type=int,default=8947);ap.add_argument('--domain',type=int,default=208);ap.add_argument('--stop-profile',choices=['baseline-directional','legacy-rectangle'],default='baseline-directional');ap.add_argument('--scenario',choices=['transit','all','obstacle','tools','maps','blockage','followthrough','rotation','map-observations'],default='all');ap.add_argument('--block-case',choices=['persistent','transient','takeover'],default='persistent');ap.add_argument('--obstacle-offset',type=float,default=0.);ap.add_argument('--source-gap-ms',type=float,default=0.);args=ap.parse_args()
+    ap=argparse.ArgumentParser();ap.add_argument('--output',required=True);ap.add_argument('--setup',required=True);ap.add_argument('--port',type=int,default=8947);ap.add_argument('--domain',type=int,default=208);ap.add_argument('--stop-profile',choices=['baseline-directional','legacy-rectangle'],default='baseline-directional');ap.add_argument('--scenario',choices=['transit','all','obstacle','tools','maps','blockage','followthrough','rotation','map-observations'],default='all');ap.add_argument('--block-case',choices=['persistent','transient','takeover'],default='persistent');ap.add_argument('--obstacle-offset',type=float,default=0.);ap.add_argument('--source-gap-ms',type=float,default=0.);ap.add_argument('--turn-obstacle',action='store_true');args=ap.parse_args()
     if not 0<=args.source_gap_ms<=1500:raise ValueError('Invalid bounded source gap')
     if not math.isfinite(args.obstacle_offset):raise ValueError('Invalid synthetic obstacle offset')
     out=Path(args.output).resolve().parent
@@ -286,6 +286,25 @@ def main():
                 assert resumed['gate']['arm_generation']>max(s['gate'].get('collision_fault_generation',-1)for s in witness)
                 events.append(dict(case='actual_scan_gap_cancel_receipt_replan_reauthorize_same_task',passed=True,original_generation=original_generation,new_generation=resumed['session']['generation'],gap_ms=args.source_gap_ms,
                     observed_fault_samples=sum(s['gate'].get('collision_source_valid')is False for s in witness),stopped_samples=sum(max(map(abs,s['command']))<1e-6 for s in witness),user_start_requests=1))
+            if args.turn_obstacle:
+                if ros is None:ros=ScenarioROS()
+                turning=wait(lambda d:d['session']['task_kind']=='rotation'and d['session']['phase']=='executing'and abs(d['truth']['command'][1])>.05,20)
+                original_run=turning['reception']['mission']['run_id'];original_generation=turning['session']['generation']
+                x,y,yaw=turning['truth']['pose'];circle=[x+.36*math.cos(yaw)+.09*math.sin(yaw),y+.36*math.sin(yaw)-.09*math.cos(yaw),.025]
+                for _ in range(8):ros.control(dict(obstacle=circle,control_id='arrival-spin-person'));status();time.sleep(.05)
+                blocked=wait(lambda d:any(e['kind']=='arrival_spin_wait'for e in d['reception']['mission']['events']),8)
+                rays=ros.obstacle_rays(blocked,circle);assert rays>=2,('turn obstacle not observed',rays)
+                assert blocked['reception']['mission']['phase']=='rerouting'
+                assert blocked['reception']['mission']['run_id']==original_run
+                held=[];until=time.monotonic()+2.
+                while time.monotonic()<until:
+                    ros.control(dict(obstacle=circle,control_id='arrival-spin-person'));w=status();held.append(w['truth']['command']);time.sleep(.05)
+                assert all(max(map(abs,c))<1e-6 for c in held),'Movement continued while turn obstruction was held'
+                for _ in range(6):ros.control(dict(obstacle=None,control_id='arrival-spin-person-left'));status();time.sleep(.05)
+                resumed=wait(lambda d:d['session']['generation']>original_generation and d['session']['task_kind']=='rotation'and d['session']['phase']=='executing',15)
+                assert resumed['reception']['mission']['run_id']==original_run
+                assert resumed['truth']['collision_attempts']==0
+                events.append(dict(case='actual_arrival_spin_obstacle_wait_clear_resume_same_visit',passed=True,ray_returns=rays,zero_held_samples=len(held),original_generation=original_generation,resumed_generation=resumed['session']['generation'],same_run=True,user_start_requests=1))
             parked=wait(lambda d:d['reception']['mission']['phase']=='guest_wait',45)
             assert parked['reception']['mission']['index']==1
             error=abs(math.remainder(parked['pose'][2]-a['yaw'],2*math.pi));assert error<=math.radians(10),error

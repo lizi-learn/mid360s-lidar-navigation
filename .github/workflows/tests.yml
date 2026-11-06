@@ -300,6 +300,23 @@ jobs:
           name: reception-followthrough-evidence
           path: /tmp/reception-followthrough
           if-no-files-found: ignore
+      - name: Wait through a temporary person during arrival Spin and resume the same visit
+        shell: bash
+        env:
+          ROS_LOCALHOST_ONLY: '1'
+          ROS_DOMAIN_ID: '225'
+          RMW_IMPLEMENTATION: rmw_cyclonedds_cpp
+        run: |
+          source /opt/ros/humble/setup.bash
+          source nav_controller_ws/install/setup.bash
+          export CYCLONEDDS_URI="file://$PWD/config/cyclonedds-local.xml"
+          timeout 180s python3 experiments/reception/check_native.py --setup "$GITHUB_WORKSPACE/nav_controller_ws/install/setup.bash" --output /tmp/reception-spin-wait/report.json --scenario followthrough --turn-obstacle --port 8956 --domain 225
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: reception-spin-wait-evidence
+          path: /tmp/reception-spin-wait
+          if-no-files-found: ignore
       - name: Check production UDP transport with the reception workflow
         shell: bash
         env:

@@ -457,9 +457,40 @@ class MissionService:
             command.update(arrival_heading=True,epoch=self.engine.epoch,
                            arrival_transit_ids=list(self.engine.actual_transit))
             return command
+    def interrupted_arrival_spin_command(self,state):
+        """Keep a temporarily interrupted turn inside its authorized visit.
+
+        An abort is retained as an abort, never arrival. The retry recomputes
+        the remaining heading from current measured pose and receives a new
+        native action result. Operator stops are never retried.
+        """
+        from reception_spins import enabled
+        receipt=state.get('terminal_receipt')or{}
+        if(not enabled(self.node)or state.get('phase')!='blocked'or
+                not state.get('navigation_permitted')or state.get('manual_activity')or state.get('last_stop')or
+                receipt.get('status')!=6 or receipt.get('task_kind')!='rotation'or
+                receipt.get('generation')!=state.get('generation')or
+                (self.future is not None and not self.future.done())):return None
+        with self.engine.lock:
+            if(self.engine.phase!='navigating'or state['generation']!=self.engine.goal_generation or
+                    not self.active_command or not self.active_command.get('arrival_heading')):return None
+            command=copy.deepcopy(self.active_command)
+            deadline=command.get('turn_wait_deadline')
+            if deadline is None:deadline=time.monotonic()+self.engine.document['policy']['max_wait']
+            if time.monotonic()>=deadline:
+                self.engine.failed(self.engine.epoch,'原地转向持续受阻，已结束本次等候');return None
+            self.engine.pending_arrival_heading=True
+            self.engine.begin_reroute('转向暂时受阻，停车等待并保留当前点位')
+            self.engine.event('arrival_spin_wait',generation=state['generation'],reason=state.get('notice',''))
+            command.update(epoch=self.engine.epoch,turn_wait_deadline=deadline,turn_wait=True)
+            return command
     def dispatch_arrival_heading(self,command):
-        from reception_spins import available,heading_error,prepare
+        from reception_spins import available,heading_error,prepare,wait_after_interruption
         epoch=command['epoch']
+        if command.get('turn_wait'):
+            if not self.node.cancel_reception_leg(epoch):return
+            if not wait_after_interruption(self.node,self.engine,epoch,command['turn_wait_deadline']):return
+            command=dict(command);command.pop('turn_wait',None)
         if not available(self.node,self.engine,epoch):return
         angle=heading_error(self.node,command['point'])
         if abs(angle)<=self.node.presentation_yaw_tolerance:
@@ -477,6 +508,7 @@ class MissionService:
         generation=result['generation']
         if self.engine.dispatched(epoch,generation,command.get('end_index'),command.get('arrival_transit_ids')):
             self.active_command=copy.deepcopy(command)
+            self.active_command.pop('turn_wait',None)
             for key in ('source_recovery','source_deadline','reroute','reason'):
                 self.active_command.pop(key,None)
             self.source_recovery_active=False
@@ -538,7 +570,7 @@ class MissionService:
         while not self.closed.wait(.1):
             try:
                 state = self.session_snapshot()
-                heading=self.arrival_heading_command(state)
+                heading=self.interrupted_arrival_spin_command(state)or self.arrival_heading_command(state)
                 recovery = self.tracking_recovery_command(state)
                 # Speech acknowledgements are local, bounded files; no cloud here.
                 speech = self.node.reception_speech_result()
