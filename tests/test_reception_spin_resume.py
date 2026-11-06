@@ -27,7 +27,7 @@ class SpinWaitTests(unittest.TestCase):
  def test_repeated_abort_keeps_the_original_wait_deadline(self):
   s,e,state,_=self.fixture();c=s.interrupted_arrival_spin_command(state);deadline=c['turn_wait_deadline']
   with patch('reception_spins.wait_after_interruption',return_value=True):s.dispatch(c)
-  state.update(phase='blocked',terminal_receipt=dict(generation=e.goal_generation,status=6,task_kind='rotation'))
+  state.update(phase='blocked',terminal_receipt=dict(generation=e.goal_generation,status=6,task_kind='rotation',succeeded=False))
   c=s.interrupted_arrival_spin_command(state);self.assertEqual(c['turn_wait_deadline'],deadline)
  def test_operator_cancel_and_old_generation_are_not_retried(self):
   for change in [dict(navigation_permitted=False),dict(manual_activity=True),dict(last_stop={'reason':'cancel'}),dict(generation=1)]:
@@ -40,6 +40,12 @@ class SpinWaitTests(unittest.TestCase):
    clock.t+=dt;s.node.collision_stop=1.<clock.t<2.
   self.assertTrue(wait_after_interruption(s.node,e,e.epoch,10.,now=lambda:clock.t,sleep=sleep))
   self.assertGreaterEqual(clock.t,3.5);self.assertEqual(s.node.prepare_rotation.call_count,1)
+ def test_monitor_stop_has_its_own_evidence_not_a_fabricated_action_abort(self):
+  s,e,state,_=self.fixture();state['terminal_receipt']['status']=None
+  self.assertIsNone(s.interrupted_arrival_spin_command(state))
+  s.node.rotation_collision_generation=state['generation']
+  self.assertIsNotNone(s.interrupted_arrival_spin_command(state))
+  self.assertIsNone(state['terminal_receipt']['status'])
  def test_persistent_obstacle_times_out_without_an_action_or_fake_arrival(self):
   s,e,state,_=self.fixture();clock=NS(t=0.);s.node.collision_stop=True
   def sleep(dt):clock.t+=dt
@@ -62,7 +68,7 @@ class SpinWaitTests(unittest.TestCase):
    clock.t+=dt
    if state['phase']=='executing':
     if s.node.prepare_rotation.call_count==1:
-     pose[2]=.4;state.update(phase='blocked',terminal_receipt=dict(generation=state['generation'],status=6,task_kind='rotation'))
+     pose[2]=.4;state.update(phase='blocked',terminal_receipt=dict(generation=state['generation'],status=6,task_kind='rotation',succeeded=False))
     else:pose[2]=1.8;state['phase']='arrived'
   self.assertTrue(turn_initial(s.node,e,e.epoch,1.8,now=lambda:clock.t,sleep=sleep))
   self.assertAlmostEqual(s.node.prepare_rotation.call_args.args[0]['radians'],1.4)

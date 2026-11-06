@@ -63,6 +63,7 @@ class Console(Node):
         self.audio=AudioSettings(runtime/'audio-settings.json')
         self.minimum_speed=minimum_speed;self.footprint=footprint;self.odometry_model=odometry_model;self.gait_profile=gait_profile
         self.native_reception_spins=gait_profile=='p2-flat-model'
+        self.rotation_collision_generation=None
         self.presentation_yaw_tolerance=math.radians(10)
         self.maximum_speed=.8 if gait_profile=='p2-flat-model' else .30
         self.route_process=None;self.route_directory=None
@@ -338,6 +339,7 @@ class Console(Node):
                         self.session.cancel()
                         self.session._notice('避障观测暂时中断，原地转向已停止')
                     else:
+                        self.rotation_collision_generation=self.session.generation
                         self.session.finished(self.session.generation,False)
                         self.session._notice('原地转向受阻，速度已归零')
                     self.op(armed=False,paused=True);self.stop_actions();return
@@ -706,6 +708,7 @@ class Console(Node):
                     if self.reception.engine.phase in ('dispatching','navigating','presenting','guest_wait','dwell','rerouting','waiting_route','paused'):
                         raise ValueError('Existing mission must finish or be explicitly cancelled')
                 generation=self.session.prepare(goal,time.monotonic())
+                self.rotation_collision_generation=None
                 self.goal_rotation=radians;self.goal_route=[];self.goal_route_guided=False
                 self.goal_heading_mode='pose';self.path=[];self.goal=[goal['x'],goal['y']];self.feedback={}
                 self.pending_plan_accept=False;self.op(armed=False,paused=True)

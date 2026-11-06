@@ -19,6 +19,16 @@ def heading_error(node, point):
     return math.remainder(point['yaw'] - pose[2], math.tau)
 
 
+def interrupted_rotation(node,state):
+    receipt=state.get('terminal_receipt')or{}
+    aborted=receipt.get('status')==6
+    monitor_stop=(receipt.get('status')is None and
+                  getattr(node,'rotation_collision_generation',None)==state.get('generation'))
+    return (state.get('phase')=='blocked'and not state.get('last_stop')and
+            receipt.get('task_kind')=='rotation'and receipt.get('generation')==state.get('generation')and
+            receipt.get('succeeded')is False and (aborted or monitor_stop))
+
+
 def initial_error(node):
     """Only replace an actual large initial pivot; forward curves stay curves."""
     pose = node.reception_pose()
@@ -102,10 +112,7 @@ def turn_initial(node, engine, epoch, radians, *, now=time.monotonic, sleep=time
             raise ValueError('原地转向已被其他目标替换')
         if state['phase'] in ('arrived', 'blocked', 'failed', 'cancelled', 'stopped'):
             engine.event('initial_spin_finished', generation=generation, phase=state['phase'])
-            receipt=state.get('terminal_receipt')or{}
-            if(state['phase']=='blocked'and receipt.get('status')==6 and
-                    receipt.get('task_kind')=='rotation'and receipt.get('generation')==generation and
-                    not state.get('last_stop')):
+            if interrupted_rotation(node,state):
                 if waiting_deadline is None:waiting_deadline=now()+engine.document['policy']['max_wait']
                 engine.event('initial_spin_wait',generation=generation,reason=state.get('notice',''))
                 if not node.cancel_reception_leg(epoch):return False

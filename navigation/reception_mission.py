@@ -464,12 +464,9 @@ class MissionService:
         the remaining heading from current measured pose and receives a new
         native action result. Operator stops are never retried.
         """
-        from reception_spins import enabled
-        receipt=state.get('terminal_receipt')or{}
-        if(not enabled(self.node)or state.get('phase')!='blocked'or
+        from reception_spins import enabled,interrupted_rotation
+        if(not enabled(self.node)or not interrupted_rotation(self.node,state)or
                 not state.get('navigation_permitted')or state.get('manual_activity')or state.get('last_stop')or
-                receipt.get('status')!=6 or receipt.get('task_kind')!='rotation'or
-                receipt.get('generation')!=state.get('generation')or
                 (self.future is not None and not self.future.done())):return None
         with self.engine.lock:
             if(self.engine.phase!='navigating'or state['generation']!=self.engine.goal_generation or
